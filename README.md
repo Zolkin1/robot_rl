@@ -133,3 +133,10 @@ Some examples of packages that can likely be excluded are:
 "<path-to-isaac-sim>/extscache/omni.services.*"     // Services tools
 ...
 ```
+
+## Run From A Checkpoint
+Run
+```
+python /robot_rl/scripts/rsl_rl/play.py --task=G1-vel --num_envs=10 --checkpoint=<log_dir_checkpoint>
+
+```

@@ -6,5 +6,7 @@
 """This sub-module contains the functions that are specific to the environment."""
 
 from isaaclab.envs.mdp import *  # noqa: F401, F403
+from isaaclab_tasks.manager_based.locomotion.velocity.mdp import *    #Inherit from the base envs
 
 from .rewards import *  # noqa: F401, F403
+from .observations import *  # noqa: F401, F403
