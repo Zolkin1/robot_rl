@@ -11,7 +11,7 @@ def sin_phase(env: ManagerBasedRLEnv, period: float) -> torch.Tensor:
     phase = torch.tensor(2*torch.pi * (env.sim.current_time / period))
     sphase = torch.sin(phase)
 
-    sphase = torch.ones((env.num_envs, 1), device=env.device) * sphase;
+    sphase = torch.ones((env.num_envs, 1), device=env.device) * sphase
 
     return sphase
 

@@ -1,0 +1,20 @@
+# G1_21j config
+robot_name: "g1_21j"
+#checkpoint_path: "/home/zolkin/AmberLab/Project-Isaac-RL/robot-rl/robot_rl/logs/rsl_rl/g1/2025-05-13_10-10-40/exported/policy.pt"
+#checkpoint_path: "/home/zolkin/AmberLab/Project-Isaac-RL/robot-rl/robot_rl/logs/rsl_rl/g1/2025-05-12_19-35-28/exported/policy.pt"
+checkpoint_path: "/home/zolkin/AmberLab/Project-Isaac-RL/robot-rl/robot_rl/logs/rsl_rl/g1/2025-05-13_17-04-48/exported/policy.pt"
+num_obs: 74
+num_action: 21
+cmd_scale: 0.25
+period: 0.8                   # s
+dt: 0.02                      # 50 Hz
+ang_vel_scale: 1
+qpos_scale: 1
+qvel_scale: 0.05 #0.1
+action_scale: 0.25
+def_ang_order: "mj"
+default_angles: [-0.42, 0, 0, 0.81, -0.4, 0,
+                  -0.42, 0, 0, 0.81, -0.4, 0,
+                  0,
+                  0, 0.27, 0, 0.5,
+                  0, -0.27, 0, 0.5]

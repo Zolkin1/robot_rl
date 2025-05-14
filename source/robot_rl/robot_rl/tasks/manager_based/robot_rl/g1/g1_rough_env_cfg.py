@@ -83,13 +83,16 @@ class G1RoughEnvCfg(HumanoidEnvCfg):
         # self.rewards.torque_lim.weight = -1e-2                      # Torque limits
         self.rewards.joint_vel.weight = -1e-3                       # Joint velocity
         self.rewards.dof_pos_limits.weight = -1 #-10                    # Joint limits
-        self.rewards.leg_joint_reg.weight = 1.25                    # Regularize positions of leg joints (relative to a nominal)
+        self.rewards.joint_reg.weight = 0. #0.25                    # Regularize positions of leg joints (relative to a nominal)
         self.rewards.ang_vel_xy_l2.weight = -0.01                   # Base x-y angular velocity
         self.rewards.lin_vel_z_l2.weight = -0.1                     # Base z linear velocity
-        self.rewards.flat_orientation_l2.weight = -1.0              # Tilting
+        self.rewards.flat_orientation_l2.weight = -1.5              # Tilting
         self.rewards.action_rate_l2.weight = -0.005                 # Action smoothing
-        self.rewards.joint_deviation_hip.weight = -0.1              # Hip yaw and roll regularization
-        self.rewards.joint_deviation_arms.weight = -0.1             # Arms regularization
+        self.rewards.joint_deviation_hip.weight = -0.5              # Hip yaw and roll regularization
+        self.rewards.joint_deviation_arms.weight = -0.5             # Arms regularization
+        self.rewards.joint_deviation_torso.weight = -1.0
+        self.rewards.height_torso.weight = -1.2                     # Base height
+        self.rewards.track_heading.weight = 2.0                     # Base heading
         self.rewards.dof_acc_l2.weight = -1.25e-7
         self.rewards.dof_acc_l2.params["asset_cfg"] = SceneEntityCfg(
             "robot", joint_names=[".*_hip_.*", ".*_knee_joint"]
@@ -100,5 +103,5 @@ class G1RoughEnvCfg(HumanoidEnvCfg):
         )
 
         # -- Task
-        self.rewards.track_lin_vel_xy_exp.weight = 2.5
-        self.rewards.track_ang_vel_z_exp.weight = 0.75
+        self.rewards.track_lin_vel_xy_exp.weight = 4 #2.5
+        self.rewards.track_ang_vel_z_exp.weight = 0 #0.75  # 0

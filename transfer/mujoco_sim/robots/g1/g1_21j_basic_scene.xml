@@ -1,7 +1,7 @@
 <mujoco model="g1_basic_scene">
     <!-- <include file="g1_29dof_with_hand.xml"/> -->
     <!-- <include file="g1_18dof.xml"/> -->
-    <include file="g1_21j.xml"/>
+    <include file="g1_21j_v2.xml"/>
 
     <statistic center="1.0 0.7 1.0" extent="0.8"/>
 

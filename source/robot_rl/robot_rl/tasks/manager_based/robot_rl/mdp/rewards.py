@@ -13,6 +13,8 @@ from isaaclab.assets import Articulation
 from isaaclab.managers import SceneEntityCfg
 from isaaclab.utils.math import wrap_to_pi
 from isaaclab.sensors import ContactSensor
+from isaaclab.utils.math import euler_xyz_from_quat, wrap_to_pi, quat_rotate_inverse
+from warp import quat_rotate_inv
 
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedRLEnv
@@ -122,7 +124,7 @@ def feet_slide(env, sensor_cfg: SceneEntityCfg, asset_cfg: SceneEntityCfg = Scen
 #
 #     return reward
 
-def phase_feet_contacts(env: ManagerBasedRLEnv, sensor_cfg: SceneEntityCfg, period: float) -> torch.Tensor:
+def phase_feet_contacts(env: ManagerBasedRLEnv, sensor_cfg: SceneEntityCfg, period: float, std: float,) -> torch.Tensor:
     """Reward feet in contact with the ground in the correct phase."""
     # If the feet are in contact at the right time then positive reward, else 0 reward
 
@@ -142,4 +144,84 @@ def phase_feet_contacts(env: ManagerBasedRLEnv, sensor_cfg: SceneEntityCfg, peri
     # Compute reward
     reward = (in_contact[:, 0] - in_contact[:, 1])*phi_c
 
+    # Add in the foot tracking
+    # foot_pos = # TODO: Get foot position
+    # reward = reward * torch.exp(-torch.norm(env.current_des_step - foot_pos, dim=1) / std)
+
     return reward
+
+def track_heading(env: ManagerBasedRLEnv, command_name: str,
+                  std: float,
+                  asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),) -> torch.Tensor:
+    """Reward tracking the heading of the robot."""
+    asset = env.scene[asset_cfg.name]
+    # command = env.command_manager.get_command(command_name)[:, :2]
+    #
+    # Get current heading
+    # Get the robot's root quaternion in world frame
+    robot_quat_w = asset.data.root_quat_w  # Shape: [num_environments, 4]
+
+    # Extract the Yaw angle (Heading)
+    heading = euler_xyz_from_quat(robot_quat_w)
+    heading = wrap_to_pi(heading[2])
+    #
+    # # Compute the heading from the commanded velocity
+    # # Compute the command in the global frame
+    # # TODO: Change where I grab command to grab all 3 entries so I don't need this!
+    # command_3 = torch.zeros((command.shape[0], 3), device=command.device)
+    # command_3[:, :2] = command
+    # command_w = quat_rotate_inverse(robot_quat_w, command_3)
+    # # heading_des = torch.atan2(command[:, 1], command[:, 0])
+    # heading_des = torch.atan2(command_w[:, 1], command_w[:, 0])
+    heading_des = wrap_to_pi(env.command_manager.get_command(command_name)[:, 2])
+
+    # print(f"command: {command}")
+    # print(f"heading_des: {heading_des}, heading: {heading}")
+
+    reward = 2.*torch.exp(-torch.abs(wrap_to_pi(heading_des - heading)) / std)
+
+    # print(f"heading: {heading}, heading_des: {heading_des}")
+    # print(f"reward: {reward}")
+    print(f"heading error: {wrap_to_pi(heading_des - heading)}")
+
+    return reward
+
+def compute_step_location(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg,
+                          nom_height: float, Tswing: float, command_name: str, wdes: float) -> torch.Tensor:
+    """Compute the step location using the LIP model."""
+    asset = env.scene[asset_cfg.name]
+    # Extract the relevant quantities
+    # Base position
+    r = asset.data.root_pos_w
+
+    # Base linear velocity
+    rdot = asset.data.root_lin_vel_w
+
+    # Compute the natural frequency
+    g = 9.81
+    omega = math.sqrt(g / nom_height)
+
+    # Compute initial ICP
+    icp_0 = r[:2] + rdot[:2]/omega
+
+    # Compute final ICP
+    icp_f = math.exp(omega * Tswing)*icp_0 + (1 - math.exp(omega * Tswing)) * env.current_des_step
+
+    # Compute desired step length and width
+    command = env.command_manager.get_command(command_name)[:, :2]
+    vdes = torch.norm(command[:, :2])
+    sd = vdes * Tswing
+    wd = wdes * 1
+
+    # Compute ICP offsets
+    bx = sd / (math.exp(omega * Tswing) - 1)
+    by = wd / (math.exp(omega * Tswing) + 1)
+
+    # Compute desired foot positions
+    heading = euler_xyz_from_quat(asset.data.root_quat_w)[2]
+    R = torch.tensor([[torch.cos(heading), -torch.sin(heading)], [torch.sin(heading), torch.cos(heading)]])
+
+    p = icp_f - R*torch.stack([bx, torch.pow(torch.tensor(-1.), env.control_count)*by])
+
+    env.current_des_step = p    # This only works if I compute the new location once per step/on a timer
+

@@ -16,6 +16,7 @@ from isaaclab.managers import SceneEntityCfg
 from isaaclab.managers import TerminationTermCfg as DoneTerm
 from isaaclab.scene import InteractiveSceneCfg
 from isaaclab.utils import configclass
+from isaaclab.utils.noise import AdditiveUniformNoiseCfg as Unoise
 
 from isaaclab_tasks.manager_based.locomotion.velocity.velocity_env_cfg import LocomotionVelocityRoughEnvCfg, RewardsCfg, ObservationsCfg    #Inherit from the base envs
 
@@ -54,6 +55,8 @@ class HumanoidObservationsCfg(ObservationsCfg):
         base_lin_vel = None     # Removed - no sensor
         height_scan = None      # Removed - not supported yet
 
+        joint_vel = ObsTerm(func=mdp.joint_vel_rel, noise=Unoise(n_min=-1.5, n_max=1.5),history_length=1,scale=0.05)
+
         # Phase clock
         sin_phase = ObsTerm(func=mdp.sin_phase, params={"period": period})
         cos_phase = ObsTerm(func=mdp.cos_phase, params={"period": period})
@@ -87,6 +90,13 @@ class HumanoidRewardCfg(RewardsCfg):
     #     func=mdp.track_ang_vel_z_world_exp, weight=2.0, params={"command_name": "base_velocity", "std": 0.5}
     # )
 
+    # Track the heading
+    track_heading = RewTerm(
+        func=mdp.track_heading,
+        weight=1.0,
+        params={"command_name": "base_velocity", "std": 0.2},
+    )
+
     ##
     # Feet
     ##
@@ -115,6 +125,7 @@ class HumanoidRewardCfg(RewardsCfg):
         params={
             "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*_ankle_roll_link"),
             "period": period,
+            "std": 0.2,
         }
     )
 
@@ -182,7 +193,7 @@ class HumanoidRewardCfg(RewardsCfg):
         func=mdp.joint_vel_l2,
         weight=0,
     )
-    leg_joint_reg = RewTerm(
+    joint_reg = RewTerm(
         func=mdp.joint_pos_target,
         weight=0.75,
         params={
@@ -215,8 +226,8 @@ class HumanoidRewardCfg(RewardsCfg):
                           0, 0.27, 0, 0.5,
                           0, -0.27, 0, 0.5,],
             "std": 0.1,
-            "joint_weight": [1., 1., 1., 1., 1., 1.,
-                             1., 1., 1., 1., 1., 1.,
+            "joint_weight": [0.0, 10., 10., 0.0, 1., 1.,
+                             0.0, 10., 10., 0.0, 1., 1.,
                              1.,
                              1., 1., 1., 1.,
                              1., 1., 1., 1.,],
@@ -232,21 +243,33 @@ class HumanoidEnvCfg(LocomotionVelocityRoughEnvCfg):
     rewards: HumanoidRewardCfg = HumanoidRewardCfg()
     observations: HumanoidObservationsCfg = HumanoidObservationsCfg()
 
-    # TODO: How to load in a custom G1 model?
+    # TODO: Is this the right way to do this? How do I reset these?
+    current_des_step = [0, 0]
+    control_count: int = 0
 
     def __post_init__(self):
         # post init of parent
         super().__post_init__()
 
+    # def reset(self, seed: int, env_ids, options=None):
+    #     super().reset(seed, env_ids, options)
+    #
+    #     # Reset custom values
+    #     self.control_count = 0
+    #
+    #     # TODO: Compute the desired step location here
+    #     self.current_des_step = torch.zeros(2, device=self.sim.device)
 
     def __prepare_tensors__(self):
-        """Move tesnors to GPU"""
-        self.rewards.leg_joint_reg.params["joint_des"] = torch.tensor(
-            self.rewards.leg_joint_reg.params["joint_des"],
+        """Move tensors to GPU"""
+        self.rewards.joint_reg.params["joint_des"] = torch.tensor(
+            self.rewards.joint_reg.params["joint_des"],
             device=self.sim.device
         )
 
-        self.rewards.leg_joint_reg.params["joint_weight"] = torch.tensor(
-            self.rewards.leg_joint_reg.params["joint_weight"],
+        self.rewards.joint_reg.params["joint_weight"] = torch.tensor(
+            self.rewards.joint_reg.params["joint_weight"],
             device=self.sim.device
         )
+
+        self.current_des_step = torch.tensor(self.current_des_step, device=self.sim.device)
