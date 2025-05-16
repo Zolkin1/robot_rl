@@ -17,8 +17,11 @@ from isaaclab.managers import TerminationTermCfg as DoneTerm
 from isaaclab.scene import InteractiveSceneCfg
 from isaaclab.utils import configclass
 from isaaclab.utils.noise import AdditiveUniformNoiseCfg as Unoise
+from isaaclab.markers import VisualizationMarkers, VisualizationMarkersCfg
 
-from isaaclab_tasks.manager_based.locomotion.velocity.velocity_env_cfg import LocomotionVelocityRoughEnvCfg, RewardsCfg, ObservationsCfg    #Inherit from the base envs
+from isaaclab_tasks.manager_based.locomotion.velocity.velocity_env_cfg import LocomotionVelocityRoughEnvCfg, RewardsCfg, ObservationsCfg, EventCfg   #Inherit from the base envs
+import isaaclab.sim as sim_utils
+
 
 from . import mdp
 
@@ -68,6 +71,38 @@ class HumanoidObservationsCfg(ObservationsCfg):
     # observation groups
     policy: PolicyCfg = PolicyCfg()
     critic: CriticCfg = CriticCfg()
+
+@configclass
+class HumanoidEventsCfg(EventCfg):
+    """Event configuration."""
+    # Calculate new step location on a fixed interval
+    update_step_location = EventTerm(func=mdp.compute_step_location,
+                                    mode="interval",
+                                    interval_range_s=(period/2., period/2.),
+                                    is_global_time=False,
+                                    params={
+                                        "nom_height": 0.78,
+                                        "Tswing": period/2.,
+                                        "command_name": "base_velocity",
+                                        "wdes": 0.4,
+                                        "feet_bodies": SceneEntityCfg("robot", body_names=".*_ankle_roll_link"),
+                                        })
+
+# @configclass
+# class HumanoidCommandCfg(CommandCfg):
+#     """Command configuration"""
+#     base_velocity = mdp.UniformVelocityCommandCfg(
+#         asset_name="robot",
+#         resampling_time_range=(10.0, 10.0),
+#         rel_standing_envs=0.02,
+#         rel_heading_envs=1.0,
+#         heading_command=True,
+#         heading_control_stiffness=0.5,
+#         debug_vis=True,
+#         ranges=mdp.UniformVelocityCommandCfg.Ranges(
+#             lin_vel_x=(-1.0, 1.0), lin_vel_y=(-1.0, 1.0), ang_vel_z=(-1.0, 1.0), heading=(-math.pi, math.pi)
+#         ),
+#     )
 
 @configclass
 class HumanoidRewardCfg(RewardsCfg):
@@ -126,6 +161,11 @@ class HumanoidRewardCfg(RewardsCfg):
             "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*_ankle_roll_link"),
             "period": period,
             "std": 0.2,
+            "nom_height": 0.78,
+            "Tswing": period/2.,
+            "command_name": "base_velocity",
+            "wdes": 0.3,
+            "asset_cfg": SceneEntityCfg("robot", body_names=".*_ankle_roll_link"),
         }
     )
 
@@ -234,6 +274,19 @@ class HumanoidRewardCfg(RewardsCfg):
         }
     )
 
+    feet_clearance = RewTerm(
+        func=mdp.foot_clearance,
+        weight=0.0,
+        params={
+            "target_height": 0.08,
+            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*_ankle_roll_link"),
+            "asset_cfg": SceneEntityCfg("robot", body_names=".*_ankle_roll_link"),
+        },
+    )
+
+# @configclass
+# class HumanoidVizCfg(VisualizationMarkersCfg):
+
 
 ##
 # Environment configuration
@@ -242,23 +295,18 @@ class HumanoidRewardCfg(RewardsCfg):
 class HumanoidEnvCfg(LocomotionVelocityRoughEnvCfg):
     rewards: HumanoidRewardCfg = HumanoidRewardCfg()
     observations: HumanoidObservationsCfg = HumanoidObservationsCfg()
+    events: HumanoidEventsCfg = HumanoidEventsCfg()
 
     # TODO: Is this the right way to do this? How do I reset these?
-    current_des_step = [0, 0]
-    control_count: int = 0
+    # current_des_step: torch.Tensor = torch.zeros(1)
+    # control_count: int = 0
 
     def __post_init__(self):
         # post init of parent
         super().__post_init__()
 
-    # def reset(self, seed: int, env_ids, options=None):
-    #     super().reset(seed, env_ids, options)
-    #
-    #     # Reset custom values
-    #     self.control_count = 0
-    #
-    #     # TODO: Compute the desired step location here
-    #     self.current_des_step = torch.zeros(2, device=self.sim.device)
+        self.control_count = 0
+
 
     def __prepare_tensors__(self):
         """Move tensors to GPU"""
@@ -272,4 +320,28 @@ class HumanoidEnvCfg(LocomotionVelocityRoughEnvCfg):
             device=self.sim.device
         )
 
-        self.current_des_step = torch.tensor(self.current_des_step, device=self.sim.device)
+        self.current_des_step = torch.zeros(self.scene.num_envs, 3, device=self.sim.device)
+
+
+    def define_markers(self) -> VisualizationMarkers:
+        """Define markers with various different shapes."""
+        self.footprint_cfg = VisualizationMarkersCfg(
+            prim_path="/Visuals/footprint",
+            markers={
+                "foot": sim_utils.CuboidCfg(
+                    size=(0.2, 0.065, 0.018),
+                    visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(1.0, 0.0, 0.0)),
+                ),
+                # "right": sim_utils.CuboidCfg(
+                #     size=(0.2, 0.065, 0.018),
+                #     visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.0, 1.0, 0.0)),
+                # ),
+            }
+        )
+        self.footprint_visualizer = VisualizationMarkers(self.footprint_cfg)
+
+    # def post_physics_step(self):
+    #     super().post_physics_step()
+    #
+    #     # Re-compute the desired foot step location
+    #     if ()

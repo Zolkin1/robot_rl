@@ -1,4 +1,6 @@
 import argparse
+import os
+
 import yaml
 import numpy as np
 
@@ -30,5 +32,5 @@ policy = RLPolicy(dt=dt, checkpoint_path=checkpoint_path, num_obs=num_obs, num_a
                   cmd_scale=cmd_scale, action_scale=action_scale, default_angles=default_angles, qvel_scale=qvel_scale)
 
 # Run the simulator
-run_simulation(policy, robot_name)
+run_simulation(policy, robot_name, log=True, log_dir=os.getcwd()+"/logs/")
 

@@ -24,6 +24,7 @@ classifiers = [
 # TODO: Verify all of these
 dependencies = [
     "mujoco>=3.3",
+    "rerun-sdk"
 ]
 
 ## Define optional dependencies (e.g., for testing, documentation, or extra features)

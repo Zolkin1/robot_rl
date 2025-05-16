@@ -96,6 +96,9 @@ class RLPolicy():
     def get_num_actions(self) -> int:
         return self.num_actions
 
+    def get_num_obs(self) -> int:
+        return self.num_obs
+
     def convert_to_mujoco(self, vec):
         mj_vec = np.zeros(21)
         for isaac_index, mujoco_index in self.isaac_to_mujoco.items():
@@ -109,3 +112,6 @@ class RLPolicy():
             isaac_vec[isaac_index] = vec[mujoco_index]
 
         return isaac_vec
+
+    def get_chkpt_path(self):
+        return self.checkpoint_path

@@ -13,8 +13,8 @@ from isaaclab.assets import Articulation
 from isaaclab.managers import SceneEntityCfg
 from isaaclab.utils.math import wrap_to_pi
 from isaaclab.sensors import ContactSensor
-from isaaclab.utils.math import euler_xyz_from_quat, wrap_to_pi, quat_rotate_inverse
-from warp import quat_rotate_inv
+from isaaclab.markers import VisualizationMarkers
+from isaaclab.utils.math import euler_xyz_from_quat, wrap_to_pi, quat_rotate_inverse, yaw_quat
 
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedRLEnv
@@ -124,9 +124,14 @@ def feet_slide(env, sensor_cfg: SceneEntityCfg, asset_cfg: SceneEntityCfg = Scen
 #
 #     return reward
 
-def phase_feet_contacts(env: ManagerBasedRLEnv, sensor_cfg: SceneEntityCfg, period: float, std: float,) -> torch.Tensor:
+def phase_feet_contacts(env: ManagerBasedRLEnv, sensor_cfg: SceneEntityCfg, period: float, std: float,
+                        nom_height: float, Tswing: float, command_name: str, wdes: float,
+                        asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),) -> torch.Tensor:
     """Reward feet in contact with the ground in the correct phase."""
     # If the feet are in contact at the right time then positive reward, else 0 reward
+
+    # Get the robot asset
+    robot = env.scene[asset_cfg.name]
 
     # Contact sensor
     contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
@@ -139,14 +144,20 @@ def phase_feet_contacts(env: ManagerBasedRLEnv, sensor_cfg: SceneEntityCfg, peri
 
     # Contact schedule function
     tp = (env.sim.current_time % period) / period     # Scaled between 0-1
-    phi_c = math.sin(2*torch.pi*tp)/math.sqrt(math.sin(2*torch.pi*tp)**2 + 0.04)
+    phi_c = torch.tensor(math.sin(2*torch.pi*tp)/math.sqrt(math.sin(2*torch.pi*tp)**2 + 0.04), device=in_contact.device)
 
     # Compute reward
     reward = (in_contact[:, 0] - in_contact[:, 1])*phi_c
 
     # Add in the foot tracking
-    # foot_pos = # TODO: Get foot position
-    # reward = reward * torch.exp(-torch.norm(env.current_des_step - foot_pos, dim=1) / std)
+    foot_pos = robot.data.body_pos_w[:, asset_cfg.body_ids, :2]
+    stance_foot_pos = foot_pos[:, int(0.5 + 0.5*torch.sign(phi_c))]
+
+    # print(f"foot index: {int(0.5 + 0.5*torch.sign(phi_c))}")
+    # print(f"stance foot pos: {stance_foot_pos}, des pos: {env.cfg.current_des_step[:, :2]}")
+
+    # TODO: Debug and put back!
+    # reward = reward * torch.exp(-torch.norm(env.cfg.current_des_step[:, :2] - stance_foot_pos, dim=1) / std)
 
     return reward
 
@@ -182,30 +193,40 @@ def track_heading(env: ManagerBasedRLEnv, command_name: str,
 
     # print(f"heading: {heading}, heading_des: {heading_des}")
     # print(f"reward: {reward}")
-    print(f"heading error: {wrap_to_pi(heading_des - heading)}")
+    # print(f"heading error: {wrap_to_pi(heading_des - heading)}")
 
     return reward
 
-def compute_step_location(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg,
-                          nom_height: float, Tswing: float, command_name: str, wdes: float) -> torch.Tensor:
+def compute_step_location(env: ManagerBasedRLEnv, env_ids: torch.Tensor,
+                          nom_height: float, Tswing: float, command_name: str, wdes: float,
+                          feet_bodies: SceneEntityCfg,
+                          asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+                          visualize: bool = True) -> torch.Tensor:
     """Compute the step location using the LIP model."""
     asset = env.scene[asset_cfg.name]
+    feet = env.scene[feet_bodies.name]
+
     # Extract the relevant quantities
     # Base position
-    r = asset.data.root_pos_w
+    r = asset.data.root_com_pos_w
 
     # Base linear velocity
-    rdot = asset.data.root_lin_vel_w
+    rdot = asset.data.root_com_lin_vel_w
 
     # Compute the natural frequency
     g = 9.81
     omega = math.sqrt(g / nom_height)
 
     # Compute initial ICP
-    icp_0 = r[:2] + rdot[:2]/omega
+    icp_0 = r[:, :2] + rdot[:, :2]/omega
+
+    # Get current foot position
+    foot_pos = feet.data.body_pos_w[:, asset_cfg.body_ids, :2]
+    stance_foot_pos = foot_pos[:, (env.cfg.control_count % 2)]
+    # print(f"stance foot pos: {stance_foot_pos}")
 
     # Compute final ICP
-    icp_f = math.exp(omega * Tswing)*icp_0 + (1 - math.exp(omega * Tswing)) * env.current_des_step
+    icp_f = math.exp(omega * Tswing)*icp_0 + (1 - math.exp(omega * Tswing)) * stance_foot_pos #env.cfg.current_des_step[:, :2]
 
     # Compute desired step length and width
     command = env.command_manager.get_command(command_name)[:, :2]
@@ -219,9 +240,57 @@ def compute_step_location(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg,
 
     # Compute desired foot positions
     heading = euler_xyz_from_quat(asset.data.root_quat_w)[2]
-    R = torch.tensor([[torch.cos(heading), -torch.sin(heading)], [torch.sin(heading), torch.cos(heading)]])
+    # print(f"heading: {heading}")
+    cos_head = torch.cos(heading)
+    sin_head = torch.sin(heading)
+    row1 = torch.stack([cos_head, -sin_head], dim=1)
+    row2 = torch.stack([sin_head, cos_head], dim=1)
+    R = torch.stack([row1, row2], dim=1)  # Shape (N, 2, 2)
 
-    p = icp_f - R*torch.stack([bx, torch.pow(torch.tensor(-1.), env.control_count)*by])
+    # print(f"R shape: {R.shape}")
+    # print(f"icp shape: {icp_f.shape}")
 
-    env.current_des_step = p    # This only works if I compute the new location once per step/on a timer
+    b = torch.stack([bx, torch.pow(torch.tensor(-1., device=command.device), env.cfg.control_count)*by])
+    # b = b.repeat(icp_f.shape[0], 1)
+    # print(f"b shape: {b.shape}")
 
+    ph = icp_f - torch.matmul(R, b) #icp_f - R@b
+    # print(f"ph shape: {ph.shape}")
+
+    # print(f"p shape: {p.shape}")    # Need to compute for all the envs
+    p = torch.zeros((ph.shape[0], 3), device=command.device)    # For setting the height
+    p[:, :2] = ph
+
+    # print(f"r: {r}, by: {torch.pow(torch.tensor(-1., device=command.device), env.cfg.control_count)*by}")
+    # print(f"sim time: {env.sim.current_time}, p: {p}")
+    # print(f"env.cfg.control_count {env.cfg.control_count}")
+
+    if visualize:
+        env.footprint_visualizer.visualize(
+            translations=p,
+            orientations=yaw_quat(asset.data.root_quat_w), #.repeat_interleave(2, dim=0),
+            # repeat 0,1 for num_env
+            # marker_indices=torch.tensor([0,1], device=env.device).repeat(env.num_envs),
+        )
+
+    env.cfg.current_des_step = p    # This only works if I compute the new location once per step/on a timer
+    env.cfg.control_count += 1
+    return p
+
+def foot_clearance(env: ManagerBasedRLEnv,
+                   target_height: float,
+                   sensor_cfg: SceneEntityCfg = SceneEntityCfg("contact_sensor"),
+                   asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),) -> torch.Tensor:
+    """Reward foot clearance."""
+    asset: Articulation = env.scene[asset_cfg.name]
+    contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
+
+    # Get contact state
+    contacts = contact_sensor.data.net_forces_w_history[:, :, sensor_cfg.body_ids, :].norm(dim=-1).max(dim=1)[0] > 1.0
+
+    # Calculate foot heights
+    feet_z_err = asset.data.body_pos_w[:, asset_cfg.body_ids, 2] - target_height
+    pos_error = torch.square(feet_z_err) * ~contacts
+    # print("feet_z:", asset.data.body_pos_w[:, asset_cfg.body_ids, 2]*~contacts)
+
+    return torch.sum(pos_error, dim=(1))
