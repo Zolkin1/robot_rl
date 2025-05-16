@@ -58,15 +58,21 @@ class HumanoidObservationsCfg(ObservationsCfg):
         base_lin_vel = None     # Removed - no sensor
         height_scan = None      # Removed - not supported yet
 
+        base_ang_vel = ObsTerm(func=mdp.base_ang_vel, noise=Unoise(n_min=-0.2, n_max=0.2),history_length=1,scale=0.25)
+        velocity_commands = ObsTerm(func=mdp.generated_commands, params={"command_name": "base_velocity"},history_length=1,scale=(2.0,2.0,0.25))
         joint_vel = ObsTerm(func=mdp.joint_vel_rel, noise=Unoise(n_min=-1.5, n_max=1.5),history_length=1,scale=0.05)
+        joint_pos = ObsTerm(func=mdp.joint_pos_rel, noise=Unoise(n_min=-0.01, n_max=0.01),history_length=1)
 
         # Phase clock
         sin_phase = ObsTerm(func=mdp.sin_phase, params={"period": period})
         cos_phase = ObsTerm(func=mdp.cos_phase, params={"period": period})
 
     @configclass
-    class CriticCfg(PolicyCfg):
+    class CriticCfg(ObservationsCfg.PolicyCfg):
         """Observations for critic group."""
+        base_lin_vel = ObsTerm(func=mdp.base_lin_vel, noise=Unoise(n_min=-0.1, n_max=0.1),history_length=1,scale=2.0)
+        height_scan = None      # Removed - not supported yet
+
 
     # observation groups
     policy: PolicyCfg = PolicyCfg()
@@ -87,6 +93,19 @@ class HumanoidEventsCfg(EventCfg):
                                         "wdes": 0.4,
                                         "feet_bodies": SceneEntityCfg("robot", body_names=".*_ankle_roll_link"),
                                         })
+
+    randomize_ground_contact_friction = EventTerm(
+        func=mdp.randomize_rigid_body_material,
+        mode="reset",
+        params={
+            "asset_cfg": SceneEntityCfg("robot", body_names=[".*_ankle_roll_link"]),
+            "static_friction_range": (0.1, 1.25),
+            "dynamic_friction_range": (0.1, 1.25),
+            "restitution_range": (0.0, 0.0),
+            "num_buckets": 64,
+            "make_consistent": True,  # ensures dynamic friction <= static friction
+        },
+    )
 
 # @configclass
 # class HumanoidCommandCfg(CommandCfg):
@@ -125,48 +144,56 @@ class HumanoidRewardCfg(RewardsCfg):
     #     func=mdp.track_ang_vel_z_world_exp, weight=2.0, params={"command_name": "base_velocity", "std": 0.5}
     # )
 
-    # Track the heading
-    track_heading = RewTerm(
-        func=mdp.track_heading,
-        weight=1.0,
-        params={"command_name": "base_velocity", "std": 0.2},
-    )
+    # # Track the heading
+    # track_heading = RewTerm(
+    #     func=mdp.track_heading,
+    #     weight=1.0,
+    #     params={"command_name": "base_velocity", "std": 0.2},
+    # )
 
     ##
     # Feet
     ##
     feet_air_time = RewTerm(
         func=mdp.feet_air_time_positive_biped,
-        weight=0.5,
+        weight=0.25,
         params={
             "command_name": "base_velocity",
             "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*_ankle_roll_link"),
             "threshold": period/2.,
         },
     )
-    # TODO: Try removing
-    feet_slide = RewTerm(
-        func=mdp.feet_slide,
-        weight=-0.3,
-        params={
-            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*_ankle_roll_link"),
-            "asset_cfg": SceneEntityCfg("robot", body_names=".*_ankle_roll_link"),
-        },
-    )
 
-    phase_feet_contacts = RewTerm(
-        func=mdp.phase_feet_contacts,
-        weight=10,
+    # feet_slide = RewTerm(
+    #     func=mdp.feet_slide,
+    #     weight=-0.3,
+    #     params={
+    #         "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*_ankle_roll_link"),
+    #         "asset_cfg": SceneEntityCfg("robot", body_names=".*_ankle_roll_link"),
+    #     },
+    # )
+
+    # phase_feet_contacts = RewTerm(
+    #     func=mdp.phase_feet_contacts,
+    #     weight=0, #10
+    #     params={
+    #         "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*_ankle_roll_link"),
+    #         "period": period,
+    #         "std": 0.2,
+    #         "nom_height": 0.78,
+    #         "Tswing": period/2.,
+    #         "command_name": "base_velocity",
+    #         "wdes": 0.3,
+    #         "asset_cfg": SceneEntityCfg("robot", body_names=".*_ankle_roll_link"),
+    #     }
+    # )
+
+    phase_contact = RewTerm(
+        func=mdp.phase_contact,
+        weight=0.18,
         params={
-            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*_ankle_roll_link"),
-            "period": period,
-            "std": 0.2,
-            "nom_height": 0.78,
-            "Tswing": period/2.,
-            "command_name": "base_velocity",
-            "wdes": 0.3,
-            "asset_cfg": SceneEntityCfg("robot", body_names=".*_ankle_roll_link"),
-        }
+            # "command_name": "base_velocity",
+            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*_ankle_roll_link")},
     )
 
     ##
@@ -176,14 +203,14 @@ class HumanoidRewardCfg(RewardsCfg):
     dof_pos_limits = RewTerm(
         func=mdp.joint_pos_limits,
         weight=-1.0,
-        params={"asset_cfg": SceneEntityCfg("robot", joint_names=[".*_hip_.*", ".*_knee_joint", ".*_ankle_.*"])},
+        # params={"asset_cfg": SceneEntityCfg("robot", joint_names=[".*_hip_.*", ".*_knee_joint", ".*_ankle_.*"])},
     )
 
     ##
     # Penalize deviation from default of the joints that are not essential for locomotion
     ##
     joint_deviation_hip = RewTerm(
-        func=mdp.joint_deviation_l1,
+        func=mdp.joint_deviation_l1, # TODO: Move to l2
         weight=0, #-0.2,
         params={"asset_cfg": SceneEntityCfg("robot", joint_names=[".*_hip_yaw_joint", ".*_hip_roll_joint"])},
     )
@@ -229,50 +256,50 @@ class HumanoidRewardCfg(RewardsCfg):
     #     weight=0,
     #     params=
     # )
-    joint_vel = RewTerm(
-        func=mdp.joint_vel_l2,
-        weight=0,
-    )
-    joint_reg = RewTerm(
-        func=mdp.joint_pos_target,
-        weight=0.75,
-        params={
-            "asset_cfg": SceneEntityCfg("robot"),
-            # Joint Order:
-            # L Hip Pitch
-            # L Hip Roll
-            # L Hip Yaw
-            # L Knee
-            # L Ankle Pitch
-            # L Ankle Roll
-            # R Hip Pitch
-            # R Hip Roll
-            # R Hip Yaw
-            # R Knee
-            # R Ankle Pitch
-            # R Ankle Roll
-            # Waist Yaw
-            # L Shoulder Pitch
-            # L Shoulder Roll
-            # L Shoulder Yaw
-            # L Elbow
-            # R Shoulder Pitch
-            # R Shoulder Roll
-            # R Shoulder Yaw
-            # R Elbow
-            "joint_des": [-0.42, 0, 0, 0.81, -0.4, 0,
-                          -0.42, 0, 0, 0.81, -0.4, 0,
-                          0,
-                          0, 0.27, 0, 0.5,
-                          0, -0.27, 0, 0.5,],
-            "std": 0.1,
-            "joint_weight": [0.0, 10., 10., 0.0, 1., 1.,
-                             0.0, 10., 10., 0.0, 1., 1.,
-                             1.,
-                             1., 1., 1., 1.,
-                             1., 1., 1., 1.,],
-        }
-    )
+    # joint_vel = RewTerm(
+    #     func=mdp.joint_vel_l2,
+    #     weight=0,
+    # )
+    # joint_reg = RewTerm(
+    #     func=mdp.joint_pos_target,
+    #     weight=0.75,
+    #     params={
+    #         "asset_cfg": SceneEntityCfg("robot"),
+    #         # Joint Order:
+    #         # L Hip Pitch
+    #         # L Hip Roll
+    #         # L Hip Yaw
+    #         # L Knee
+    #         # L Ankle Pitch
+    #         # L Ankle Roll
+    #         # R Hip Pitch
+    #         # R Hip Roll
+    #         # R Hip Yaw
+    #         # R Knee
+    #         # R Ankle Pitch
+    #         # R Ankle Roll
+    #         # Waist Yaw
+    #         # L Shoulder Pitch
+    #         # L Shoulder Roll
+    #         # L Shoulder Yaw
+    #         # L Elbow
+    #         # R Shoulder Pitch
+    #         # R Shoulder Roll
+    #         # R Shoulder Yaw
+    #         # R Elbow
+    #         "joint_des": [-0.42, 0, 0, 0.81, -0.4, 0,
+    #                       -0.42, 0, 0, 0.81, -0.4, 0,
+    #                       0,
+    #                       0, 0.27, 0, 0.5,
+    #                       0, -0.27, 0, 0.5,],
+    #         "std": 0.1,
+    #         "joint_weight": [0.0, 10., 10., 0.0, 1., 1.,
+    #                          0.0, 10., 10., 0.0, 1., 1.,
+    #                          1.,
+    #                          1., 1., 1., 1.,
+    #                          1., 1., 1., 1.,],
+    #     }
+    # )
 
     feet_clearance = RewTerm(
         func=mdp.foot_clearance,
@@ -283,6 +310,18 @@ class HumanoidRewardCfg(RewardsCfg):
             "asset_cfg": SceneEntityCfg("robot", body_names=".*_ankle_roll_link"),
         },
     )
+
+    contact_no_vel = RewTerm(
+        func=mdp.contact_no_vel,
+        weight=-0.1,
+        params={
+            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*_ankle_roll_link"),
+            "asset_cfg": SceneEntityCfg("robot", body_names=".*_ankle_roll_link"),
+        },
+    )
+
+    dof_vel_l2 = RewTerm(func=mdp.joint_vel_l2, weight=-1e-3)
+    alive = RewTerm(func=mdp.is_alive, weight=0.15)
 
 # @configclass
 # class HumanoidVizCfg(VisualizationMarkersCfg):
@@ -310,15 +349,15 @@ class HumanoidEnvCfg(LocomotionVelocityRoughEnvCfg):
 
     def __prepare_tensors__(self):
         """Move tensors to GPU"""
-        self.rewards.joint_reg.params["joint_des"] = torch.tensor(
-            self.rewards.joint_reg.params["joint_des"],
-            device=self.sim.device
-        )
-
-        self.rewards.joint_reg.params["joint_weight"] = torch.tensor(
-            self.rewards.joint_reg.params["joint_weight"],
-            device=self.sim.device
-        )
+        # self.rewards.joint_reg.params["joint_des"] = torch.tensor(
+        #     self.rewards.joint_reg.params["joint_des"],
+        #     device=self.sim.device
+        # )
+        #
+        # self.rewards.joint_reg.params["joint_weight"] = torch.tensor(
+        #     self.rewards.joint_reg.params["joint_weight"],
+        #     device=self.sim.device
+        # )
 
         self.current_des_step = torch.zeros(self.scene.num_envs, 3, device=self.sim.device)
 

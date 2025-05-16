@@ -129,6 +129,20 @@ def plot_vels(data):
             axes[i, j].set_ylabel(f"qvel {i + 6*j + FLOATING_BASE} (rad/s)")
             axes[i, j].grid()
 
+def plot_base(data):
+    fig, axes = plt.subplots(nrows=3, ncols=2, figsize=(10, 10))
+
+    for i in range(3):
+        for j in range(2):
+            if j == 0:
+                axes[i, j].plot(data["time"], data["qpos"][:, i])
+                axes[i, j].set_xlabel("time")
+                axes[i, j].set_ylabel(f"qpos {i} (m)")
+            else:
+                axes[i, j].plot(data["time"], data["qvel"][:, i])
+                axes[i, j].set_xlabel("time")
+                axes[i, j].set_ylabel(f"qvel {i} (m/s)")
+
 if __name__ == "__main__":
     # Load in the data from rerun
     log_dir = os.getcwd() + "/logs"
@@ -157,5 +171,6 @@ if __name__ == "__main__":
     plot_joints_and_actions(data)
     plot_torques(data)
     plot_vels(data)
+    plot_base(data)
 
     plt.show()

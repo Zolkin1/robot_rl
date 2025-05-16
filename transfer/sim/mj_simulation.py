@@ -105,7 +105,7 @@ def run_simulation(policy, robot: str, log: bool, log_dir: str):
     with mujoco.viewer.launch_passive(mj_model, mj_data) as viewer:
 
         des_vel = np.zeros(3)
-        des_vel[0] = 0.
+        des_vel[0] = 0.5
 
         while viewer.is_running():
             start_time = time.time()
@@ -135,6 +135,6 @@ def run_simulation(policy, robot: str, log: bool, log_dir: str):
 
             # Try to run in roughly realtime
             elapsed = time.time() - start_time
-            if elapsed < 5*sim_loop_rate:
-                time.sleep(5*sim_loop_rate - elapsed)
+            if elapsed < 1*sim_loop_rate:
+                time.sleep(1*sim_loop_rate - elapsed)
 

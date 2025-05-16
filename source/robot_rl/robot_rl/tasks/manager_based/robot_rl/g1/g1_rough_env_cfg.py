@@ -78,38 +78,64 @@ class G1RoughEnvCfg(HumanoidEnvCfg):
         ##
         # Rewards
         ##
-        # -- Regularization
-        self.rewards.dof_torques_l2.weight = -1e-4                  # Joint torques
-        # self.rewards.torque_lim.weight = -1e-2                      # Torque limits
-        self.rewards.joint_vel.weight = -1e-3                       # Joint velocity
-        self.rewards.dof_pos_limits.weight = -1 #-10                    # Joint limits
-        self.rewards.joint_reg.weight = 0. #0.25                    # Regularize positions of leg joints (relative to a nominal)
-        self.rewards.ang_vel_xy_l2.weight = -0.05                   # Base x-y angular velocity
-        self.rewards.lin_vel_z_l2.weight = -2.0                     # Base z linear velocity
-        self.rewards.flat_orientation_l2.weight = -1.5              # Tilting
-        self.rewards.action_rate_l2.weight = -0.005                 # Action smoothing
-        self.rewards.joint_deviation_hip.weight = -1.0              # Hip yaw and roll regularization
+        self.rewards.track_lin_vel_xy_exp.weight = 1.0
+        self.rewards.track_ang_vel_z_exp.weight = 0.5
+        self.rewards.lin_vel_z_l2.weight =  -2.0 # TODO reduce this maybe?
+        self.rewards.ang_vel_xy_l2.weight = -0.05
+        self.rewards.dof_torques_l2.weight = -1.0e-5
+        self.rewards.dof_acc_l2.weight = -2.5e-7
+        self.rewards.dof_vel_l2.weight = -1.0e-3
+        self.rewards.action_rate_l2.weight = -0.01
+        self.rewards.feet_air_time.weight = 0.0
+        self.rewards.flat_orientation_l2.weight = -1.0
+        self.rewards.dof_pos_limits.weight = -5.0
+        self.rewards.alive.weight = 0.15
+        self.rewards.contact_no_vel.weight = -0.2
+        self.rewards.joint_deviation_hip.weight = -1.0
+        self.rewards.height_torso.weight = -10.0
+        self.rewards.feet_clearance.weight = -20.0
+        self.rewards.phase_contact.weight = 0.25
+
         self.rewards.joint_deviation_arms.weight = -0.5             # Arms regularization
         self.rewards.joint_deviation_torso.weight = -1.0
-        self.rewards.phase_feet_contacts.weight = 1.               # Contact location
-        self.rewards.height_torso.weight = -2.                     # Base height
-        self.rewards.height_torso.params["target_height"] = 0.76
-        self.rewards.feet_clearance.weight = -20.
+
+        self.rewards.height_torso.params["target_height"] = 0.75
         self.rewards.feet_clearance.params["target_height"] = 0.08
-        self.rewards.feet_slide.weight = -0.3
-        self.rewards.dof_acc_l2.weight = -1.25e-7
-        self.rewards.dof_acc_l2.params["asset_cfg"] = SceneEntityCfg(
-            "robot", joint_names=[".*_hip_.*", ".*_knee_joint"]
-        )
-        self.rewards.dof_torques_l2.weight = -1.5e-7
-        self.rewards.dof_torques_l2.params["asset_cfg"] = SceneEntityCfg(
-            "robot", joint_names=[".*_hip_.*", ".*_knee_joint", ".*_ankle_.*"]
-        )
 
-        # -- Task
-        self.rewards.track_lin_vel_xy_exp.weight = 2 #2.5
-        self.rewards.track_ang_vel_z_exp.weight = 0 #0.75  # 0
 
-        # -- Unused
-        self.rewards.track_heading.weight = 0.                     # Base heading
-        self.rewards.feet_air_time.weight = 0.
+
+        # # -- Regularization
+        # self.rewards.dof_torques_l2.weight = -1e-4                  # Joint torques
+        # # self.rewards.torque_lim.weight = -1e-2                      # Torque limits
+        # self.rewards.joint_vel.weight = -1e-3                       # Joint velocity
+        # self.rewards.dof_pos_limits.weight = -1 #-10                    # Joint limits
+        # self.rewards.joint_reg.weight = 0. #0.25                    # Regularize positions of leg joints (relative to a nominal)
+        # self.rewards.ang_vel_xy_l2.weight = -0.05                   # Base x-y angular velocity
+        # self.rewards.lin_vel_z_l2.weight = -2.0                     # Base z linear velocity
+        # self.rewards.flat_orientation_l2.weight = -1.5              # Tilting
+        # self.rewards.action_rate_l2.weight = -0.005                 # Action smoothing
+        # self.rewards.joint_deviation_hip.weight = -1.0              # Hip yaw and roll regularization
+        # self.rewards.joint_deviation_arms.weight = -0.5             # Arms regularization
+        # self.rewards.joint_deviation_torso.weight = -1.0
+        # self.rewards.phase_feet_contacts.weight = 0.25 #1.               # Contact location
+        # self.rewards.height_torso.weight = -2.                     # Base height
+        # self.rewards.height_torso.params["target_height"] = 0.76
+        # self.rewards.feet_clearance.weight = -20.
+        # self.rewards.feet_clearance.params["target_height"] = 0.1
+        # self.rewards.feet_slide.weight = -0.3
+        # self.rewards.dof_acc_l2.weight = -1.25e-7
+        # self.rewards.dof_acc_l2.params["asset_cfg"] = SceneEntityCfg(
+        #     "robot", joint_names=[".*_hip_.*", ".*_knee_joint"]
+        # )
+        # self.rewards.dof_torques_l2.weight = -1.5e-7
+        # self.rewards.dof_torques_l2.params["asset_cfg"] = SceneEntityCfg(
+        #     "robot", joint_names=[".*_hip_.*", ".*_knee_joint", ".*_ankle_.*"]
+        # )
+        #
+        # # -- Task
+        # self.rewards.track_lin_vel_xy_exp.weight = 2 #2.5
+        # self.rewards.track_ang_vel_z_exp.weight = 0.5 #0.75  # 0
+        #
+        # # -- Unused
+        # self.rewards.track_heading.weight = 0.                     # Base heading
+        # self.rewards.feet_air_time.weight = 0.

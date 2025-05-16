@@ -4,7 +4,8 @@ import numpy as np
 class RLPolicy():
     """RL Policy Wrapper"""
     def __init__(self, dt: float, checkpoint_path: str, num_obs: int, num_action: int,
-                 cmd_scale: float, period: float, action_scale: float, default_angles: np.array, qvel_scale: float):
+                 cmd_scale: list, period: float, action_scale: float, default_angles: np.array, qvel_scale: float,
+                 ang_vel_scale: float):
         """Initialize RL Policy Wrapper.
             freq: time between actions (s)
         """
@@ -17,6 +18,7 @@ class RLPolicy():
         self.action_scale = action_scale
         self.default_angles = default_angles
         self.qvel_scale = qvel_scale
+        self.ang_vel_scale = ang_vel_scale
 
         self.action_isaac = np.zeros(num_action)
 
@@ -64,9 +66,11 @@ class RLPolicy():
 
         qj = qpos[7:] - self.default_angles
 
-        obs[:3] = qvel[3:6]                                                 # Angular velocity
+        obs[:3] = qvel[3:6]*self.ang_vel_scale                                                 # Angular velocity
         obs[3:6] = projected_gravity                                        # Projected gravity
-        obs[6:9] = des_vel*self.cmd_scale                                   # Command velocity
+        obs[6] = des_vel[0]*self.cmd_scale[0]                                   # Command velocity
+        obs[7] = des_vel[1]*self.cmd_scale[1]                                   # Command velocity
+        obs[8] = des_vel[2]*self.cmd_scale[2]                                   # Command velocity
 
         nj = len(qj)
         obs[9 : 9 + nj] = self.convert_to_isaac(qj)                                          # Joint pos

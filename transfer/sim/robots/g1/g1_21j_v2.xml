@@ -51,7 +51,7 @@ Position and velocity actuators added. -->
 
     <!-- Ankle Pitch -->
     <default class="ankle_pitch_pos">
-       <position kp="40" ctrllimited="false"/>
+       <position kp="80" ctrllimited="false"/>
     </default>
     <default class="ankle_pitch_vel">
       <position kv="2" ctrllimited="false"/>
@@ -59,7 +59,7 @@ Position and velocity actuators added. -->
 
     <!-- Ankle Roll -->
     <default class="ankle_roll_pos">
-      <position kp="40" ctrllimited="false"/>
+      <position kp="80" ctrllimited="false"/>
     </default>
     <default class="ankle_roll_vel">
       <position kv="2" ctrllimited="false"/>
