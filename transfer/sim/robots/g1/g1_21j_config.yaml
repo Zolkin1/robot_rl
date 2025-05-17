@@ -1,6 +1,6 @@
 # G1_21j config
 robot_name: "g1_21j"
-checkpoint_path: "/home/zolkin/AmberLab/Project-Isaac-RL/robot-rl/robot_rl/logs/rsl_rl/g1/2025-05-16_11-53-11/exported/policy.pt"
+checkpoint_path: "/home/zolkin/AmberLab/Project-Isaac-RL/robot-rl/robot_rl/logs/rsl_rl/g1/2025-05-16_14-40-48/exported/policy.pt"
 num_obs: 74
 num_action: 21
 period: 0.8                   # s

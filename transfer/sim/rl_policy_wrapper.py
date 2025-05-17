@@ -60,13 +60,13 @@ class RLPolicy():
         if torch.cuda.is_available():
             self.policy = self.policy.cuda()
 
-    def create_obs(self, qpos, qvel, time, projected_gravity, des_vel):
+    def create_obs(self, qjoints, body_ang_vel, qvel, time, projected_gravity, des_vel):
         """Create the observation vector from the sensor data"""
         obs = np.zeros(self.num_obs, dtype=np.float32)
 
-        qj = qpos[7:] - self.default_angles
+        qj = qjoints - self.default_angles
 
-        obs[:3] = qvel[3:6]*self.ang_vel_scale                                                 # Angular velocity
+        obs[:3] = body_ang_vel*self.ang_vel_scale                                                 # Angular velocity
         obs[3:6] = projected_gravity                                        # Projected gravity
         obs[6] = des_vel[0]*self.cmd_scale[0]                                   # Command velocity
         obs[7] = des_vel[1]*self.cmd_scale[1]                                   # Command velocity
@@ -74,7 +74,7 @@ class RLPolicy():
 
         nj = len(qj)
         obs[9 : 9 + nj] = self.convert_to_isaac(qj)                                          # Joint pos
-        obs[9 + nj : 9 + 2*nj] = self.convert_to_isaac(qvel[6:]) * self.qvel_scale                            # Joint vel
+        obs[9 + nj : 9 + 2*nj] = self.convert_to_isaac(qvel) * self.qvel_scale                            # Joint vel
         obs[9 + 2*nj : 9 + 3*nj] = self.action_isaac                              # Past action
 
         sin_phase = np.sin(2 * np.pi * time/self.period)
@@ -119,3 +119,7 @@ class RLPolicy():
 
     def get_chkpt_path(self):
         return self.checkpoint_path
+
+    def get_action_isaac(self):
+        default_isaac = self.convert_to_isaac(self.default_angles)
+        return self.action_isaac * self.action_scale + default_isaac

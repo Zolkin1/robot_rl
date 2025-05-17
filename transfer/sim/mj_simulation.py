@@ -86,6 +86,7 @@ def run_simulation(policy, robot: str, log: bool, log_dir: str):
         print(f"Saving rerun logs to {new_folder_path}.")
         log_file = os.path.join(new_folder_path, "sim_log.csv")
         sim_config = {
+            'simulator': "mujoco",
             'robot': robot,
             'policy': policy.get_chkpt_path(),
             'policy_dt': policy.dt,
@@ -117,7 +118,7 @@ def run_simulation(policy, robot: str, log: bool, log_dir: str):
 
             # Compute the control action
             pg = get_projected_gravity(qpos[3:7])
-            obs = policy.create_obs(qpos, qvel, sim_time, pg, des_vel)
+            obs = policy.create_obs(qpos[7:], qvel[3:6], qvel[6:], sim_time, pg, des_vel)
             u = policy.get_action(obs)
             mj_data.ctrl[:nu] = u
 

@@ -164,6 +164,10 @@ if __name__ == "__main__":
 
         # print(data)
 
+    print(f"=============="
+          f" Data generated using " + config["simulator"] + " "
+          "===============")
+
     print(f"time shape: {data['time'].shape}")
     print(f"qpos shape: {data['qpos'].shape}")
 

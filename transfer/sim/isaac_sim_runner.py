@@ -3,171 +3,243 @@
 #
 # SPDX-License-Identifier: BSD-3-Clause
 
-"""Script to play a checkpoint if an RL agent from RSL-RL."""
+"""This script demonstrates how to spawn a cart-pole and interact with it.
+
+.. code-block:: bash
+
+    # Usage
+    ./isaaclab.sh -p scripts/tutorials/01_assets/run_articulation.py
+
+"""
 
 """Launch Isaac Sim Simulator first."""
+
 
 import argparse
 
 from isaaclab.app import AppLauncher
 
-# local imports
-# import cli_args  # isort: skip
+# add argparse arguments
+parser = argparse.ArgumentParser(description="Tutorial on spawning and interacting with an articulation.")
+parser.add_argument("--config_file", type=str, help="Config file name in the config folder")
 
-# # add argparse arguments
-# parser = argparse.ArgumentParser(description="Train an RL agent with RSL-RL.")
-# parser.add_argument("--video", action="store_true", default=False, help="Record videos during training.")
-# parser.add_argument("--video_length", type=int, default=200, help="Length of the recorded video (in steps).")
-# parser.add_argument(
-#     "--disable_fabric", action="store_true", default=False, help="Disable fabric and use USD I/O operations."
-# )
-# parser.add_argument("--num_envs", type=int, default=None, help="Number of environments to simulate.")
-# parser.add_argument("--task", type=str, default=None, help="Name of the task.")
-# parser.add_argument(
-#     "--use_pretrained_checkpoint",
-#     action="store_true",
-#     help="Use the pre-trained checkpoint from Nucleus.",
-# )
-# parser.add_argument("--real-time", action="store_true", default=False, help="Run in real-time, if possible.")
-# # append RSL-RL cli arguments
-# cli_args.add_rsl_rl_args(parser)
-# # append AppLauncher cli args
-# AppLauncher.add_app_launcher_args(parser)
-# args_cli = parser.parse_args()
-# # always enable cameras to record video
-# if args_cli.video:
-#     args_cli.enable_cameras = True
-#
-# # launch omniverse app
-# app_launcher = AppLauncher(args_cli)
-# simulation_app = app_launcher.app
+# append AppLauncher cli args
+AppLauncher.add_app_launcher_args(parser)
+# parse the arguments
+args_cli = parser.parse_args()
+
+# launch omniverse app
+app_launcher = AppLauncher(args_cli)
+simulation_app = app_launcher.app
 
 """Rest everything follows."""
 
-import gymnasium as gym
-import os
-import time
 import torch
+import csv
+import os
+import numpy as np
+import yaml
+from datetime import datetime
 
-from rsl_rl.runners import OnPolicyRunner
+import isaacsim.core.utils.prims as prim_utils
 
-# from isaaclab.envs import DirectMARLEnv, multi_agent_to_single_agent
-# from isaaclab.utils.assets import retrieve_file_path
-# from isaaclab.utils.dict import print_dict
-# from isaaclab.utils.pretrained_checkpoint import get_published_pretrained_checkpoint
-#
-# from isaaclab_rl.rsl_rl import RslRlOnPolicyRunnerCfg, RslRlVecEnvWrapper, export_policy_as_jit, export_policy_as_onnx
-#
-# import isaaclab_tasks  # noqa: F401
-# from isaaclab_tasks.utils import get_checkpoint_path, parse_env_cfg
+import isaaclab.sim as sim_utils
+from isaaclab.assets import Articulation
+from isaaclab.sim import SimulationContext
 
-# import robot_rl.tasks  # noqa: F401
+from rl_policy_wrapper import RLPolicy
+
+##
+# Pre-defined configs
+##
+from robot_rl.assets.robots.g1_21j import G1_MINIMAL_CFG  # isort: skip
 
 
-def run_isaac_sim(num_envs, task):
-    """Play with RSL-RL agent."""
-    # launch omniverse app
+def design_scene() -> tuple[dict, list[list[float]]]:
+    """Designs the scene."""
+    # Ground-plane
+    cfg = sim_utils.GroundPlaneCfg()
+    cfg.func("/World/defaultGroundPlane", cfg)
+    # Lights
+    cfg = sim_utils.DomeLightCfg(intensity=3000.0, color=(0.75, 0.75, 0.75))
+    cfg.func("/World/Light", cfg)
 
-    # TODO: Debug
-    app_launcher = AppLauncher()
-    # simulation_app = app_launcher.app
+    # Create separate groups called "Origin1", "Origin2"
+    # Each group will have a robot in it
+    origins = [[0.0, 0.0, 0.0]]
+    # Origin 1
+    prim_utils.create_prim("/World/Origin1", "Xform", translation=origins[0])
 
-    # # parse configuration
-    # env_cfg = parse_env_cfg(
-    #     task, device="cuda", num_envs=num_envs, use_fabric=None
-    # )
-    # agent_cfg: RslRlOnPolicyRunnerCfg = cli_args.parse_rsl_rl_cfg(task, args_cli)
-    #
-    # # specify directory for logging experiments
-    # log_root_path = os.path.join("logs", "rsl_rl", agent_cfg.experiment_name)
-    # log_root_path = os.path.abspath(log_root_path)
-    # print(f"[INFO] Loading experiment from directory: {log_root_path}")
-    # if args_cli.use_pretrained_checkpoint:
-    #     resume_path = get_published_pretrained_checkpoint("rsl_rl", task)
-    #     if not resume_path:
-    #         print("[INFO] Unfortunately a pre-trained checkpoint is currently unavailable for this task.")
-    #         return
-    # elif args_cli.checkpoint:
-    #     resume_path = retrieve_file_path(args_cli.checkpoint)
-    # else:
-    #     resume_path = get_checkpoint_path(log_root_path, agent_cfg.load_run, agent_cfg.load_checkpoint)
-    #
-    # log_dir = os.path.dirname(resume_path)
-    #
-    # # create isaac environment
-    # if hasattr(env_cfg, "__prepare_tensors__") and callable(getattr(env_cfg, "__prepare_tensors__")):
-    #     env_cfg.__prepare_tensors__()
-    # env = gym.make(task, cfg=env_cfg)
-    #
-    # # convert to single-agent instance if required by the RL algorithm
-    # if isinstance(env.unwrapped, DirectMARLEnv):
-    #     env = multi_agent_to_single_agent(env)
-    #
-    # # # wrap for video recording
-    # # if args_cli.video:
-    # #     video_kwargs = {
-    # #         "video_folder": os.path.join(log_dir, "videos", "play"),
-    # #         "step_trigger": lambda step: step == 0,
-    # #         "video_length": args_cli.video_length,
-    # #         "disable_logger": True,
-    # #     }
-    # #     print("[INFO] Recording videos during training.")
-    # #     print_dict(video_kwargs, nesting=4)
-    # #     env = gym.wrappers.RecordVideo(env, **video_kwargs)
-    #
-    # # wrap around environment for rsl-rl
-    # env = RslRlVecEnvWrapper(env, clip_actions=agent_cfg.clip_actions)
-    #
-    # print(f"[INFO]: Loading model checkpoint from: {resume_path}")
-    # # load previously trained model
-    # ppo_runner = OnPolicyRunner(env, agent_cfg.to_dict(), log_dir=None, device=agent_cfg.device)
-    # ppo_runner.load(resume_path)
-    #
-    # # obtain the trained policy for inference
-    # policy = ppo_runner.get_inference_policy(device=env.unwrapped.device)
-    #
-    # # extract the neural network module
-    # # we do this in a try-except to maintain backwards compatibility.
-    # try:
-    #     # version 2.3 onwards
-    #     policy_nn = ppo_runner.alg.policy
-    # except AttributeError:
-    #     # version 2.2 and below
-    #     policy_nn = ppo_runner.alg.actor_critic
-    #
-    # # export policy to onnx/jit
-    # export_model_dir = os.path.join(os.path.dirname(resume_path), "exported")
-    # export_policy_as_jit(policy_nn, ppo_runner.obs_normalizer, path=export_model_dir, filename="policy.pt")
-    # export_policy_as_onnx(
-    #     policy_nn, normalizer=ppo_runner.obs_normalizer, path=export_model_dir, filename="policy.onnx"
-    # )
-    #
-    # dt = env.unwrapped.step_dt
-    #
-    # # reset environment
-    # obs, _ = env.get_observations()
-    # timestep = 0
-    # # simulate environment
-    # while simulation_app.is_running():
-    #     start_time = time.time()
-    #     # run everything in inference mode
-    #     with torch.inference_mode():
-    #         # agent stepping
-    #         actions = policy(obs)
-    #         # env stepping
-    #         obs, _, _, _ = env.step(actions)
-    #     # if args_cli.video:
-    #     #     timestep += 1
-    #     #     # Exit the play loop after recording one video
-    #     #     if timestep == args_cli.video_length:
-    #     #         break
-    #
-    #     # time delay for real-time evaluation
-    #     sleep_time = dt - (time.time() - start_time)
-    #     if True and sleep_time > 0:
-    #         time.sleep(sleep_time)
-    #
-    # # close the simulator
-    # env.close()
-    # simulation_app.close()
+    # Articulation
+    robot_cfg = G1_MINIMAL_CFG.copy()
+    robot_cfg.prim_path = "/World/Origin.*/Robot"
+    robot = Articulation(cfg=robot_cfg)
 
+    # return the scene information
+    scene_entities = {"robot": robot}
+    return scene_entities, origins
+
+def log_row_to_csv(filename, data):
+    """
+    Appends a single row of data to an existing CSV file.
+
+    Args:
+      filename (str): The path to the CSV file.
+      data_row (list): A list of data points for the row.
+    """
+    try:
+        # Open in append mode ('a') to add data to the end of the file
+        # newline='' is important to prevent extra blank rows
+        with open(filename, 'a', newline='') as csvfile:
+            csv_writer = csv.writer(csvfile)
+            csv_writer.writerow(data)
+        # print(f"Appended row to {filename}") # Uncomment for verbose logging
+    except Exception as e:
+        print(f"Error appending row to {filename}: {e}")
+
+def run_simulator(log_file: str, policy_wrapper):
+    """Runs the simulation loop."""
+    # Setup the sim
+    # Load kit helper
+    sim_cfg = sim_utils.SimulationCfg(device=args_cli.device)
+    sim = SimulationContext(sim_cfg)
+    # Set main camera
+    sim.set_camera_view([2.5, 0.0, 4.0], [0.0, 0.0, 2.0])
+    # Design scene
+    entities, origins = design_scene()
+    origins = torch.tensor(origins, device=sim.device)
+
+    # Play the simulator
+    sim.reset()
+    # Now we are ready!
+    print("[INFO]: Setup complete...")
+    print(f"Logging to {log_file}.")
+
+    # Desired velocity
+    des_vel = np.zeros(3)
+    des_vel[0] = 0.5
+
+    # Extract scene entities
+    # note: we only do this here for readability. In general, it is better to access the entities directly from
+    #   the dictionary. This dictionary is replaced by the InteractiveScene class in the next tutorial.
+    robot = entities["robot"]
+    # Define simulation stepping
+    sim_dt = sim.get_physics_dt()
+    count = 0
+    # Simulation loop
+    while simulation_app.is_running():
+        # Reset
+        if count % 500 == 0:
+            # reset counter
+            count = 0
+            # reset the scene entities
+            # root state
+            # we offset the root state by the origin since the states are written in simulation world frame
+            # if this is not done, then the robots will be spawned at the (0, 0, 0) of the simulation world
+            root_state = robot.data.default_root_state.clone()
+            root_state[:, :3] += origins
+            robot.write_root_pose_to_sim(root_state[:, :7])
+            robot.write_root_velocity_to_sim(root_state[:, 7:])
+            # set joint positions with some noise
+            joint_pos, joint_vel = robot.data.default_joint_pos.clone(), robot.data.default_joint_vel.clone()
+            joint_pos += torch.rand_like(joint_pos) * 0.1
+            robot.write_joint_state_to_sim(joint_pos, joint_vel)
+            # clear internal buffers
+            robot.reset()
+            print("[INFO]: Resetting robot state...")
+        # -- generate action from policy
+        obs = policy_wrapper.create_obs(robot.data.joint_pos[0, :].cpu().numpy(), robot.data.root_ang_vel_b[0, :].cpu().numpy(),
+                                        robot.data.joint_vel[0, :].cpu().numpy(), sim.current_time,
+                                        robot.data.projected_gravity_b[0, :].cpu().numpy(), des_vel)
+        action_mj = policy_wrapper.get_action(obs)
+        action_isaac = policy_wrapper.get_action_isaac()
+
+        # TODO: Fix so it walks
+
+        # -- apply action to the robot
+        robot.set_joint_position_target(torch.tensor(action_isaac, device=sim.device))
+        # -- write data to sim
+        robot.write_data_to_sim()
+        # Perform step
+        sim.step()
+        # Increment counter
+        count += 1
+        # Update buffers
+        robot.update(sim_dt)
+
+        # TODO: Get the torques
+        torques = np.zeros(21)  # TODO: get this number programatically
+        row = ([sim.current_time] + robot.data.root_pos_w[0,:].cpu().numpy().tolist()
+               + robot.data.root_quat_w[0, :].cpu().numpy().tolist()
+               + policy_wrapper.convert_to_mujoco(robot.data.joint_pos[0, :].cpu().numpy()).tolist()
+               + robot.data.root_lin_vel_b[0, :].cpu().numpy().tolist()
+               + robot.data.root_ang_vel_b[0, :].cpu().numpy().tolist()
+               + policy_wrapper.convert_to_mujoco(robot.data.joint_vel[0,:].cpu().numpy()).tolist()
+               + obs[0,:].numpy().tolist()
+               + action_mj.tolist()
+               + torques.tolist())
+        log_row_to_csv(log_file, row)
+
+
+def main():
+    """Main function."""
+    # Parse the config file
+    config_file = args_cli.config_file
+
+    with open(config_file, "r") as f:
+        config = yaml.load(f, Loader=yaml.FullLoader)
+        checkpoint_path = config["checkpoint_path"]
+        dt = config["dt"]
+        num_obs = config["num_obs"]
+        num_action = config["num_action"]
+        period = config["period"]
+        robot_name = config["robot_name"]
+        action_scale = config["action_scale"]
+        default_angles = np.array(config["default_angles"], dtype=np.float32)
+        qvel_scale = config["qvel_scale"]
+        ang_vel_scale = config["ang_vel_scale"]
+        command_scale = config["command_scale"]
+
+    # Make the RL policy
+    policy = RLPolicy(dt=dt, checkpoint_path=checkpoint_path, num_obs=num_obs, num_action=num_action, period=period,
+                      cmd_scale=command_scale, action_scale=action_scale, default_angles=default_angles,
+                      qvel_scale=qvel_scale, ang_vel_scale=ang_vel_scale, )
+
+    # Setup the logging
+    # Make a new directroy based on the current time
+    now = datetime.now()
+    timestamp_str = now.strftime("%Y-%m-%d-%H-%M-%S")
+    new_folder_path = os.path.join(os.getcwd(), "transfer/sim/logs/" + timestamp_str)
+    try:
+        os.makedirs(new_folder_path, exist_ok=True)
+        print(f"Successfully created folder: {new_folder_path}")
+    except OSError as e:
+        print(f"Error creating folder {new_folder_path}: {e}")
+    print(f"Saving rerun logs to {new_folder_path}.")
+    log_file = os.path.join(new_folder_path, "sim_log.csv")
+    sim_config = {
+        'simulator': "isaacsim",
+        'robot': robot_name,
+        'policy': policy.get_chkpt_path(),
+        'policy_dt': policy.dt,
+        'data_structure': [
+            {'name': 'time', 'length': 1},
+            {'name': 'qpos', 'length': 28},
+            {'name': 'qvel', 'length': 27},
+            {'name': 'obs', 'length': policy.get_num_obs()},
+            {'name': 'action', 'length': policy.get_num_actions()},
+            {'name': 'torque', 'length': 21},
+        ]
+    }
+    with open(os.path.join(new_folder_path, "sim_config.yaml"), 'w') as f:
+        yaml.dump(sim_config, f)
+
+    # Run the simulator
+    run_simulator(log_file, policy)
+
+
+if __name__ == "__main__":
+    # run the main function
+    main()
+    # close sim app
+    simulation_app.close()
