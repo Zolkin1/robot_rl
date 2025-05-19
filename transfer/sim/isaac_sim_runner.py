@@ -101,7 +101,7 @@ def run_simulator(log_file: str, policy_wrapper):
     """Runs the simulation loop."""
     # Setup the sim
     # Load kit helper
-    sim_cfg = sim_utils.SimulationCfg(device=args_cli.device)
+    sim_cfg = sim_utils.SimulationCfg(device=args_cli.device, dt=0.005, render_interval=4)
     sim = SimulationContext(sim_cfg)
     # Set main camera
     sim.set_camera_view([2.5, 0.0, 4.0], [0.0, 0.0, 2.0])
@@ -147,19 +147,24 @@ def run_simulator(log_file: str, policy_wrapper):
             # clear internal buffers
             robot.reset()
             print("[INFO]: Resetting robot state...")
-        # -- generate action from policy
-        obs = policy_wrapper.create_obs(robot.data.joint_pos[0, :].cpu().numpy(), robot.data.root_ang_vel_b[0, :].cpu().numpy(),
-                                        robot.data.joint_vel[0, :].cpu().numpy(), sim.current_time,
-                                        robot.data.projected_gravity_b[0, :].cpu().numpy(), des_vel)
-        action_mj = policy_wrapper.get_action(obs)
-        action_isaac = policy_wrapper.get_action_isaac()
+        if count % 4 == 0:
+            # -- generate action from policy
+            obs = policy_wrapper.create_obs(robot.data.joint_pos[0, :].cpu().numpy(), robot.data.root_ang_vel_b[0, :].cpu().numpy(),
+                                            robot.data.joint_vel[0, :].cpu().numpy(), sim.current_time,
+                                            robot.data.projected_gravity_b[0, :].cpu().numpy(), des_vel, "isaac")
+            action_mj = policy_wrapper.get_action(obs)
+            action_isaac = policy_wrapper.get_action_isaac()
 
-        # TODO: Fix so it walks
+            # TODO: Fix so it walks
 
-        # -- apply action to the robot
-        robot.set_joint_position_target(torch.tensor(action_isaac, device=sim.device))
-        # -- write data to sim
-        robot.write_data_to_sim()
+            # -- apply action to the robot
+            # TODO: Reshape the action isaac to be (1, 21)
+            action_isaac = np.reshape(action_isaac, (1, 21))
+            robot.set_joint_position_target(torch.tensor(action_isaac, device=sim.device))
+
+            # -- write data to sim
+            robot.write_data_to_sim()
+
         # Perform step
         sim.step()
         # Increment counter

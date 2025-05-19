@@ -17,9 +17,8 @@ Position and velocity actuators added. -->
     <!--   Leg Gains    -->
     <!-- ############## -->
     <!-- Hip Pitch -->
-<!--    TODO: Go back to the corret PD gains -->
     <default class="hip_pitch_pos">
-       <position kp="200" ctrllimited="false"/>
+       <position kp="100" ctrllimited="false"/>
     </default>
     <default class="hip_pitch_vel">
       <position kv="2" ctrllimited="false"/>
@@ -27,7 +26,7 @@ Position and velocity actuators added. -->
 
     <!-- Hip Roll -->
     <default class="hip_roll_pos">
-       <position kp="200" ctrllimited="false"/>
+       <position kp="100" ctrllimited="false"/>
     </default>
     <default class="hip_roll_vel">
         <position kv="2" ctrllimited="false"/>
@@ -35,7 +34,7 @@ Position and velocity actuators added. -->
 
     <!-- Hip Yaw -->
     <default class="hip_yaw_pos">
-       <position kp="200" ctrllimited="false"/>
+       <position kp="100" ctrllimited="false"/>
     </default>
     <default class="hip_yaw_vel">
       <position kv="2" ctrllimited="false"/>
@@ -43,7 +42,7 @@ Position and velocity actuators added. -->
 
     <!-- Knee -->
     <default class="knee_pos">
-       <position kp="200" ctrllimited="false"/>
+       <position kp="150" ctrllimited="false"/>
     </default>
     <default class="knee_vel">
       <position kv="4" ctrllimited="false"/>
@@ -51,7 +50,7 @@ Position and velocity actuators added. -->
 
     <!-- Ankle Pitch -->
     <default class="ankle_pitch_pos">
-       <position kp="80" ctrllimited="false"/>
+       <position kp="40" ctrllimited="false"/>
     </default>
     <default class="ankle_pitch_vel">
       <position kv="2" ctrllimited="false"/>
@@ -59,7 +58,7 @@ Position and velocity actuators added. -->
 
     <!-- Ankle Roll -->
     <default class="ankle_roll_pos">
-      <position kp="80" ctrllimited="false"/>
+      <position kp="40" ctrllimited="false"/>
     </default>
     <default class="ankle_roll_vel">
       <position kv="2" ctrllimited="false"/>
@@ -97,7 +96,7 @@ Position and velocity actuators added. -->
 
     <!-- Shoulder Yaw -->
     <default class="shoulder_yaw_pos">
-      <position kp="100" ctrllimited="false"/>
+      <position kp="50" ctrllimited="false"/>
     </default>
     <default class="shoulder_yaw_vel">
       <position kv="2" ctrllimited="false"/>

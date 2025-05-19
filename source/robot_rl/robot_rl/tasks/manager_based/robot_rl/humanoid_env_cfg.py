@@ -46,6 +46,7 @@ period = 0.8  # (0.4 s swing phase)
 class HumanoidActionsCfg:
     """Action specifications for the MDP."""
     joint_pos = mdp.JointPositionActionCfg(asset_name="robot", joint_names=[".*"], scale=0.25, use_default_offset=True)
+    # joint_pos = mdp.JointPositionActionCfg(asset_name="robot", joint_names=[".*"], use_default_offset=True)
 
 
 @configclass
@@ -68,7 +69,7 @@ class HumanoidObservationsCfg(ObservationsCfg):
         cos_phase = ObsTerm(func=mdp.cos_phase, params={"period": period})
 
     @configclass
-    class CriticCfg(ObservationsCfg.PolicyCfg):
+    class CriticCfg(PolicyCfg):
         """Observations for critic group."""
         base_lin_vel = ObsTerm(func=mdp.base_lin_vel, noise=Unoise(n_min=-0.1, n_max=0.1),history_length=1,scale=2.0)
         height_scan = None      # Removed - not supported yet
@@ -335,6 +336,7 @@ class HumanoidEnvCfg(LocomotionVelocityRoughEnvCfg):
     rewards: HumanoidRewardCfg = HumanoidRewardCfg()
     observations: HumanoidObservationsCfg = HumanoidObservationsCfg()
     events: HumanoidEventsCfg = HumanoidEventsCfg()
+    actions: HumanoidActionsCfg = HumanoidActionsCfg()
 
     # TODO: Is this the right way to do this? How do I reset these?
     # current_des_step: torch.Tensor = torch.zeros(1)

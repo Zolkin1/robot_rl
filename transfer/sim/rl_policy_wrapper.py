@@ -60,11 +60,9 @@ class RLPolicy():
         if torch.cuda.is_available():
             self.policy = self.policy.cuda()
 
-    def create_obs(self, qjoints, body_ang_vel, qvel, time, projected_gravity, des_vel):
+    def create_obs(self, qjoints, body_ang_vel, qvel, time, projected_gravity, des_vel, convention="mj"):
         """Create the observation vector from the sensor data"""
         obs = np.zeros(self.num_obs, dtype=np.float32)
-
-        qj = qjoints - self.default_angles
 
         obs[:3] = body_ang_vel*self.ang_vel_scale                                                 # Angular velocity
         obs[3:6] = projected_gravity                                        # Projected gravity
@@ -72,9 +70,16 @@ class RLPolicy():
         obs[7] = des_vel[1]*self.cmd_scale[1]                                   # Command velocity
         obs[8] = des_vel[2]*self.cmd_scale[2]                                   # Command velocity
 
-        nj = len(qj)
-        obs[9 : 9 + nj] = self.convert_to_isaac(qj)                                          # Joint pos
-        obs[9 + nj : 9 + 2*nj] = self.convert_to_isaac(qvel) * self.qvel_scale                            # Joint vel
+        nj = len(qjoints)
+        if convention == "mj":
+            qj = qjoints - self.default_angles
+            obs[9 : 9 + nj] = self.convert_to_isaac(qj)                                          # Joint pos
+            obs[9 + nj : 9 + 2*nj] = self.convert_to_isaac(qvel) * self.qvel_scale                            # Joint vel
+        else:
+            qj = qjoints - self.convert_to_isaac(self.default_angles)
+            obs[9: 9 + nj] = qj  # Joint pos
+            obs[9 + nj: 9 + 2 * nj] = qvel * self.qvel_scale  # Joint vel
+
         obs[9 + 2*nj : 9 + 3*nj] = self.action_isaac                              # Past action
 
         sin_phase = np.sin(2 * np.pi * time/self.period)
