@@ -100,7 +100,7 @@ class G1RoughEnvCfg(HumanoidEnvCfg):
         self.rewards.joint_deviation_torso.weight = -1.0
 
         self.rewards.height_torso.params["target_height"] = 0.75
-        self.rewards.feet_clearance.params["target_height"] = 0.08
+        self.rewards.feet_clearance.params["target_height"] = 0.12
 
 
 

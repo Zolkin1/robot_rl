@@ -108,22 +108,6 @@ class HumanoidEventsCfg(EventCfg):
         },
     )
 
-# @configclass
-# class HumanoidCommandCfg(CommandCfg):
-#     """Command configuration"""
-#     base_velocity = mdp.UniformVelocityCommandCfg(
-#         asset_name="robot",
-#         resampling_time_range=(10.0, 10.0),
-#         rel_standing_envs=0.02,
-#         rel_heading_envs=1.0,
-#         heading_command=True,
-#         heading_control_stiffness=0.5,
-#         debug_vis=True,
-#         ranges=mdp.UniformVelocityCommandCfg.Ranges(
-#             lin_vel_x=(-1.0, 1.0), lin_vel_y=(-1.0, 1.0), ang_vel_z=(-1.0, 1.0), heading=(-math.pi, math.pi)
-#         ),
-#     )
-
 @configclass
 class HumanoidRewardCfg(RewardsCfg):
     """Reward terms for the MDP."""
@@ -251,57 +235,12 @@ class HumanoidRewardCfg(RewardsCfg):
     ##
     # Regularization
     ##
-    # TODO: Determine if this will work (see docs note)
-    # torque_lim = RewTerm(
-    #     func=mdp.applied_torque_limits,
-    #     weight=0,
-    #     params=
-    # )
-    # joint_vel = RewTerm(
-    #     func=mdp.joint_vel_l2,
-    #     weight=0,
-    # )
-    # joint_reg = RewTerm(
-    #     func=mdp.joint_pos_target,
-    #     weight=0.75,
-    #     params={
-    #         "asset_cfg": SceneEntityCfg("robot"),
-    #         # Joint Order:
-    #         # L Hip Pitch
-    #         # L Hip Roll
-    #         # L Hip Yaw
-    #         # L Knee
-    #         # L Ankle Pitch
-    #         # L Ankle Roll
-    #         # R Hip Pitch
-    #         # R Hip Roll
-    #         # R Hip Yaw
-    #         # R Knee
-    #         # R Ankle Pitch
-    #         # R Ankle Roll
-    #         # Waist Yaw
-    #         # L Shoulder Pitch
-    #         # L Shoulder Roll
-    #         # L Shoulder Yaw
-    #         # L Elbow
-    #         # R Shoulder Pitch
-    #         # R Shoulder Roll
-    #         # R Shoulder Yaw
-    #         # R Elbow
-    #         "joint_des": [-0.42, 0, 0, 0.81, -0.4, 0,
-    #                       -0.42, 0, 0, 0.81, -0.4, 0,
-    #                       0,
-    #                       0, 0.27, 0, 0.5,
-    #                       0, -0.27, 0, 0.5,],
-    #         "std": 0.1,
-    #         "joint_weight": [0.0, 10., 10., 0.0, 1., 1.,
-    #                          0.0, 10., 10., 0.0, 1., 1.,
-    #                          1.,
-    #                          1., 1., 1., 1.,
-    #                          1., 1., 1., 1.,],
-    #     }
-    # )
+    dof_vel_l2 = RewTerm(func=mdp.joint_vel_l2, weight=-1e-3)
+    alive = RewTerm(func=mdp.is_alive, weight=0.15)
 
+    ##
+    # Feet
+    ##
     feet_clearance = RewTerm(
         func=mdp.foot_clearance,
         weight=0.0,
@@ -321,8 +260,6 @@ class HumanoidRewardCfg(RewardsCfg):
         },
     )
 
-    dof_vel_l2 = RewTerm(func=mdp.joint_vel_l2, weight=-1e-3)
-    alive = RewTerm(func=mdp.is_alive, weight=0.15)
 
 # @configclass
 # class HumanoidVizCfg(VisualizationMarkersCfg):
