@@ -240,10 +240,12 @@ def compute_step_location_local(env: ManagerBasedRLEnv, env_ids: torch.Tensor,
     command = env.command_manager.get_command(command_name)
 
     # COM Position in global frame
-    r = asset.data.root_com_pos_w
+    # r = asset.data.root_com_pos_w
+    r = asset.data.root_pos_w
 
     # COM velocity in local frame
-    rdot = asset.data.root_com_lin_vel_b
+    rdot = command
+    # rdot = asset.data.root_com_lin_vel_b
 
     g = 9.81
     omega = math.sqrt(g / nom_height)
@@ -285,8 +287,8 @@ def compute_step_location_local(env: ManagerBasedRLEnv, env_ids: torch.Tensor,
 
     # Clip the step to be within the kinematic limits
     p_local = icp_f.clone()
-    p_local[:, 0] = torch.clip(icp_f[:, 0] - b[:, 0], -0.8, 0.8)    # Clip in the local x direction
-    p_local[:, 1] = torch.clip(icp_f[:, 1] - b[:, 1], -0.4, 0.4)    # Clip in the local y direction
+    p_local[:, 0] = torch.clip(icp_f[:, 0] - b[:, 0], -0.5, 0.5)    # Clip in the local x direction
+    p_local[:, 1] = torch.clip(icp_f[:, 1] - b[:, 1], -0.3, 0.3)    # Clip in the local y direction
 
 
     # Compute desired step in the global frame

@@ -10,19 +10,84 @@ from isaaclab.utils import configclass
 from isaaclab.utils.noise import AdditiveUniformNoiseCfg as Unoise
 from isaaclab.managers import RewardTermCfg as RewTerm
 
-from robot_rl.tasks.manager_based.robot_rl.humanoid_env_cfg import HumanoidEnvCfg
+from robot_rl.tasks.manager_based.robot_rl.humanoid_env_cfg import (HumanoidEnvCfg, HumanoidEventsCfg,
+                                                                    HumanoidRewardCfg, PERIOD)
+from robot_rl.tasks.manager_based.robot_rl import mdp
 
 ##
 # Pre-defined configs
 ##
 from robot_rl.assets.robots.g1_21j import G1_MINIMAL_CFG  # isort: skip
 
+
+##
+# LIP Specific Constants
+##
+WDES = 0.6 #0.2 #0.25
+
+##
+# Lip specific rewards
+##
+class G1RoughLipRewards(HumanoidRewardCfg):
+    """Rewards specific to LIP Model"""
+    lip_gait_tracking = RewTerm(
+        func=mdp.lip_gait_tracking,
+        weight=0.0,
+        params={
+            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*_ankle_roll_link"),
+            "period": PERIOD,
+            "std": 0.2,
+            "nom_height": 0.78,
+            "Tswing": PERIOD/2.,
+            "command_name": "base_velocity",
+            "wdes": WDES,
+            "asset_cfg": SceneEntityCfg("robot", body_names=".*_ankle_roll_link"),
+        }
+    )
+
+    lip_feet_tracking = RewTerm(
+        func=mdp.lip_feet_tracking,
+        weight=10.0,
+        params={
+            "period": PERIOD,
+            "std": 0.2,
+            "Tswing": PERIOD/2.,
+            "feet_bodies": SceneEntityCfg("robot", body_names=".*_ankle_roll_link"),
+        }
+    )
+
+class G1RoughLipEventsCfg(HumanoidEventsCfg):
+    # Calculate new step location on a fixed interval
+    update_step_location = EventTerm(func=mdp.compute_step_location_local,
+                                     mode="interval",
+                                     interval_range_s=(PERIOD / 2., PERIOD / 2.),
+                                     is_global_time=False,
+                                     params={
+                                         "nom_height": 0.78,
+                                         "Tswing": PERIOD / 2.,
+                                         "command_name": "base_velocity",
+                                         "wdes": WDES,
+                                         "feet_bodies": SceneEntityCfg("robot", body_names=".*_ankle_roll_link"),
+                                     })
+    # Do on reset
+    reset_update_set_location = EventTerm(func=mdp.compute_step_location_local,
+                                          mode="reset",
+                                          params={
+                                              "nom_height": 0.78,
+                                              "Tswing": PERIOD / 2.,
+                                              "command_name": "base_velocity",
+                                              "wdes": WDES,
+                                              "feet_bodies": SceneEntityCfg("robot", body_names=".*_ankle_roll_link"),
+                                          })
 ##
 # Environment configuration
 ##
 @configclass
 class G1RoughLipEnvCfg(HumanoidEnvCfg):
     """Configuration for the G1 Flat environment."""
+    rewards: G1RoughLipRewards = G1RoughLipRewards()
+    events: G1RoughLipEventsCfg = G1RoughLipEventsCfg()
+
     def __post_init__(self):
         # post init of parent
         super().__post_init__()
@@ -41,10 +106,10 @@ class G1RoughLipEnvCfg(HumanoidEnvCfg):
         # Randomization
         ##
         # self.events.push_robot = None
-        # self.events.push_robot.params["velocity_range"] = {"x": (-1, 1), "y": (-1, 1), "roll": (-0.4, 0.4),
-        #                                                    "pitch": (-0.4, 0.4), "yaw": (-0.4, 0.4)}
-        self.events.push_robot.params["velocity_range"] = {"x": (-0, 0), "y": (-0, 0), "roll": (-0.0, 0.0),
-                                                           "pitch": (-0., 0.), "yaw": (-0.0, 0.0)}
+        self.events.push_robot.params["velocity_range"] = {"x": (-1, 1), "y": (-1, 1), "roll": (-0.4, 0.4),
+                                                           "pitch": (-0.4, 0.4), "yaw": (-0.4, 0.4)}
+        # self.events.push_robot.params["velocity_range"] = {"x": (-0, 0), "y": (-0, 0), "roll": (-0.0, 0.0),
+        #                                                    "pitch": (-0., 0.), "yaw": (-0.0, 0.0)}
         self.events.add_base_mass.params["asset_cfg"].body_names = ["pelvis_link"]
         self.events.add_base_mass.params["mass_distribution_params"] = (0.8, 1.2)
         self.events.add_base_mass.params["operation"] = "scale"
@@ -67,9 +132,9 @@ class G1RoughLipEnvCfg(HumanoidEnvCfg):
         ##
         # Commands
         ##
-        self.commands.base_velocity.ranges.lin_vel_x = (0., 1)
+        self.commands.base_velocity.ranges.lin_vel_x = (-1, 1)
         self.commands.base_velocity.ranges.lin_vel_y = (-0.0, 0.0)
-        self.commands.base_velocity.ranges.ang_vel_z = (-0.0, 0.0) #(-1.0, 1.0)
+        self.commands.base_velocity.ranges.ang_vel_z = (-1.0, 1.0)
 
         ##
         # Terminations
@@ -100,7 +165,7 @@ class G1RoughLipEnvCfg(HumanoidEnvCfg):
 
         # TODO: Add the footstep location rewards
         self.rewards.lip_gait_tracking.weight = 2
-        self.rewards.lip_feet_tracking.weight = 8 #10.0
+        self.rewards.lip_feet_tracking.weight = 3 #10.0
 
         self.rewards.joint_deviation_arms.weight = -0.5             # Arms regularization
         self.rewards.joint_deviation_torso.weight = -1.0

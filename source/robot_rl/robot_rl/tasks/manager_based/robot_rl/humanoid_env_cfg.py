@@ -40,8 +40,7 @@ from . import mdp
 
 # Constants (do this better)
 # TODO: Try playing with the period for the lip model
-period = 0.8  # (0.4 s swing phase)
-wdes = 0.2 #0.25
+PERIOD = 0.6 #0.8  # (0.4 s swing phase)
 
 @configclass
 class HumanoidActionsCfg:
@@ -66,8 +65,8 @@ class HumanoidObservationsCfg(ObservationsCfg):
         joint_pos = ObsTerm(func=mdp.joint_pos_rel, noise=Unoise(n_min=-0.01, n_max=0.01),history_length=1)
 
         # Phase clock
-        sin_phase = ObsTerm(func=mdp.sin_phase, params={"period": period})
-        cos_phase = ObsTerm(func=mdp.cos_phase, params={"period": period})
+        sin_phase = ObsTerm(func=mdp.sin_phase, params={"period": PERIOD})
+        cos_phase = ObsTerm(func=mdp.cos_phase, params={"period": PERIOD})
 
     @configclass
     class CriticCfg(PolicyCfg):
@@ -83,29 +82,6 @@ class HumanoidObservationsCfg(ObservationsCfg):
 @configclass
 class HumanoidEventsCfg(EventCfg):
     """Event configuration."""
-    # Calculate new step location on a fixed interval
-    update_step_location = EventTerm(func=mdp.compute_step_location_local,
-                                    mode="interval",
-                                    interval_range_s=(period/2., period/2.),
-                                    is_global_time=False,
-                                    params={
-                                        "nom_height": 0.78,
-                                        "Tswing": period/2.,
-                                        "command_name": "base_velocity",
-                                        "wdes": wdes,
-                                        "feet_bodies": SceneEntityCfg("robot", body_names=".*_ankle_roll_link"),
-                                        })
-    # Do on reset
-    reset_update_set_location = EventTerm(func=mdp.compute_step_location_local,
-                                    mode="reset",
-                                    params={
-                                        "nom_height": 0.78,
-                                        "Tswing": period/2.,
-                                        "command_name": "base_velocity",
-                                        "wdes": wdes,
-                                        "feet_bodies": SceneEntityCfg("robot", body_names=".*_ankle_roll_link"),
-                                        })
-
     randomize_ground_contact_friction = EventTerm(
         func=mdp.randomize_rigid_body_material,
         mode="reset",
@@ -156,7 +132,7 @@ class HumanoidRewardCfg(RewardsCfg):
         params={
             "command_name": "base_velocity",
             "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*_ankle_roll_link"),
-            "threshold": period/2.,
+            "threshold": PERIOD / 2.,
         },
     )
 
@@ -270,36 +246,6 @@ class HumanoidRewardCfg(RewardsCfg):
             "asset_cfg": SceneEntityCfg("robot", body_names=".*_ankle_roll_link"),
         },
     )
-
-    lip_gait_tracking = RewTerm(
-        func=mdp.lip_gait_tracking,
-        weight=0.0,
-        params={
-            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*_ankle_roll_link"),
-            "period": period,
-            "std": 0.2,
-            "nom_height": 0.78,
-            "Tswing": period/2.,
-            "command_name": "base_velocity",
-            "wdes": wdes,
-            "asset_cfg": SceneEntityCfg("robot", body_names=".*_ankle_roll_link"),
-        }
-    )
-
-    lip_feet_tracking = RewTerm(
-        func=mdp.lip_feet_tracking,
-        weight=10.0,
-        params={
-            "period": period,
-            "std": 0.2,
-            "Tswing": period/2.,
-            "feet_bodies": SceneEntityCfg("robot", body_names=".*_ankle_roll_link"),
-        }
-    )
-
-# @configclass
-# class HumanoidVizCfg(VisualizationMarkersCfg):
-
 
 ##
 # Environment configuration
