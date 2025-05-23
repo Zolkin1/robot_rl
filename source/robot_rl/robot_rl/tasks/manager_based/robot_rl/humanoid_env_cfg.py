@@ -39,8 +39,9 @@ from . import mdp
 ##
 
 # Constants (do this better)
+# TODO: Try playing with the period for the lip model
 period = 0.8  # (0.4 s swing phase)
-
+wdes = 0.2 #0.25
 
 @configclass
 class HumanoidActionsCfg:
@@ -83,7 +84,7 @@ class HumanoidObservationsCfg(ObservationsCfg):
 class HumanoidEventsCfg(EventCfg):
     """Event configuration."""
     # Calculate new step location on a fixed interval
-    update_step_location = EventTerm(func=mdp.compute_step_location,
+    update_step_location = EventTerm(func=mdp.compute_step_location_local,
                                     mode="interval",
                                     interval_range_s=(period/2., period/2.),
                                     is_global_time=False,
@@ -91,7 +92,17 @@ class HumanoidEventsCfg(EventCfg):
                                         "nom_height": 0.78,
                                         "Tswing": period/2.,
                                         "command_name": "base_velocity",
-                                        "wdes": 0.4,
+                                        "wdes": wdes,
+                                        "feet_bodies": SceneEntityCfg("robot", body_names=".*_ankle_roll_link"),
+                                        })
+    # Do on reset
+    reset_update_set_location = EventTerm(func=mdp.compute_step_location_local,
+                                    mode="reset",
+                                    params={
+                                        "nom_height": 0.78,
+                                        "Tswing": period/2.,
+                                        "command_name": "base_velocity",
+                                        "wdes": wdes,
                                         "feet_bodies": SceneEntityCfg("robot", body_names=".*_ankle_roll_link"),
                                         })
 
@@ -260,6 +271,31 @@ class HumanoidRewardCfg(RewardsCfg):
         },
     )
 
+    lip_gait_tracking = RewTerm(
+        func=mdp.lip_gait_tracking,
+        weight=0.0,
+        params={
+            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*_ankle_roll_link"),
+            "period": period,
+            "std": 0.2,
+            "nom_height": 0.78,
+            "Tswing": period/2.,
+            "command_name": "base_velocity",
+            "wdes": wdes,
+            "asset_cfg": SceneEntityCfg("robot", body_names=".*_ankle_roll_link"),
+        }
+    )
+
+    lip_feet_tracking = RewTerm(
+        func=mdp.lip_feet_tracking,
+        weight=10.0,
+        params={
+            "period": period,
+            "std": 0.2,
+            "Tswing": period/2.,
+            "feet_bodies": SceneEntityCfg("robot", body_names=".*_ankle_roll_link"),
+        }
+    )
 
 # @configclass
 # class HumanoidVizCfg(VisualizationMarkersCfg):
@@ -283,7 +319,7 @@ class HumanoidEnvCfg(LocomotionVelocityRoughEnvCfg):
         # post init of parent
         super().__post_init__()
 
-        self.control_count = 0
+        # self.control_count = 0
 
 
     def __prepare_tensors__(self):
@@ -299,6 +335,7 @@ class HumanoidEnvCfg(LocomotionVelocityRoughEnvCfg):
         # )
 
         self.current_des_step = torch.zeros(self.scene.num_envs, 3, device=self.sim.device)
+        self.com_lin_vel_avg = torch.zeros(self.scene.num_envs, 3, device=self.sim.device)
 
 
     def define_markers(self) -> VisualizationMarkers:
@@ -306,11 +343,11 @@ class HumanoidEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.footprint_cfg = VisualizationMarkersCfg(
             prim_path="/Visuals/footprint",
             markers={
-                "foot": sim_utils.CuboidCfg(
+                "des_foot": sim_utils.CuboidCfg(
                     size=(0.2, 0.065, 0.018),
                     visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(1.0, 0.0, 0.0)),
                 ),
-                # "right": sim_utils.CuboidCfg(
+                # "stance_foot": sim_utils.CuboidCfg(
                 #     size=(0.2, 0.065, 0.018),
                 #     visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.0, 1.0, 0.0)),
                 # ),
