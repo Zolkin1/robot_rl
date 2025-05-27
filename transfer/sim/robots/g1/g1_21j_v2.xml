@@ -209,6 +209,9 @@ Position and velocity actuators added. -->
       <!-- Pelvis IMU -->
       <site name="pelvis_imu" size="0.01" pos="0.04525 0 -0.08339" rgba="1 0 0 0"/>
 
+      <!-- Height Sensor Site -->
+      <site name="height_sensor_site" size="0.01" pos="0 0 0" rgba="1 0 0 0"/>
+
       <!-- Left Leg -->
       <body name="left_hip_pitch_link" pos="0 0.064452 -0.1027">
         <inertial pos="0.002741 0.047791 -0.02606" quat="0.954862 0.293964 0.0302556 0.030122" mass="1.35" diaginertia="0.00181517 0.00153422 0.00116212"/>
