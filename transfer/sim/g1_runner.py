@@ -37,7 +37,7 @@ policy = RLPolicy(dt=dt, checkpoint_path=checkpoint_path, num_obs=num_obs, num_a
                   qvel_scale=qvel_scale, ang_vel_scale=ang_vel_scale,)
 
 # Run the simulator
-run_simulation(policy, robot_name, log=True, log_dir=os.getcwd()+"/logs/")
+run_simulation(policy, robot_name, scene="basic_scene", log=True, log_dir=os.getcwd()+"/logs/")
 
 
 

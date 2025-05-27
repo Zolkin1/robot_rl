@@ -21,5 +21,15 @@
     <worldbody>
         <light pos="1 0 3.5" dir="0 0 -1" directional="true"/>
         <geom name="floor" size="0 0 0.05" type="plane" material="groundplane" group="2"/>
+        <body>
+            <geom name="tile1" pos="0.25 0 -0.095" type="box" contype="4" conaffinity="1" size="10 10 0.095" material="box_material" rgba="0.87 0.72 0.53 0.0"/>
+        </body>
+        <geom name="stairs" size="0.6 3 0.15" type="box" material="groundplane" pos= "0.9 0 0.0" group="2"/>
+        <geom name="stairs1" size="0.6 3 0.3" type="box" material="groundplane" pos= "1.15 0 0.0" group="2"/>
+        <geom name="stairs2" size="0.6 3 0.45" type="box" material="groundplane" pos= "1.4 0 0.0" group="2"/>
+        <geom name="stairs5" size="0.6 3 0.6" type="box" material="groundplane" pos= "1.65 0 0.0" group="2"/>
+        <geom name="stairs3" size="0.6 3 0.45" type="box" material="groundplane" pos= "1.9 0 0.0" group="2"/>
+        <geom name="stairs4" size="0.6 3 0.3" type="box" material="groundplane" pos= "2.15 0 0.0" group="2"/>
+        <geom name="stairs6" size="0.6 3 0.15" type="box" material="groundplane" pos= "2.4 0 0.0" group="2"/>
     </worldbody>
 </mujoco>

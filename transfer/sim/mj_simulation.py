@@ -12,12 +12,13 @@ import pygame
 from scipy.optimize import direct
 
 
-def get_model_data(robot: str):
+def get_model_data(robot: str, scene: str):
     """Create the mj model and data from the given robot."""
     if robot != "g1_21j":
         raise ValueError("Invalid robot name! Only support g1_21j for now.")
 
-    relative_path = "robots/g1/g1_21j_basic_scene.xml"
+    file_name = robot + "_" + scene + ".xml"
+    relative_path = "robots/g1/" + file_name
     path = os.path.join(os.getcwd(), relative_path)
     print(f"Trying to load the xml at {path}")
     mj_model = mujoco.MjModel.from_xml_path(path)
@@ -57,11 +58,11 @@ def log_row_to_csv(filename, data):
     except Exception as e:
         print(f"Error appending row to {filename}: {e}")
 
-def run_simulation(policy, robot: str, log: bool, log_dir: str):
+def run_simulation(policy, robot: str, scene: str, log: bool, log_dir: str):
     """Run the simulation."""
 
     # Setup mj model and data
-    mj_model, mj_data = get_model_data(robot)
+    mj_model, mj_data = get_model_data(robot, scene)
     scene = mujoco.MjvScene(mj_model, maxgeom=1000)
     cam = mujoco.MjvCamera()
     opt = mujoco.MjvOption()
@@ -121,13 +122,14 @@ def run_simulation(policy, robot: str, log: bool, log_dir: str):
         with open(os.path.join(new_folder_path, "sim_config.yaml"), 'w') as f:
             yaml.dump(sim_config, f)
 
+    x_y_num_rays = (5, 5)
 
     with mujoco.viewer.launch_passive(mj_model, mj_data) as viewer:
 
         des_vel = np.zeros(3)
 
         # Setup geoms
-        ray_pos = ray_cast_sensor(mj_model, mj_data, "height_sensor_site", (1, 1), (5, 5), 0.0)
+        ray_pos = ray_cast_sensor(mj_model, mj_data, "height_sensor_site", (1, 1), x_y_num_rays, 0.0)
         # Add custom debug spheres
         ii = 0
         for pos in ray_pos.reshape(-1, 3):
@@ -186,7 +188,7 @@ def run_simulation(policy, robot: str, log: bool, log_dir: str):
 
             # Step the simulator
             for i in range(sim_steps_per_policy_update):
-                ray_pos = ray_cast_sensor(mj_model, mj_data, "height_sensor_site", (1, 1), (5,5), 0.0)
+                ray_pos = ray_cast_sensor(mj_model, mj_data, "height_sensor_site", (1, 1), x_y_num_rays, 0.0)
                 ii = 0
                 for pos in ray_pos.reshape(-1, 3):
                     viewer.user_scn.geoms[ii].pos = pos
@@ -237,8 +239,8 @@ def ray_cast_sensor(model, data, site_name, size: Tuple[float, float], x_y_num_r
 
     # Ray spacing
     spacing = np.zeros(3)
-    spacing[0] = size[0]/x_y_num_rays[0]
-    spacing[1] = size[1]/x_y_num_rays[1]
+    spacing[0] = size[0]/(x_y_num_rays[0] - 1)
+    spacing[1] = size[1]/(x_y_num_rays[1] - 1)
 
     # Loop through the rays
     for xray in range(x_y_num_rays[0]):
