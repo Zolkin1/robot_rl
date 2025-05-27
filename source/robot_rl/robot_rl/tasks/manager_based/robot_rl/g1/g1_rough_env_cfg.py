@@ -65,9 +65,9 @@ class G1RoughEnvCfg(HumanoidEnvCfg):
         ##
         # Commands
         ##
-        self.commands.base_velocity.ranges.lin_vel_x = (0,1) #(-1.0, 1.0) # 0 - 1
-        self.commands.base_velocity.ranges.lin_vel_y = (0,0) #(-1.0, 1.0)
-        self.commands.base_velocity.ranges.ang_vel_z = (0,0) #(-1.0, 1.0) #(-1.0, 1.0)
+        self.commands.base_velocity.ranges.lin_vel_x = (-1.5, 1.5) # 0 - 1
+        self.commands.base_velocity.ranges.lin_vel_y = (-0.4,0.4) #(-1.0, 1.0)
+        self.commands.base_velocity.ranges.ang_vel_z = (-1.0, 1.0)
 
         ##
         # Terminations

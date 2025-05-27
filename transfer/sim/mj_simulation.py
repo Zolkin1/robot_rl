@@ -129,7 +129,7 @@ def run_simulation(policy, robot: str, scene: str, log: bool, log_dir: str):
         des_vel = np.zeros(3)
 
         # Setup geoms
-        ray_pos = ray_cast_sensor(mj_model, mj_data, "height_sensor_site", (1, 1), x_y_num_rays, 0.0)
+        ray_pos = ray_cast_sensor(mj_model, mj_data, "height_sensor_site", (1, 1), x_y_num_rays)
         # Add custom debug spheres
         ii = 0
         for pos in ray_pos.reshape(-1, 3):
@@ -188,7 +188,7 @@ def run_simulation(policy, robot: str, scene: str, log: bool, log_dir: str):
 
             # Step the simulator
             for i in range(sim_steps_per_policy_update):
-                ray_pos = ray_cast_sensor(mj_model, mj_data, "height_sensor_site", (1, 1), x_y_num_rays, 0.0)
+                ray_pos = ray_cast_sensor(mj_model, mj_data, "height_sensor_site", (1, 1), x_y_num_rays)
                 ii = 0
                 for pos in ray_pos.reshape(-1, 3):
                     viewer.user_scn.geoms[ii].pos = pos
@@ -213,8 +213,10 @@ def run_simulation(policy, robot: str, scene: str, log: bool, log_dir: str):
                 time.sleep(1*sim_loop_rate - elapsed)
 
 
-def ray_cast_sensor(model, data, site_name, size: Tuple[float, float], x_y_num_rays: Tuple[int, int], sen_offset: float = 0) -> np.array:
-    """Using a grid pattern, create a height map using ray casting."""
+def ray_cast_sensor(model, data, site_name, size: Tuple[float, float], x_y_num_rays: Tuple[int, int]) -> np.array:
+    """Using a grid pattern, create a height map using ray casting.
+        Return the global 3d position of the ray collision.
+    """
 
     ray_pos_shape = x_y_num_rays
     ray_pos_shape = ray_pos_shape + (3,)
@@ -255,8 +257,7 @@ def ray_cast_sensor(model, data, site_name, size: Tuple[float, float], x_y_num_r
                           ray_origin.astype(np.float64), direction.astype(np.float64),
                           geom_group, 1, -1, geom_id)
 
-            ray_pos[xray, yray, :] = site_pos + ray_pos[xray, yray, :] + offset
-
-    ray_pos[:, :, 2] = ray_pos[:, :, 2] - sen_offset
+            ray_pos[xray, yray, :] = ray_origin + ray_pos[xray, yray, :]
+    # print(f"ray_pos: {ray_pos}, shape: {ray_pos.shape}")
 
     return ray_pos
