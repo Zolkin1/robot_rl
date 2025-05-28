@@ -58,7 +58,7 @@ def find_most_recent_timestamped_folder(base_path):
 
 def extract_data(filepath, config):
     data_structure = config.get('data_structure')
-
+    print(f"data_structure: {data_structure}")
     extracted_data_lists = {item['name']: [] for item in data_structure if 'name' in item}
 
     with open(filepath, "r") as f:
@@ -143,6 +143,29 @@ def plot_base(data):
                 axes[i, j].set_xlabel("time")
                 axes[i, j].set_ylabel(f"qvel {i} (m/s)")
 
+def plot_ankles(data):
+    fig, axes = plt.subplots(nrows=2, ncols=3, figsize=(10, 10))
+
+    axes[0, 0].plot(data["time"], data["left_ankle_pos"][:, 0])
+    axes[0, 1].plot(data["time"], data["left_ankle_pos"][:, 1])
+    axes[0, 2].plot(data["time"], data["left_ankle_pos"][:, 2])
+    axes[0, 0].set_xlabel("time")
+    axes[0, 0].set_ylabel(f"left_ankle_pos x (m)")
+    axes[0, 1].set_xlabel("time")
+    axes[0, 1].set_ylabel(f"left_ankle_pos y (m)")
+    axes[0, 2].set_xlabel("time")
+    axes[0, 2].set_ylabel(f"left_ankle_pos z (m)")
+
+    axes[1, 0].plot(data["time"], data["right_ankle_pos"][:, 0])
+    axes[1, 1].plot(data["time"], data["right_ankle_pos"][:, 1])
+    axes[1, 2].plot(data["time"], data["right_ankle_pos"][:, 2])
+    axes[1, 0].set_xlabel("time")
+    axes[1, 0].set_ylabel(f"right_ankle_pos x (m)")
+    axes[1, 1].set_xlabel("time")
+    axes[1, 1].set_ylabel(f"right_ankle_pos y (m)")
+    axes[1, 2].set_xlabel("time")
+    axes[1, 2].set_ylabel(f"right_ankle_pos z (m)")
+
 if __name__ == "__main__":
     # Load in the data from rerun
     log_dir = os.getcwd() + "/logs"
@@ -170,11 +193,18 @@ if __name__ == "__main__":
 
     print(f"time shape: {data['time'].shape}")
     print(f"qpos shape: {data['qpos'].shape}")
+    print(f"qvel shape: {data['qvel'].shape}")
+    print(f"torque shape: {data['torque'].shape}")
+    print(f"action shape: {data['action'].shape}")
+    print(f"left_ankle_pos shape: {data['left_ankle_pos'].shape}")
+    print(f"right_ankle_pos shape: {data['right_ankle_pos'].shape}")
 
     # Make a plot
-    plot_joints_and_actions(data)
-    plot_torques(data)
-    plot_vels(data)
-    plot_base(data)
+    # plot_joints_and_actions(data)
+    # plot_torques(data)
+    # plot_vels(data)
+    # plot_base(data)
+    import pdb; pdb.set_trace()
+    plot_ankles(data)
 
     plt.show()

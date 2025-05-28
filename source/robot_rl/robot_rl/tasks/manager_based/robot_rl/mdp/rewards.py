@@ -302,15 +302,15 @@ def compute_step_location_local(env: ManagerBasedRLEnv, env_ids: torch.Tensor,
 
     if visualize:
         sw_st_feet = torch.cat((p, foot_pos[:, int(0.5 - 0.5 * torch.sign(phi_c)), :]), dim=0)
-        env.footprint_visualizer.visualize(
-            # TODO: Visualize both the current stance foot and the desired foot
-            # translations=foot_pos[:, int(0.5 - 0.5*torch.sign(phi_c)), :], #p,
-            # translations=foot_pos[:, (env.cfg.control_count % 2), :],
-            translations=sw_st_feet,
-            orientations=yaw_quat(asset.data.root_quat_w).repeat_interleave(2, dim=0),
-            # repeat 0,1 for num_env
-            # marker_indices=torch.tensor([0,1], device=env.device).repeat(env.num_envs),
-        )
+        # env.footprint_visualizer.visualize(
+        #     # TODO: Visualize both the current stance foot and the desired foot
+        #     # translations=foot_pos[:, int(0.5 - 0.5*torch.sign(phi_c)), :], #p,
+        #     # translations=foot_pos[:, (env.cfg.control_count % 2), :],
+        #     translations=sw_st_feet,
+        #     orientations=yaw_quat(asset.data.root_quat_w).repeat_interleave(2, dim=0),
+        #     # repeat 0,1 for num_env
+        #     # marker_indices=torch.tensor([0,1], device=env.device).repeat(env.num_envs),
+        # )
 
     env.cfg.current_des_step[env_ids, :] = p[env_ids,:]  # This only works if I compute the new location once per step/on a timer
 

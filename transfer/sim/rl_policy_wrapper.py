@@ -68,7 +68,8 @@ class RLPolicy():
         obs[3:6] = projected_gravity                                        # Projected gravity
         obs[6] = des_vel[0]*self.cmd_scale[0]                                   # Command velocity
         obs[7] = des_vel[1]*self.cmd_scale[1]                                   # Command velocity
-        obs[8] = des_vel[2]*self.cmd_scale[2]                                   # Command velocity
+        obs[8] = des_vel[2]*self.cmd_scale[2]     
+                                     # Command velocity
 
         nj = len(qjoints)
         if convention == "mj":

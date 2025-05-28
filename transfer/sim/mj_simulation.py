@@ -117,6 +117,8 @@ def run_simulation(policy, robot: str, scene: str, log: bool, log_dir: str):
                 {'name': 'obs', 'length': policy.get_num_obs()},
                 {'name': 'action', 'length': policy.get_num_actions()},
                 {'name': 'torque', 'length': mj_data.qpos.shape[0] - 7},
+                {'name': 'left_ankle_pos', 'length': 3},
+                {'name': 'right_ankle_pos', 'length': 3},
             ]
         }
         with open(os.path.join(new_folder_path, "sim_config.yaml"), 'w') as f:
@@ -174,7 +176,6 @@ def run_simulation(policy, robot: str, scene: str, log: bool, log_dir: str):
                 des_vel[1] = vy
                 des_vel[2] = vyaw   # TODO: Why does this not seem to work?
 
-
                 # Extract relevant info
             sim_time = mj_data.time
             qpos = mj_data.qpos
@@ -183,6 +184,7 @@ def run_simulation(policy, robot: str, scene: str, log: bool, log_dir: str):
             # Compute the control action
             pg = get_projected_gravity(qpos[3:7])
             obs = policy.create_obs(qpos[7:], qvel[3:6], qvel[6:], sim_time, pg, des_vel)
+    
             u = policy.get_action(obs)
             mj_data.ctrl[:nu] = u
 
@@ -194,6 +196,10 @@ def run_simulation(policy, robot: str, scene: str, log: bool, log_dir: str):
                     viewer.user_scn.geoms[ii].pos = pos
                     ii += 1
 
+                left_ankle_pos = mj_data.sensor("left_ankle_pos").data
+                right_ankle_pos = mj_data.sensor("right_ankle_pos").data
+
+
                 # Update scene
                 mujoco.mjv_updateScene(mj_model, mj_data, opt, None, cam, mujoco.mjtCatBit.mjCAT_ALL, scene)
 
@@ -203,7 +209,7 @@ def run_simulation(policy, robot: str, scene: str, log: bool, log_dir: str):
                     for j in range(mj_model.nu):
                         torques.append(mj_data.actuator_force[j])
 
-                    log_row_to_csv(log_file, [mj_data.time] + mj_data.qpos.tolist() + mj_data.qvel.tolist() + obs[0, :].numpy().tolist() + u.tolist() + torques)
+                    log_row_to_csv(log_file, [mj_data.time] + mj_data.qpos.tolist() + mj_data.qvel.tolist() + obs[0, :].numpy().tolist() + u.tolist() + torques + left_ankle_pos.tolist() + right_ankle_pos.tolist())
                 if i % viewer_rate == 0:
                     viewer.sync()
 

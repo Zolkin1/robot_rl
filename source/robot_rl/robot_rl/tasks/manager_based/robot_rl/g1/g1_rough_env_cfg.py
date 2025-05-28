@@ -65,9 +65,9 @@ class G1RoughEnvCfg(HumanoidEnvCfg):
         ##
         # Commands
         ##
-        self.commands.base_velocity.ranges.lin_vel_x = (0,1) #(-1.0, 1.0) # 0 - 1
-        self.commands.base_velocity.ranges.lin_vel_y = (0,0) #(-1.0, 1.0)
-        self.commands.base_velocity.ranges.ang_vel_z = (0,0) #(-1.0, 1.0) #(-1.0, 1.0)
+        self.commands.base_velocity.ranges.lin_vel_x = (-1.0,1.0) #(-1.0, 1.0) # 0 - 1
+        self.commands.base_velocity.ranges.lin_vel_y = (-0.3,0.3) #(-1.0, 1.0)
+        self.commands.base_velocity.ranges.ang_vel_z = (-1,1) #(-1.0, 1.0) #(-1.0, 1.0)
 
         ##
         # Terminations
@@ -80,7 +80,7 @@ class G1RoughEnvCfg(HumanoidEnvCfg):
         ##
         self.rewards.track_lin_vel_xy_exp.weight = 1.0
         self.rewards.track_ang_vel_z_exp.weight = 0.5
-        self.rewards.lin_vel_z_l2.weight =  -2.0 # TODO reduce this maybe?
+        self.rewards.lin_vel_z_l2.weight = -2.0 # TODO reduce this maybe?
         self.rewards.ang_vel_xy_l2.weight = -0.05
         self.rewards.dof_torques_l2.weight = -1.0e-5
         self.rewards.dof_acc_l2.weight = -2.5e-7

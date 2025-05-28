@@ -28,3 +28,7 @@ def is_ground_phase(env: ManagerBasedRLEnv, period: float) -> torch.Tensor:
     cp = cos_phase(env, period)
 
     return torch.tensor([(sp < 0.0), (cp < 0.0)])
+
+def step_location(env: ManagerBasedRLEnv) -> torch.Tensor:
+    foot_pos = env.cfg.current_des_step
+    return foot_pos
