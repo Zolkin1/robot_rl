@@ -8,6 +8,9 @@
 """Launch Isaac Sim Simulator first."""
 
 import argparse
+import pickle
+import time
+import os
 
 from isaaclab.app import AppLauncher
 
@@ -17,7 +20,7 @@ import cli_args  # isort: skip
 # add argparse arguments
 parser = argparse.ArgumentParser(description="Train an RL agent with RSL-RL.")
 parser.add_argument("--video", action="store_true", default=False, help="Record videos during training.")
-parser.add_argument("--video_length", type=int, default=200, help="Length of the recorded video (in steps).")
+parser.add_argument("--video_length", type=int, default=50, help="Length of the recorded video (in steps).")
 parser.add_argument(
     "--disable_fabric", action="store_true", default=False, help="Disable fabric and use USD I/O operations."
 )
@@ -45,8 +48,6 @@ simulation_app = app_launcher.app
 """Rest everything follows."""
 
 import gymnasium as gym
-import os
-import time
 import torch
 
 from rsl_rl.runners import OnPolicyRunner
@@ -141,6 +142,9 @@ def main():
     # reset environment
     obs, _ = env.get_observations()
     timestep = 0
+    y_out_list = []
+    dy_out_list = []
+    base_velocity_list = []
     # simulate environment
     while simulation_app.is_running():
         start_time = time.time()
@@ -150,11 +154,19 @@ def main():
             actions = policy(obs)
             # env stepping
             obs, _, _, _ = env.step(actions)
-        if args_cli.video:
+
+            y_out, dy_out, base_velocity = extract_reference_trajectory(env)
+            #store y_out and dy_out in a list
+            y_out_list.append(y_out)
+            dy_out_list.append(dy_out)
+            base_velocity_list.append(base_velocity)
+        # if args_cli.video:
             timestep += 1
             # Exit the play loop after recording one video
             if timestep == args_cli.video_length:
                 break
+
+
 
         # time delay for real-time evaluation
         sleep_time = dt - (time.time() - start_time)
@@ -163,7 +175,28 @@ def main():
 
     # close the simulator
     env.close()
+    #save y_out_list and dy_out_list to a file
+    with open("y_out_list.pkl", "wb") as f:
+        pickle.dump(y_out_list, f)
+    with open("dy_out_list.pkl", "wb") as f:
+        pickle.dump(dy_out_list, f)
+    with open("base_velocity_list.pkl", "wb") as f:
+        pickle.dump(base_velocity_list, f)
 
+def extract_reference_trajectory(env):
+    # Get the underlying environment by unwrapping
+    unwrapped_env = env.unwrapped
+    # Get the HLIP reference term from the command manager
+    hlip_Ref = unwrapped_env.command_manager.get_term("hlip_ref")
+    y_out = hlip_Ref.y_out
+    dy_out = hlip_Ref.dy_out
+    cur_swing_time = hlip_Ref.cur_swing_time
+
+
+    #TODO: get y_act, and dy_act from the env
+    #also extract base velocity from the command manager
+    base_velocity = unwrapped_env.command_manager.get_command("base_velocity")
+    return y_out, dy_out, base_velocity
 
 if __name__ == "__main__":
     # run the main function
