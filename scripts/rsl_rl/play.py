@@ -145,6 +145,9 @@ def main():
     y_out_list = []
     dy_out_list = []
     base_velocity_list = []
+    cur_swing_time_list = []
+    y_act_list = []
+    dy_act_list = []
     # simulate environment
     while simulation_app.is_running():
         start_time = time.time()
@@ -155,11 +158,14 @@ def main():
             # env stepping
             obs, _, _, _ = env.step(actions)
 
-            y_out, dy_out, base_velocity = extract_reference_trajectory(env)
+            y_out, dy_out, base_velocity,cur_swing_time, y_act, dy_act = extract_reference_trajectory(env)
             #store y_out and dy_out in a list
             y_out_list.append(y_out)
             dy_out_list.append(dy_out)
             base_velocity_list.append(base_velocity)
+            cur_swing_time_list.append(cur_swing_time)
+            y_act_list.append(y_act)
+            dy_act_list.append(dy_act)
         # if args_cli.video:
             timestep += 1
             # Exit the play loop after recording one video
@@ -182,6 +188,12 @@ def main():
         pickle.dump(dy_out_list, f)
     with open("base_velocity_list.pkl", "wb") as f:
         pickle.dump(base_velocity_list, f)
+    with open("cur_swing_time_list.pkl", "wb") as f:
+        pickle.dump(cur_swing_time_list, f)
+    with open("y_act_list.pkl", "wb") as f:
+        pickle.dump(y_act_list, f)
+    with open("dy_act_list.pkl", "wb") as f:
+        pickle.dump(dy_act_list, f)
 
 def extract_reference_trajectory(env):
     # Get the underlying environment by unwrapping
@@ -192,11 +204,14 @@ def extract_reference_trajectory(env):
     dy_out = hlip_Ref.dy_out
     cur_swing_time = hlip_Ref.cur_swing_time
 
+    y_act = hlip_Ref.y_act
+    dy_act = hlip_Ref.dy_act    
+
 
     #TODO: get y_act, and dy_act from the env
     #also extract base velocity from the command manager
     base_velocity = unwrapped_env.command_manager.get_command("base_velocity")
-    return y_out, dy_out, base_velocity
+    return y_out, dy_out, base_velocity,cur_swing_time, y_act, dy_act
 
 if __name__ == "__main__":
     # run the main function

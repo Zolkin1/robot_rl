@@ -1,5 +1,8 @@
 import math
 import torch
+from torch import Tensor
+from typing import Tuple
+
 # Combination formula for Bezier coefficients
 def _ncr(n: int, r: int) -> int:
     return math.comb(n, r)
@@ -106,109 +109,146 @@ def calculate_cur_swing_foot_pos(
 def coth(x: torch.Tensor) -> torch.Tensor:
     return 1.0 / torch.tanh(x)
 
-def precompute_hlip_dynamics(T: float, T_ds: float, z0: float, device: torch.device):
-    lam = math.sqrt(9.81 / z0)
-    Ts = T - T_ds
-    lamTs = lam * Ts
-    lamTs_tensor = torch.tensor(lamTs, dtype=torch.float32, device=device)
-    sigma1 = lam * coth(0.5 * lamTs_tensor)
-    sigma2 = lam * torch.tanh(0.5 * lamTs_tensor)
-
-    cosh_lTs = math.cosh(lamTs)
-    sinh_lTs = math.sinh(lamTs)
-
-    A = torch.tensor([[cosh_lTs, sinh_lTs/lam], [lam*sinh_lTs, cosh_lTs]], dtype=torch.float32, device=device)
-    B = torch.tensor([[1.0-cosh_lTs], [-lam*sinh_lTs]], dtype=torch.float32, device=device)
-    return A, B, sigma1, sigma2
 
 
-def compute_hlip_orbit_from_dynamics(
-    cmd_vel: torch.Tensor,
-    T: torch.Tensor,
-    A: torch.Tensor,
-    B: torch.Tensor,
-    y_nom: float,
-    stance_idx: torch.Tensor
-):
-    """
-    Compute batched HLIP desired CoM orbit and foot placement selecting foot based on stance_idx.
 
-    Args:
-        cmd_vel: Tensor (N,2) of desired [v_x, v_y].
-        T: Tensor (N,) of gait periods.
-        A: Tensor (2,2) precomputed dynamics matrix.
-        B: Tensor (2,1) precomputed input matrix.
-        y_nom: float, nominal lateral foot offset.
-        stance_idx: Tensor (N,) with 0 for left stance, 1 for right stance.
+class HLIP(torch.nn.Module):
+    """Hybrid Linear Inverted Pendulum implementation using PyTorch."""
 
-    Returns:
-        Dict with:
-          com_pos_des: Tensor (N,2)
-          com_vel_des: Tensor (N,2)
-          foot_placement: Tensor (N,2)
-    """
-    N = cmd_vel.shape[0]
-    device = cmd_vel.device
+    def __init__(self, grav: float, z0: float, T_ds: float, T: float, y_nom: float):
+        super().__init__()
+        # Store physical constants
+        self.grav = grav
+        self.z0 = z0
+        self.y_nom = y_nom
+        self.lambda_ = torch.sqrt(torch.tensor(grav / z0))
+        
+        # Get device from grav tensor
+        device = torch.tensor(grav).device
+        
+        # Initialize and store constant matrices on the correct device
+        self.A_ss = torch.tensor([[0.0, 1.0], [grav / z0, 0.0]], device=device)
+        self.A_ds = torch.tensor([[0.0, 1.0], [0.0, 0.0]], device=device)
+        self.B_usw = torch.tensor([-1.0, 0.0], device=device)
 
-    def Bu(u: torch.Tensor):
-        return B.unsqueeze(0) * u.view(N, 1, 1)
+        self.T_ds = T_ds
+        self.T = T
+        self._compute_s2s_matrices()
 
-    # Forward orbit
-    u_x = cmd_vel[:, 0] * T
-    X_des = torch.linalg.solve(
-        torch.eye(2, device=device).expand(N, 2, 2) - A.unsqueeze(0),
-        Bu(u_x)
-    )  # (N,2,1)
+    def _compute_s2s_matrices(self) -> None:
+        """Compute and store step-to-step A and B matrices."""
+        # Matrices are already on the correct device from __init__
+        exp_ss = torch.matrix_exp(self.A_ss * (self.T - self.T_ds))
+        exp_ds = torch.matrix_exp(self.A_ds * self.T_ds)
+        self.A_s2s = exp_ss @ exp_ds
+        self.B_s2s = exp_ss @ self.B_usw
 
-    # Lateral two-step orbit
-    u_left = cmd_vel[:, 1] * T - y_nom
-    u_right = cmd_vel[:, 1] * T + y_nom
-    A2 = A @ A
+    def _remap_for_init_stance_state(
+        self, X_des_p1: Tensor, Y_des_p2: Tensor, Ux: float, Uy: Tensor
+    ) -> Tuple[Tensor, Tensor]:
+        """Remap the desired state for the initial stance state."""
+        # Create tensors on the correct device
+        Y_left = torch.cat([
+            (Y_des_p2[:, 1, 0] - Uy[:, 1]).unsqueeze(-1),
+            Y_des_p2[:, 1, 1].unsqueeze(-1)
+        ], dim=-1)  # [batch, 2]
+        
+        Y_right = torch.cat([
+            (Y_des_p2[:, 0, 0] - Uy[:, 0]).unsqueeze(-1),
+            Y_des_p2[:, 0, 1].unsqueeze(-1)
+        ], dim=-1)  # [batch, 2]
+        
+        X0 = torch.cat([
+            (X_des_p1[:, 0] - Ux).unsqueeze(-1),
+            X_des_p1[:, 1].unsqueeze(-1)
+        ], dim=-1)  # [batch, 2]
+        
+        return X0, torch.cat([Y_left.unsqueeze(1), Y_right.unsqueeze(1)], dim=1)  # [batch, 2, 2]
 
-    Y_left = torch.linalg.solve(
-        torch.eye(2, device=device).expand(N, 2, 2) - A2.unsqueeze(0),
-        A.unsqueeze(0) @ Bu(u_left) + Bu(u_right)
-    )  # (N,2,1)
-    Y_right = torch.linalg.solve(
-        torch.eye(2, device=device).expand(N, 2, 2) - A2.unsqueeze(0),
-        A.unsqueeze(0) @ Bu(u_right) + Bu(u_left)
-    )  # (N,2,1)
+    def _compute_desire_com_trajectory(
+        self, cur_time: float, Xdesire: Tensor
+    ) -> Tuple[Tensor, Tensor]:
+        """Compute desired COM trajectory relative to stance foot.
+        Args:
+            cur_time: float, current time
+            Xdesire: Tensor of shape [batch, 2] containing initial position and velocity
+        Returns:
+            Tuple of (position, velocity) tensors, each of shape [batch]
+        """
+        x0, v0 = Xdesire[:, 0], Xdesire[:, 1]  # [batch]
+        lam = self.lambda_
+        pos = x0 * torch.cosh(lam * cur_time) + (v0 / lam) * torch.sinh(lam * cur_time)  # [batch]
+        vel = x0 * lam * torch.sinh(lam * cur_time) + v0 * torch.cosh(lam * cur_time)  # [batch]
+        return pos, vel
 
-    # Select foot target based on stance index
+    def _solve_deadbeat_gain(self, A: Tensor, B: Tensor) -> Tensor:
+        """Solve for deadbeat gains."""
+        A_tmp = torch.stack([
+            torch.tensor([-B[0], -B[1]]),
+            torch.tensor([
+                A[1, 1] * B[0] - A[0, 1] * B[1],
+                A[0, 0] * B[1] - A[1, 0] * B[0]
+            ])
+        ])
+        B_tmp = torch.tensor([A[0, 0] + A[1, 1], A[0, 1] * A[1, 0] - A[0, 0] * A[1, 1]])
+        return torch.linalg.solve(A_tmp, B_tmp)
 
-    if stance_idx == 0:
-        Y_des = Y_left
-        u_y = u_left
-    else:
-        Y_des = Y_right
-        u_y = u_right
+    def compute_desired_orbit(
+        self,
+        vel: Tensor,
+        T: float,
+    ) -> Tuple[Tensor, Tensor, Tensor, Tensor]:
+        """Compute desired orbit parameters."""
+        # Get device from input tensor
+        device = vel.device
+        
+        # Compute matrices if not already done
+        if self.A_s2s is None:
+            self._compute_s2s_matrices()
+            
+        # Ensure matrices are on the same device as input
+        if self.A_s2s.device != device:
+            self.A_s2s = self.A_s2s.to(device)
+            self.B_s2s = self.B_s2s.to(device)
 
-    return {
-        "com_x": X_des,
-        "com_y": Y_des,
-        "foot_placement": torch.stack([u_x, u_y], dim=-1),
-    }
+        # P1 orbit - handle batch dimension
+        U_des_p1 = vel[:, 0] * T  # [batch]
+        # Expand matrices for batch operations
+        eye_expanded = torch.eye(2, device=device).unsqueeze(0).expand(vel.shape[0], -1, -1)  # [batch, 2, 2]
+        
+        # Solve for each batch element
+        X_des_p1 = torch.linalg.solve(eye_expanded- self.A_s2s, self.B_s2s * U_des_p1.unsqueeze(-1))  # [batch, 2, 1]
+        X_des_p1 = X_des_p1.squeeze(-1)  # [batch, 2]
 
+        # P2 orbit for left and right
+        U_left = vel[:, 1] * T - self.y_nom  # [batch]
+        U_right = vel[:, 1] * T + self.y_nom  # [batch]
+        
+        # Create batch-wise matrices for Y calculations
+        A_squared = self.A_s2s @ self.A_s2s  # [batch, 2, 2]
+        B_term = self.A_s2s @ self.B_s2s  # [batch, 2]
+        
+        # Solve for Y_left and Y_right with batch dimension
+        Y_left = torch.linalg.solve(
+            eye_expanded - A_squared,
+            B_term * U_left.unsqueeze(-1) + self.B_s2s * U_right.unsqueeze(-1)
+        ).squeeze(-1)  # [batch, 2]
+        
+        Y_right = torch.linalg.solve(
+            eye_expanded - A_squared,
+            B_term * U_right.unsqueeze(-1) + self.B_s2s * U_left.unsqueeze(-1)
+        ).squeeze(-1)  # [batch, 2]
 
-def compute_desire_com_trajectory(
-    cur_time: torch.Tensor,
-    Xdesire: torch.Tensor,
-    lam: float
-) -> torch.Tensor:
-    """
-    Compute desired COM trajectory relative to stance foot using closed-form HLIP solution.
+        return X_des_p1, U_des_p1, torch.stack([Y_left, Y_right], dim=1), torch.stack([U_left, U_right], dim=1)
 
-    Args:
-        cur_time: Tensor or float with current time within step.
-        Xdesire: Tensor (...,2) initial [pos, vel].
-        lam: Natural frequency sqrt(g/z0).
+    def compute_orbit(
+        self, T: float, cmd: Tensor
+    ) ->  None:
+        """Compute desired orbit."""
+        # Get desired orbit params
+        Xdes, Ux, Ydes, Uy = self.compute_desired_orbit(cmd[:,:2], T)
+        # Remap for initial stance
+        self.x_init, self.y_init = self._remap_for_init_stance_state(Xdes, Ydes, Ux, Uy)
 
-    Returns:
-        Tensor (...,2) of desired [pos, vel] at cur_time.
-    """
-    x0 = Xdesire[..., 0]
-    v0 = Xdesire[..., 1]
-
-    pos = x0 * torch.cosh(lam * cur_time) + (v0 / lam) * torch.sinh(lam * cur_time)
-    vel = x0 * lam * torch.sinh(lam * cur_time) + v0 * torch.cosh(lam * cur_time)
-    return pos, vel
+        return Xdes, Ux, Ydes, Uy
+   
