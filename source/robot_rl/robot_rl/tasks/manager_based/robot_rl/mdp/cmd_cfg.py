@@ -3,6 +3,10 @@ from isaaclab.managers import CommandTermCfg
 from isaaclab.utils import configclass
 from isaaclab.markers import VisualizationMarkers, VisualizationMarkersCfg
 import isaaclab.sim as sim_utils
+
+Q_weights = [1.0] * 24  # Replace N_STATES with the correct number, e.g., 24
+R_weights = [0.1] * 12  # Replace N_INPUTS with the correct number, e.g., 12
+
 @configclass
 class HLIPCommandCfg(CommandTermCfg):
     """
@@ -59,3 +63,6 @@ class HLIPCommandCfg(CommandTermCfg):
         }
     )
     current_pose_visualizer_cfg.markers["current"].scale = (0.1, 0.1, 0.1)
+
+    Q_weights = Q_weights
+    R_weights = R_weights

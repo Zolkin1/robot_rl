@@ -1,6 +1,7 @@
 import torch
 import math
 from isaaclab.utils import configclass
+import numpy as np
 
 from isaaclab.managers import CommandTermCfg,CommandTerm
 from isaaclab.markers import VisualizationMarkers, VisualizationMarkersCfg
@@ -8,6 +9,7 @@ import isaaclab.sim as sim_utils
 from isaaclab.utils.math import euler_xyz_from_quat, wrap_to_pi, quat_rotate_inverse, yaw_quat, quat_rotate, quat_inv
 
 from .ref_gen import bezier_deg, calculate_cur_swing_foot_pos, HLIP
+from .clf import CLF
 # from isaaclab.utils.transforms import combine_frame_transforms, quat_from_euler_xyz
 
 from typing import TYPE_CHECKING
@@ -57,12 +59,28 @@ class HLIPCommandTerm(CommandTerm):
         grav = torch.abs(torch.tensor(self.env.cfg.sim.gravity[2], device=self.device))
         self.hlip_controller = HLIP(grav, self.z0, self.T_ds, self.T, self.y_nom)
 
+        self.mass = sum(self.robot.data.default_mass.T)[0]
+        A_lip = torch.tensor([[0.0, 1.0], [grav / self.z0, 0.0]], device=self.device)
+        B_lip = torch.tensor([[0.0], [1.0 / (self.mass * self.z0)]], device=self.device)
+
+        self.clf = CLF(
+            A_lip, B_lip, 12, self.env.cfg.sim.dt,
+            Q_weights=np.array(cfg.Q_weights),
+            R_weights=np.array(cfg.R_weights),
+            device=self.device
+        )
+        
+        
+
 
     @property
     def command(self):
         return self.foot_target
+    
 
     def _resample_command(self, env_ids):
+        self._update_command()
+        self.v = self.clf.compute_v(self.y_act, self.y_nom,self.dy_act,self.dy_out)
         # Do nothing here
         # device = self.env.command_manager.get_command("base_velocity").device
         
@@ -106,15 +124,10 @@ class HLIPCommandTerm(CommandTerm):
             T=T,cmd=base_velocity)
         
         #select init and Xdes, Ux, Ydes, Uy
-        com_y = Ydes[:,self.stance_idx]
         com_y_init = self.hlip_controller.y_init[:,self.stance_idx]
         com_x_init = self.hlip_controller.x_init
         Uy_des = Uy[:,self.stance_idx]
-        # Squeeze the last dimension to get (N,2)
-        com_x = Xdes.squeeze(-1)
     
-
-
         com_pos_des_x, com_vel_des_x = self.hlip_controller._compute_desire_com_trajectory(
             cur_time=self.cur_swing_time,
             Xdesire=com_x_init,
@@ -123,10 +136,7 @@ class HLIPCommandTerm(CommandTerm):
             cur_time=self.cur_swing_time,
             Xdesire=com_y_init,
         )
-
-
         # Concatenate x and y components
-        
         com_pos_des = torch.stack([com_pos_des_x, com_pos_des_y,self.com_z], dim=-1)  # Shape: (N,2)
         com_vel_des = torch.stack([com_vel_des_x, com_vel_des_y,torch.zeros((N), device=self.device)], dim=-1)  # Shape: (N,2)
 
@@ -134,10 +144,10 @@ class HLIPCommandTerm(CommandTerm):
 
         pelvis_ori = torch.zeros((N,3), device=self.device)
         #TODO enable heading control
-        # heading_target = self.env.command_manager.get_term("base_velocity").heading_target
-        # pelvis_ori[:,2] = heading_target
-        current_heading = self.robot.data.heading_w
-        pelvis_ori[:,2] = current_heading + base_velocity[:,2] * self.env.cfg.sim.dt
+        heading_target = self.env.command_manager.get_term("base_velocity").heading_target
+        pelvis_ori[:,2] = heading_target
+        # current_heading = self.robot.data.heading_w
+        # pelvis_ori[:,2] = current_heading + base_velocity[:,2] * self.env.cfg.sim.dt
 
         foot_ori = torch.zeros((N,3), device=self.device)
         #TODO enable foot orientation control
