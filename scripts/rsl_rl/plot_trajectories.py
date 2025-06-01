@@ -1,71 +1,304 @@
+import os
 import pickle
 import numpy as np
 import matplotlib.pyplot as plt
+import glob
+import torch
 
-# Load the saved data
-with open("y_out_list.pkl", "rb") as f:
-    y_out_list = pickle.load(f)
-with open("dy_out_list.pkl", "rb") as f:
-    dy_out_list = pickle.load(f)
-with open("base_velocity_list.pkl", "rb") as f:
-    base_velocity_list = pickle.load(f)
-with open("cur_swing_time_list.pkl", "rb") as f:
-    cur_swing_time_list = pickle.load(f)
-with open("y_act_list.pkl", "rb") as f:
-    y_act_list = pickle.load(f)
-with open("dy_act_list.pkl", "rb") as f:
-    dy_act_list = pickle.load(f)
+def find_most_recent_log_dir(base_path="logs/play"):
+    """Find the most recent log directory"""
+    if not os.path.exists(base_path):
+        print(f"Error: Log directory {base_path} does not exist")
+        return None
+    # Get all timestamped directories
+    dirs = glob.glob(os.path.join(base_path, "*"))
+    if not dirs:
+        print(f"No log directories found in {base_path}")
+        return None
+    # Sort by modification time (newest first)
+    latest_dir = max(dirs, key=os.path.getmtime)
+    return latest_dir
 
-# Convert lists to numpy arrays
-# Shape: (time_steps, num_envs, dim)
-y_out_array = np.array([y.cpu().numpy() for y in y_out_list])
-dy_out_array = np.array([dy.cpu().numpy() for dy in dy_out_list])
-y_act_array = np.array([y.cpu().numpy() for y in y_act_list])
-dy_act_array = np.array([dy.cpu().numpy() for dy in dy_act_list])
-base_velocity_array = np.array([v.cpu().numpy() for v in base_velocity_list])
-cur_swing_time_array = np.array([t for t in cur_swing_time_list])
+def load_data(log_dir):
+    """Load all pickle files from the log directory"""
+    data = {}
+    for pkl_file in glob.glob(os.path.join(log_dir, "*.pkl")):
+        var_name = os.path.basename(pkl_file).replace(".pkl", "")
+        with open(pkl_file, "rb") as f:
+            data[var_name] = pickle.load(f)
+    return data
 
-time_steps = np.arange(len(y_out_list))
-env_idx = 0
+def plot_trajectories(data, save_dir=None):
+    """Plot all trajectories with proper labels and units"""
+    # Convert lists to numpy arrays and handle torch tensors
+    processed_data = {}
+    for key, values in data.items():
+        if isinstance(values[0], torch.Tensor):
+            processed_data[key] = np.array([v.cpu().numpy() for v in values])
+        else:
+            processed_data[key] = np.array(values)
+    
+    # Create time array
+    time_steps = np.arange(len(processed_data[list(processed_data.keys())[0]]))
+    
+    # Define state labels and units
+    state_labels = {
+        'y_out': [
+            'COM x', 'COM y', 'COM z', 'Pelvis Roll', 'Pelvis Pitch', 'Pelvis Yaw',
+            'swing foot x', 'swing foot y', 'swing foot z',
+            'swing foot roll', 'swing foot pitch', 'swing foot yaw'
+        ],
+        'dy_out': [
+            'COM x', 'COM y', 'COM z', 'Pelvis Roll', 'Pelvis Pitch', 'Pelvis Yaw',
+            'swing foot x', 'swing foot y', 'swing foot z',
+            'swing foot roll', 'swing foot pitch', 'swing foot yaw'
+        ],
+        'base_velocity': ['Linear x', 'Linear y', 'Angular z'],
+        "stance_foot_pos": ['x', 'y', 'z'],
+        "stance_foot_ori": ['roll', 'pitch', 'yaw'],
+        'cur_swing_time': ['Time'],
+        'y_act': [
+            'COM x', 'COM y', 'COM z', 'Pelvis Roll', 'Pelvis Pitch', 'Pelvis Yaw',
+            'swing foot x', 'swing foot y', 'swing foot z',
+            'swing foot roll', 'swing foot pitch', 'swing foot yaw'
+        ],
+        'dy_act': [
+            'COM x', 'COM y', 'COM z', 'Pelvis Roll', 'Pelvis Pitch', 'Pelvis Yaw',
+            'swing foot x', 'swing foot y', 'swing foot z',
+            'swing foot roll', 'swing foot pitch', 'swing foot yaw'
+        ],
+        'v': ['Velocity'],
+        'vdot': ['Acceleration'],
+        'reward': ['Reward']
+    }
+    
+    units = {
+        'y_out': ['m', 'm', 'm', 'rad', 'rad', 'rad', 'm', 'm', 'm', 'rad', 'rad', 'rad'],
+        'dy_out': ['m/s', 'm/s', 'm/s', 'rad/s', 'rad/s', 'rad/s', 'm/s', 'm/s', 'm/s', 'rad/s', 'rad/s', 'rad/s'],
+        'base_velocity': ['m/s', 'm/s', 'rad/s'],
+        'stance_foot_pos': ['m', 'm', 'm'],
+        'stance_foot_ori': ['rad', 'rad', 'rad'],
+        'cur_swing_time': ['s'],
+        'y_act': ['m', 'm', 'm', 'rad', 'rad', 'rad', 'm', 'm', 'm', 'rad', 'rad', 'rad'],
+        'dy_act': ['m/s', 'm/s', 'm/s', 'rad/s', 'rad/s', 'rad/s', 'm/s', 'm/s', 'm/s', 'rad/s', 'rad/s', 'rad/s'],
+        'v': ['m/s'],
+        'vdot': ['m/s²'],
+        'reward': ['']
+    }
+    
+    # Helper for subplot indexing
+    def get_ax(axs, idx, n_cols):
+        if axs.ndim == 1:
+            return axs[idx]
+        return axs[idx // n_cols, idx % n_cols]
 
-# Only plot the first 6 dimensions (COM position and pelvis orientation)
-state_labels = [
-    'COM x', 'COM y', 'COM z',
-    'Pelvis Roll', 'Pelvis Pitch', 'Pelvis Yaw'
-]
-units = ['m', 'm', 'm', 'rad', 'rad', 'rad']
+    env_ids = 0
 
-fig, axs = plt.subplots(2, 3, figsize=(18, 8))
-fig.suptitle('Reference vs Actual Trajectories (First Environment)', fontsize=16)
+    
 
-for i in range(6):
-    ax = axs[i // 3, i % 3]
-    ax.plot(time_steps, y_out_array[:, env_idx, i], label='y_des', color='b')
-    ax.plot(time_steps, y_act_array[:, env_idx, i], label='y_act', color='r', linestyle='--')
-    ax.set_title(state_labels[i])
-    ax.set_xlabel('Time Steps')
-    ax.set_ylabel(units[i])
-    ax.legend()
-    ax.grid(True)
+    if "stance_foot_pos" and "stance_foot_ori" in processed_data:
+        pos_data = processed_data["stance_foot_pos"]
+        ori_data = processed_data["stance_foot_ori"]
+        pos_data_0 = processed_data["stance_foot_pos_0"]
+        ori_data_0 = processed_data["stance_foot_ori_0"]
+        # Assume shape: (timesteps, envs, 3) for both
+        env_ids = 0  # or loop over envs if you want
 
-plt.tight_layout(rect=[0, 0.03, 1, 0.95])
-plt.savefig('reference_vs_actual_y.png', dpi=300, bbox_inches='tight')
-plt.show()
+        fig, axs = plt.subplots(2, 3, figsize=(15, 6))
+        fig.suptitle("Stance Foot Position and Orientation", fontsize=16)
 
-# Plot velocities (dy_out vs dy_act)
-fig, axs = plt.subplots(2, 3, figsize=(18, 8))
-fig.suptitle('Reference vs Actual Velocities (First Environment)', fontsize=16)
+        # Position
+        pos_labels = ["x", "y", "z"]
+        for i in range(3):
+            ax = axs[0, i]
+            ax.plot(time_steps, pos_data[:, env_ids, i], label=f"pos {pos_labels[i]}")
+            ax.plot(time_steps, pos_data_0[:, env_ids, i], label=f"pos_0 {pos_labels[i]}", linestyle='--')
+            ax.set_title(f"Position {pos_labels[i]}")
+            ax.set_xlabel("Time Steps")
+            ax.set_ylabel("m")
+            ax.grid(True)
+            ax.legend()
 
-for i in range(6):
-    ax = axs[i // 3, i % 3]
-    ax.plot(time_steps, dy_out_array[:, env_idx, i], label='dy_des', color='b')
-    ax.plot(time_steps, dy_act_array[:, env_idx, i], label='dy_act', color='r', linestyle='--')
-    ax.set_title(state_labels[i] + ' Velocity')
-    ax.set_xlabel('Time Steps')
-    ax.set_ylabel(units[i] + '/s')
-    ax.legend()
-    ax.grid(True)
+        # Orientation
+        ori_labels = ["roll", "pitch", "yaw"]
+        for i in range(3):
+            ax = axs[1, i]
+            ax.plot(time_steps, ori_data[:, env_ids, i], label=f"ori {ori_labels[i]}")
+            ax.plot(time_steps, ori_data_0[:, env_ids, i], label=f"ori_0 {ori_labels[i]}", linestyle='--')
+            ax.set_title(f"Orientation {ori_labels[i]}")
+            ax.set_xlabel("Time Steps")
+            ax.set_ylabel("rad")
+            ax.grid(True)
+            ax.legend()
 
-plt.tight_layout(rect=[0, 0.03, 1, 0.95])
-plt.savefig('reference_vs_actual_dy.png', dpi=300, bbox_inches='tight')
-plt.show() 
+        plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+        if save_dir:
+            plt.savefig(os.path.join(save_dir, "stance_foot_pos_ori.png"), dpi=300, bbox_inches="tight")
+        plt.show()
+
+    # Plot positions (y_out vs y_act)
+    if 'y_out' in processed_data and 'y_act' in processed_data:
+        n_dims = processed_data['y_out'].shape[2]
+        n_cols = 4
+        n_rows = (n_dims + n_cols - 1) // n_cols
+        fig, axs = plt.subplots(n_rows, n_cols, figsize=(5 * n_cols, 3 * n_rows))
+        fig.suptitle('Reference vs Actual Positions', fontsize=16)
+        axs = np.array(axs)
+        for i in range(n_dims):
+            ax = get_ax(axs, i, n_cols)
+            ax.plot(time_steps, processed_data['y_out'][:, env_ids, i], label='Reference', color='b')
+            ax.plot(time_steps, processed_data['y_act'][:, env_ids, i], label='Actual', color='r', linestyle='--')
+            # Use label if available, else fallback
+            label = state_labels['y_out'][i] if i < len(state_labels['y_out']) else f'Var {i}'
+            unit = units['y_out'][i] if i < len(units['y_out']) else ''
+            ax.set_title(label)
+            ax.set_xlabel('Time Steps')
+            ax.set_ylabel(unit)
+            ax.grid(True)
+            if i == 0:
+                ax.legend()
+        # Hide unused subplots
+        for i in range(n_dims, n_rows * n_cols):
+            ax = get_ax(axs, i, n_cols)
+            ax.set_visible(False)
+        plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+        if save_dir:
+            plt.savefig(os.path.join(save_dir, 'positions.png'), dpi=300, bbox_inches='tight')
+        plt.show()
+    
+    # Plot velocities (dy_out vs dy_act)
+    if 'dy_out' in processed_data and 'dy_act' in processed_data:
+        n_dims = processed_data['dy_out'].shape[2]
+        n_cols = 4
+        n_rows = (n_dims + n_cols - 1) // n_cols
+        fig, axs = plt.subplots(n_rows, n_cols, figsize=(5 * n_cols, 3 * n_rows))
+        fig.suptitle('Reference vs Actual Velocities', fontsize=16)
+        axs = np.array(axs)
+        for i in range(n_dims):
+            ax = get_ax(axs, i, n_cols)
+            ax.plot(time_steps, processed_data['dy_out'][:, env_ids, i], label='Reference', color='b')
+            ax.plot(time_steps, processed_data['dy_act'][:, env_ids, i], label='Actual', color='r', linestyle='--')
+            label = state_labels['dy_out'][i] if i < len(state_labels['dy_out']) else f'Var {i}'
+            unit = units['dy_out'][i] if i < len(units['dy_out']) else ''
+            ax.set_title(label)
+            ax.set_xlabel('Time Steps')
+            ax.set_ylabel(unit)
+            ax.grid(True)
+            if i == 0:
+                ax.legend()
+        for i in range(n_dims, n_rows * n_cols):
+            ax = get_ax(axs, i, n_cols)
+            ax.set_visible(False)
+        plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+        if save_dir:
+            plt.savefig(os.path.join(save_dir, 'velocities.png'), dpi=300, bbox_inches='tight')
+        plt.show()
+    
+    # Plot base velocity
+    if 'base_velocity' in processed_data:
+        n_dims = processed_data['base_velocity'].shape[2]
+        fig, axs = plt.subplots(1, n_dims, figsize=(5 * n_dims, 3))
+        fig.suptitle('Base Velocity', fontsize=16)
+        for i in range(n_dims):
+            ax = axs[i] if n_dims > 1 else axs
+            ax.plot(time_steps, processed_data['base_velocity'][:, env_ids, i])
+            label = state_labels['base_velocity'][i] if i < len(state_labels['base_velocity']) else f'Var {i}'
+            unit = units['base_velocity'][i] if i < len(units['base_velocity']) else ''
+            ax.set_title(label)
+            ax.set_xlabel('Time Steps')
+            ax.set_ylabel(unit)
+            ax.grid(True)
+        plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+        if save_dir:
+            plt.savefig(os.path.join(save_dir, 'base_velocity.png'), dpi=300, bbox_inches='tight')
+        plt.show()
+    
+    # Plot swing time
+    # if 'cur_swing_time' in processed_data:
+    #     plt.figure(figsize=(10, 4))
+    #     plt.plot(time_steps, processed_data['cur_swing_time'])
+    #     plt.title('Swing Time')
+    #     plt.xlabel('Time Steps')
+    #     plt.ylabel('Time (s)')
+    #     plt.grid(True)
+    #     if save_dir:
+    #         plt.savefig(os.path.join(save_dir, 'swing_time.png'), dpi=300, bbox_inches='tight')
+    #     plt.show()
+
+    # Plot v and vdot as two subplots in one figure
+    if 'v' in processed_data and 'vdot' in processed_data:
+        v_data = processed_data['v']
+        vdot_data = processed_data['vdot']
+        fig, axs = plt.subplots(2, 1, figsize=(10, 8), sharex=True)
+        
+        axs[0].plot(time_steps, v_data[:, env_ids], label='v', color='g')
+        axs[0].set_title('clf v')
+        axs[0].set_ylabel(units['v'][0] if 'v' in units else '')
+        axs[0].grid(True)
+        axs[0].legend()
+        
+        axs[1].plot(time_steps, vdot_data[:, env_ids], label='vdot', color='m')
+        axs[1].set_title('clf vdot')
+        axs[1].set_xlabel('Time Steps')
+        axs[1].set_ylabel(units['vdot'][0] if 'vdot' in units else '')
+        axs[1].grid(True)
+        axs[1].legend()
+        
+        plt.tight_layout()
+        if save_dir:
+            plt.savefig(os.path.join(save_dir, 'v_and_vdot.png'), dpi=300, bbox_inches='tight')
+        plt.show()
+
+    # Plot log_terms.pkl if it exists
+    # if save_dir:
+    #     log_terms_path = os.path.join(save_dir, '..', 'log_terms.pkl')
+    #     log_terms_path = os.path.abspath(log_terms_path)
+    #     if os.path.exists(log_terms_path):
+    #         with open(log_terms_path, 'rb') as f:
+    #             log_terms_list = pickle.load(f)
+    #         if len(log_terms_list) > 0:
+    #             # Get all keys
+    #             keys = list(log_terms_list[0].keys())
+    #             n_keys = len(keys)
+    #             n_cols = 3
+    #             n_rows = (n_keys + n_cols - 1) // n_cols
+    #             fig, axs = plt.subplots(n_rows, n_cols, figsize=(5 * n_cols, 3 * n_rows))
+    #             fig.suptitle('Log Terms', fontsize=16)
+    #             axs = np.array(axs)
+    #             for i, key in enumerate(keys):
+    #                 ax = axs[i // n_cols, i % n_cols] if n_rows > 1 or n_cols > 1 else axs
+    #                 # Gather the series for this key
+    #                 series = [entry.get(key, None) for entry in log_terms_list]
+    #                 # Convert to numpy array, handle tensors
+    #                 series = np.array([v.item() if hasattr(v, 'item') else v for v in series])
+    #                 ax.plot(np.arange(len(series)), series, label=key)
+    #                 ax.set_title(key)
+    #                 ax.set_xlabel('Time Steps')
+    #                 ax.grid(True)
+    #                 ax.legend()
+    #             # Hide unused subplots
+    #             for i in range(n_keys, n_rows * n_cols):
+    #                 ax = axs[i // n_cols, i % n_cols]
+    #                 ax.set_visible(False)
+    #             plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+    #             plt.savefig(os.path.join(save_dir, 'log_terms.png'), dpi=300, bbox_inches='tight')
+    #             plt.show()
+
+
+def main():
+    # Find the most recent log directory
+    log_dir = find_most_recent_log_dir()
+    if not log_dir:
+        return
+    print(f"Loading data from {log_dir}")
+    # Load the data
+    data = load_data(log_dir)
+    # Create a directory for plots
+    plot_dir = os.path.join(log_dir, "plots")
+    os.makedirs(plot_dir, exist_ok=True)
+    # Plot the data
+    plot_trajectories(data, save_dir=plot_dir)
+
+
+if __name__ == "__main__":
+    main() 

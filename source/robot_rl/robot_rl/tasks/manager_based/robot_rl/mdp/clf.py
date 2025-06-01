@@ -30,8 +30,8 @@ class CLF:
 
         # Set up default Q, R if not provided
         # Q_weights should be length = n_states, R_weights length = n_inputs
-        n_states = 2 * 2 + 2 * (n_outputs - 2)
-        n_inputs = 2 + (n_outputs - 2)
+        n_states = 2 * n_outputs
+        n_inputs = n_outputs
         if Q_weights is None:
             Q_weights = np.ones(n_states)
         if R_weights is None:
@@ -49,43 +49,31 @@ class CLF:
 
     def _compute_PK_np(self) -> tuple[np.ndarray, np.ndarray]:
         """
-        Build full state-space (A_full, B_full) in NumPy, solve continuous ARE,
-        and compute LQR gain K = R^{-1} B^T P.
+        Construct a pure double integrator system for all outputs,
+        and solve for the LQR gain K and Lyapunov matrix P.
         """
-        # 1) Build LIP x & y blocks
-        A_xy = np.block([
-            [self.A_lip, np.zeros_like(self.A_lip)],
-            [np.zeros_like(self.A_lip), self.A_lip]
-        ])  # (4×4)
-        B_xy = np.block([
-            [self.B_lip, np.zeros_like(self.B_lip)],
-            [np.zeros_like(self.B_lip), self.B_lip]
-        ])  # (4×2)
 
-        # 2) Double-integrators for extra outputs
-        n_extra = self.n_outputs - 2
-        A_blk = np.array([[0.0, 1.0], [0.0, 0.0]])
-        B_blk = np.array([[0.0], [1.0]])
-        A_extra = np.kron(np.eye(n_extra), A_blk)  # (2*n_extra × 2*n_extra)
-        B_extra = np.kron(np.eye(n_extra), B_blk)  # (2*n_extra × n_extra)
+        # Assume each output has a double integrator model:
+        #   [ẋ] = [0 1][x] + [0] u
+        #        [0 0]     [1]
 
-        # 3) Assemble full matrices
-        A_full = np.block([
-            [A_xy,             np.zeros((A_xy.shape[0], A_extra.shape[1]))],
-            [np.zeros((A_extra.shape[0], A_xy.shape[1])), A_extra]
-        ])
-        B_full = np.block([
-            [B_xy,             np.zeros((B_xy.shape[0], B_extra.shape[1]))],
-            [np.zeros((B_extra.shape[0], B_xy.shape[1])), B_extra]
-        ])
+        n_outputs = self.n_outputs  # total number of output dimensions (e.g., com x/y/z, foot x/y/z, etc.)
 
-        # 4) Solve CARE for P
+        # 1) Build block-diagonal A and B matrices (double integrators)
+        A_blk = np.array([[0.0, 1.0], [0.0, 0.0]])  # (2x2)
+        B_blk = np.array([[0.0], [1.0]])           # (2x1)
+
+        A_full = np.kron(np.eye(n_outputs), A_blk)   # (2n x 2n)
+        B_full = np.kron(np.eye(n_outputs), B_blk)   # (2n x n)
+
+        # 2) Solve CARE: A^T P + P A - P B R^{-1} B^T P + Q = 0
         P = solve_continuous_are(A_full, B_full, self.Q_np, self.R_np)
 
-        # 5) Compute LQR gain K = R^{-1} B^T P
-        K = np.linalg.solve(self.R_np, B_full.T.dot(P))
+        # 3) Compute LQR gain: K = R^{-1} B^T P
+        K = np.linalg.solve(self.R_np, B_full.T @ P)
 
         return P, K
+
 
     def compute_v(
         self,
@@ -120,4 +108,5 @@ class CLF:
         """
         v_curr = self.compute_v(y_act, y_nom,dy_act,dy_nom)
         vdot = (v_curr - v_prev) / self.sim_dt
+
         return vdot, v_curr

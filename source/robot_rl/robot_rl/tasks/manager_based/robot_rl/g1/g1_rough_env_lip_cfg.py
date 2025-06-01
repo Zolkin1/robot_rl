@@ -72,63 +72,82 @@ class G1RoughLipObservationsCfg(ObservationsCfg):
 ##
 class G1RoughLipRewards(HumanoidRewardCfg):
     """Rewards specific to LIP Model"""
-    lip_gait_tracking = RewTerm(
-        func=mdp.lip_gait_tracking,
-        weight=0.0,
+
+    holonomic_constraint = RewTerm(
+        func=mdp.holonomic_constraint,
+        weight=4.0,
+    )
+
+    holonomic_constraint_vel = RewTerm(
+        func=mdp.holonomic_constraint_vel,
+        weight=2.0,
+    )
+
+    reference_tracking = RewTerm(
+        func=mdp.reference_tracking,
+        weight=5.0,
         params={
-            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*_ankle_roll_link"),
-            "period": PERIOD,
-            "std": 0.2,
-            "nom_height": 0.78,
-            "Tswing": PERIOD/2.,
-            "command_name": "base_velocity",
-            "wdes": WDES,
-            "asset_cfg": SceneEntityCfg("robot", body_names=".*_ankle_roll_link"),
+            "command_name": "hlip_ref",
+            "term_std": [
+                0.2, 0.2, 0.1,    # com x, y, z
+                0.5, 0.5, 0.5,    # pelvis roll, pitch, yaw
+                0.1, 0.1, 0.05,   # swing foot x, y, z
+                0.5, 0.5, 0.5     # swing foot roll, pitch, yaw
+                ],
+            "term_weight": [1.0,0.0,1.0, #com x,y,z
+                            1.0,2.0,1.0, #pelvis roll, pitch, yaw
+                            15.0,5.0,20.0, #swing foot x,y,z
+                            0.0,0.0,0, #swing foot roll, pitch, yaw
+                          ]
         }
     )
 
-    lip_feet_tracking = RewTerm(
-        func=mdp.lip_feet_tracking,
-        weight=10.0,
+    reference_vel_tracking = RewTerm(
+        func=mdp.reference_vel_tracking,
+        weight=5.0,
         params={
-            "period": PERIOD,
-            "std": 0.2,
-            "Tswing": PERIOD/2.,
-            "feet_bodies": SceneEntityCfg("robot", body_names=".*_ankle_roll_link"),
+            "command_name": "hlip_ref",
+            "term_std": [
+                0.3, 0.3, 0.1,    # COM velocity x, y, z  — less sensitive to x/y, tighter for z (often near 0)
+                0.5, 0.5, 0.5,    # Pelvis angular velocity roll, pitch, yaw — wide range, low precision needed
+                0.2, 0.2, 0.2,    # Swing foot linear velocity x, y, z — more critical
+                0.5, 0.5, 0.5     # Swing foot angular velocity roll, pitch, yaw — usually sloppy
+            ],
+            "term_weight": [
+                0.0, 0.0, 3.0,    # COM velocity x, y, z — prioritize planar motion
+                1.0, 1.0, 1.0,    # Pelvis angular vel roll, pitch, yaw — soft regularization
+                5.0, 5.0, 1.0,    # Swing foot linear vel x, y, z — z (vertical swing timing) is crucial
+                0.0, 0.0, 0.0     # Swing foot angular vel — low priority unless you're doing precision landings
+            ]
+
         }
     )
 
-class G1RoughLipEventsCfg(HumanoidEventsCfg):
-    # Calculate new step location on a fixed interval
-    update_step_location = EventTerm(func=mdp.compute_step_location_local,
-                                     mode="interval",
-                                     interval_range_s=(PERIOD / 2., PERIOD / 2.),
-                                     is_global_time=False,
-                                     params={
-                                         "nom_height": 0.78,
-                                         "Tswing": PERIOD / 2.,
-                                         "command_name": "base_velocity",
-                                         "wdes": WDES,
-                                         "feet_bodies": SceneEntityCfg("robot", body_names=".*_ankle_roll_link"),
-                                     })
-    # Do on reset
-    reset_update_set_location = EventTerm(func=mdp.compute_step_location_local,
-                                          mode="reset",
-                                          params={
-                                              "nom_height": 0.78,
-                                              "Tswing": PERIOD / 2.,
-                                              "command_name": "base_velocity",
-                                              "wdes": WDES,
-                                              "feet_bodies": SceneEntityCfg("robot", body_names=".*_ankle_roll_link"),
-                                          })
-##
-# Environment configuration
-##
+
+    clf_reward = RewTerm(
+        func=mdp.clf_reward,
+        weight=-1.0,
+        params={
+            "command_name": "hlip_ref",
+        }
+    )
+
+    clf_decreasing_condition = RewTerm(
+        func=mdp.clf_decreasing_condition,
+        weight=-1.0,
+        params={
+            "command_name": "hlip_ref",
+        }
+    )
+
+    
+
+
 @configclass
 class G1RoughLipEnvCfg(HumanoidEnvCfg):
     """Configuration for the G1 Flat environment."""
     rewards: G1RoughLipRewards = G1RoughLipRewards()
-    events: G1RoughLipEventsCfg = G1RoughLipEventsCfg()
+    # events: G1RoughLipEventsCfg = G1RoughLipEventsCfg()
     observations: G1RoughLipObservationsCfg = G1RoughLipObservationsCfg()
     commands: G1RoughLipCommandsCfg = G1RoughLipCommandsCfg()
     def __post_init__(self):
@@ -161,7 +180,8 @@ class G1RoughLipEnvCfg(HumanoidEnvCfg):
         self.events.reset_robot_joints.params["position_range"] = (1.0, 1.0)
         self.events.base_external_force_torque.params["asset_cfg"].body_names = ["pelvis_link"]
         self.events.reset_base.params = {
-            "pose_range": {"x": (-0.5, 0.5), "y": (-0.5, 0.5), "yaw": (-3.14,3.14)}, #(-3.14, 3.14)},
+            
+            "pose_range": {"x": (-0.5, 0.5), "y": (-0.5, 0.5), "yaw": (0,0)}, #(-3.14, 3.14)},
             "velocity_range": {
                 "x": (0.0, 0.0),
                 "y": (0.0, 0.0),
@@ -172,12 +192,13 @@ class G1RoughLipEnvCfg(HumanoidEnvCfg):
             },
         }
 
+        self.events.base_external_force_torque = None
         ##
         # Commands
         ##
-        self.commands.base_velocity.ranges.lin_vel_x = (-1, 1)
-        self.commands.base_velocity.ranges.lin_vel_y = (-0.3, 0.3)
-        self.commands.base_velocity.ranges.ang_vel_z = (-1.0, 1.0)
+        self.commands.base_velocity.ranges.lin_vel_x = (1.0,1.0)
+        self.commands.base_velocity.ranges.lin_vel_y = (-0.0, 0.0)
+        self.commands.base_velocity.ranges.ang_vel_z = (-0.0, 0.0)
 
         ##
         # Terminations
@@ -188,30 +209,51 @@ class G1RoughLipEnvCfg(HumanoidEnvCfg):
         ##
         # Rewards
         ##
-        self.rewards.track_lin_vel_xy_exp.weight = 5.0 #1
-        self.rewards.track_ang_vel_z_exp.weight = 0.5
-        self.rewards.lin_vel_z_l2.weight =  -2.0 # TODO reduce this maybe?
-        self.rewards.ang_vel_xy_l2.weight = -0.05
-        self.rewards.dof_torques_l2.weight = -1.0e-5
-        self.rewards.dof_acc_l2.weight = -2.5e-7
-        self.rewards.dof_vel_l2.weight = -1.0e-3
-        self.rewards.action_rate_l2.weight = -0.01
-        self.rewards.feet_air_time.weight = 0.0
-        self.rewards.flat_orientation_l2.weight = -1.0
-        self.rewards.dof_pos_limits.weight = -5.0
-        self.rewards.alive.weight = 0.15
-        self.rewards.contact_no_vel.weight = -0.2
-        self.rewards.joint_deviation_hip.weight = -1.0
-        self.rewards.height_torso.weight = -20 #-10.0
-        self.rewards.feet_clearance.weight = -20.0
-        self.rewards.phase_contact.weight = 0 #0.25
-
-        # TODO: Add the footstep location rewards
-        self.rewards.lip_gait_tracking.weight = 2
-        self.rewards.lip_feet_tracking.weight = 3 #10.0
-
-        self.rewards.joint_deviation_arms.weight = -0.5             # Arms regularization
+        self.rewards.feet_air_time = None
+        self.rewards.phase_contact = None
+        self.rewards.lin_vel_z_l2 = None
+        # self.rewards.height_torso = None
+        self.rewards.feet_clearance = None
+        self.rewards.ang_vel_xy_l2 = None
+        self.rewards.termination_penalty = None
+        self.rewards.flat_orientation_l2 = None
+        self.rewards.joint_deviation_hip = None
+        self.rewards.contact_no_vel = None
+        self.rewards.alive = None
+        # self.rewards.track_lin_vel_xy_exp = None
+        self.rewards.track_ang_vel_z_exp.weight = 1.0
+ 
+        # torque, acc, vel, action rate regularization
+        # self.rewards.dof_torques_l2.weight = -1.0e-5
+        # self.rewards.dof_pos_limits.weight = -5.0
+        # self.rewards.dof_acc_l2.weight = -2.5e-7
+        # self.rewards.dof_vel_l2.weight = -1.0e-3
+        # self.rewards.action_rate_l2.weight = -0.001
+        self.rewards.joint_deviation_arms.weight = -1.0             # Arms regularization
         self.rewards.joint_deviation_torso.weight = -1.0
-
+        
+        # self.rewards.joint_deviation_arms = None
+        # self.rewards.joint_deviation_torso = None
+        self.rewards.dof_pos_limits = None
+        self.rewards.dof_vel_l2 = None
+        self.rewards.dof_acc_l2 = None
+        self.rewards.dof_torques_l2 = None
+        self.rewards.action_rate_l2 = None  
+        
+        
+        # self.rewards.alive.weight = 0.15
+        # self.rewards.contact_no_vel.weight = -0.2
+        # self.rewards.lip_gait_tracking.weight = 2
+        # self.rewards.joint_deviation_hip.weight = -0.0
+        # self.rewards.ang_vel_xy_l2.weight = -0.05
+        self.rewards.height_torso.weight = -1.0 #-10.0
+        # self.rewards.feet_clearance.weight = -20.0
+        # self.rewards.lin_vel_z_l2.weight =  -2.0 
+        self.rewards.track_lin_vel_xy_exp.weight = 3.5 #1
+        # self.rewards.phase_contact.weight = 0 #0.25
+        
+        
+        # self.rewards.lip_feet_tracking.weight = 10.0 #10.0
+        # self.rewards.flat_orientation_l2.weight = -1.0
         self.rewards.height_torso.params["target_height"] = 0.75
-        self.rewards.feet_clearance.params["target_height"] = 0.12
+        # self.rewards.feet_clearance.params["target_height"] = 0.12

@@ -21,7 +21,7 @@ from isaaclab.markers import VisualizationMarkers, VisualizationMarkersCfg
 
 from isaaclab_tasks.manager_based.locomotion.velocity.velocity_env_cfg import LocomotionVelocityRoughEnvCfg, RewardsCfg, ObservationsCfg, EventCfg   #Inherit from the base envs
 import isaaclab.sim as sim_utils
-
+from robot_rl.tasks.manager_based.robot_rl.mdp.cmd_cfg import HLIPCommandCfg
 
 from . import mdp
 
@@ -40,7 +40,8 @@ from . import mdp
 
 # Constants (do this better)
 # TODO: Try playing with the period for the lip model
-PERIOD = 0.6 #0.8  # (0.4 s swing phase)
+cf = HLIPCommandCfg()
+PERIOD = cf.gait_period
 
 @configclass
 class HumanoidActionsCfg:

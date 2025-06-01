@@ -82,13 +82,13 @@ def calculate_cur_swing_foot_pos(
     # Vertical Bezier control points (degree 5)
     degree_v = 5
     control_v = torch.stack([
-        z_init,          # start height
-        z_sw_max / 3,
-        z_sw_max,
-        z_sw_max,
-        z_sw_max / 2,
-        zsw_neg,              # negative offset
-    ], dim=1)  # [batch,6]
+        z_init,                      # Start
+        z_init + 0.2 * (z_sw_max - z_init),
+        z_init + 0.6 * (z_sw_max - z_init),
+        z_sw_max,                    # Peak at mid-swing
+        z_init + 0.5 * (z_sw_max - z_init),
+        zsw_neg                      # End
+    ], dim=1)
 
     # Horizontal X and Y (linear interpolation)
     p_swing_x = ((1 - bht) * -clipped_step_x + bht * clipped_step_x).unsqueeze(1)
@@ -213,6 +213,7 @@ class HLIP(torch.nn.Module):
 
         # P1 orbit - handle batch dimension
         U_des_p1 = vel[:, 0] * T  # [batch]
+      
         # Expand matrices for batch operations
         eye_expanded = torch.eye(2, device=device).unsqueeze(0).expand(vel.shape[0], -1, -1)  # [batch, 2, 2]
         
@@ -249,6 +250,6 @@ class HLIP(torch.nn.Module):
         Xdes, Ux, Ydes, Uy = self.compute_desired_orbit(cmd[:,:2], T)
         # Remap for initial stance
         self.x_init, self.y_init = self._remap_for_init_stance_state(Xdes, Ydes, Ux, Uy)
-
+     
         return Xdes, Ux, Ydes, Uy
    

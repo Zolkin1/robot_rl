@@ -4,9 +4,28 @@ from isaaclab.utils import configclass
 from isaaclab.markers import VisualizationMarkers, VisualizationMarkersCfg
 import isaaclab.sim as sim_utils
 
-Q_weights = [1.0] * 24  # Replace N_STATES with the correct number, e.g., 24
-R_weights = [0.1] * 12  # Replace N_INPUTS with the correct number, e.g., 12
 
+Q_weights = [
+        1.0,  0.5,   # com_x: position error weighted more than velocity
+        1.0,  0.5,   # com_y
+        0.8,  0.4,   # com_z: vertical less critical than horizontal
+        0.6,  0.3,   # pelvis_roll
+        0.6,  0.3,   # pelvis_pitch
+        0.6,  0.3,   # pelvis_yaw
+        0.5,  0.25,  # swing_x: moderate foot placement error
+        0.5,  0.25,  # swing_y
+        0.5,  0.25,  # swing_z
+        0.3,  0.15,  # swing_ori_roll: orientation less critical
+        0.3,  0.15,  # swing_ori_pitch
+        0.3,  0.15   # swing_ori_yaw
+    ]
+
+R_weights = [
+        0.1, 0.1, 0.1,    # CoM inputs: allow moderate effort
+        0.05,0.05,0.05,   # pelvis inputs: lower torque priority
+        0.05,0.05,0.05,   # swing foot linear inputs
+        0.02,0.02,0.02    # swing foot orientation inputs: small adjustments
+    ]
 @configclass
 class HLIPCommandCfg(CommandTermCfg):
     """
@@ -15,11 +34,13 @@ class HLIPCommandCfg(CommandTermCfg):
     class_type: type = HLIPCommandTerm
     asset_name: str = "robot"
     T_ds: float = 0.0          # double support duration (s)
-    z0: float = 0.78           # CoM height (m)
-    y_nom: float = 0.3        # nominal lateral foot offset (m)
-    gait_period: float = 0.6   # gait cycle period (s)
-    debug_vis: bool = True    # enable debug visualization
-
+    z0: float = 0.65           # CoM height (m)
+    y_nom: float = 0.25        # nominal lateral foot offset (m)
+    gait_period: float = 0.8   # gait cycle period (s)
+    debug_vis: bool = False    # enable debug visualization
+    z_sw_max: float = 0.14    # max swing foot z height (m); this is ankle height so different from actual foot position
+    z_sw_min: float = 0.0
+    pelv_pitch_ref: float = 0.2
     resampling_time_range: tuple[float, float] = (5.0, 15.0)  # Resampling time range in seconds
     # Command sampling ranges
     ranges: dict = {

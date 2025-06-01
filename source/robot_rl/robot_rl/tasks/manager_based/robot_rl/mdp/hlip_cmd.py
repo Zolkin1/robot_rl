@@ -49,7 +49,9 @@ class HLIPCommandTerm(CommandTerm):
         self.feet_bodies_idx = self.robot.find_bodies(".*_ankle_roll_link")[0]
 
         self.foot_target = torch.zeros((self.num_envs, 2), device=self.device)
-        self.metrics["error_foot_target"] = torch.zeros((self.num_envs), device=self.device)
+
+        self.metrics = {}
+        self.metrics["error_sw_z"] = torch.zeros((self.num_envs), device=self.device)
 
         self.y_out = torch.zeros((self.num_envs, 12), device=self.device)
         self.dy_out = torch.zeros((self.num_envs, 12), device=self.device)
@@ -70,7 +72,8 @@ class HLIPCommandTerm(CommandTerm):
             device=self.device
         )
         
-        
+        self.v = torch.zeros((self.num_envs), device=self.device)
+        self.stance_idx = None
 
 
     @property
@@ -80,7 +83,6 @@ class HLIPCommandTerm(CommandTerm):
 
     def _resample_command(self, env_ids):
         self._update_command()
-        self.v = self.clf.compute_v(self.y_act, self.y_nom,self.dy_act,self.dy_out)
         # Do nothing here
         # device = self.env.command_manager.get_command("base_velocity").device
         
@@ -95,7 +97,24 @@ class HLIPCommandTerm(CommandTerm):
 
         swing_foot_pos = foot_pos[:, int(0.5 + 0.5 * torch.sign(phi_c))]
         # Only compare x,y coordinates of foot target
-        self.metrics["error_foot_target"] = torch.norm(swing_foot_pos - self.foot_target, dim=-1)
+        self.metrics["error_sw_z"] = torch.abs(self.y_out[:,8] - self.y_act[:,8])
+        self.metrics["error_sw_x"] = torch.abs(self.y_out[:,6] - self.y_act[:,6])
+        self.metrics["error_sw_y"] = torch.abs(self.y_out[:,7] - self.y_act[:,7])
+        self.metrics["error_sw_roll"] = torch.abs(self.y_out[:,9] - self.y_act[:,9])
+        self.metrics["error_sw_pitch"] = torch.abs(self.y_out[:,10] - self.y_act[:,10])
+        self.metrics["error_sw_yaw"] = torch.abs(self.y_out[:,11] - self.y_act[:,11])
+        
+
+        self.metrics["com_x"] = torch.abs(self.y_out[:,0] - self.y_act[:,0])
+        self.metrics["com_y"] = torch.abs(self.y_out[:,1] - self.y_act[:,1])
+        self.metrics["com_z"] = torch.abs(self.y_out[:,2] - self.y_act[:,2])
+        self.metrics["pelvis_roll"] = torch.abs(self.y_out[:,3] - self.y_act[:,3])
+        self.metrics["pelvis_pitch"] = torch.abs(self.y_out[:,4] - self.y_act[:,4])
+        self.metrics["pelvis_yaw"] = torch.abs(self.y_out[:,5] - self.y_act[:,5])
+
+        self.metrics["v"] = self.v
+        self.metrics["vdot"] = self.vdot
+        
         # return self.foot_target  # Return the foot target tensor for observation
 
 
@@ -104,10 +123,24 @@ class HLIPCommandTerm(CommandTerm):
         tp = (self.env.sim.current_time % (2*Tswing)) / (2*Tswing)  
         phi_c = torch.tensor(math.sin(2 * torch.pi * tp) / math.sqrt(math.sin(2 * torch.pi * tp)**2 + self.T), device=self.env.device)
 
-        self.stance_idx = int(0.5 - 0.5*torch.sign(phi_c))
-        self.swing_idx = 1 - self.stance_idx
 
+
+        new_stance_idx = int(0.5 - 0.5*torch.sign(phi_c))
+        self.swing_idx = 1 - new_stance_idx
         
+        if self.stance_idx is None or new_stance_idx != self.stance_idx:
+            if self.stance_idx is None:
+                self.stance_idx = new_stance_idx
+            #update stance foot pos, ori
+            foot_pos_w = self.robot.data.body_pos_w[:, self.feet_bodies_idx, :]
+            foot_ori_w = self.robot.data.body_quat_w[:, self.feet_bodies_idx, :]
+            self.stance_foot_pos_0 = foot_pos_w[:, new_stance_idx, :]
+            self.stance_foot_ori_quat_0 = foot_ori_w[:,new_stance_idx,:]
+            self.stance_foot_ori_0 = self.get_euler_from_quat(foot_ori_w[:,new_stance_idx,:])
+       
+        self.stance_idx = new_stance_idx
+
+
         if tp < 0.5:
             self.phase_var = 2*tp
         else:
@@ -143,11 +176,13 @@ class HLIPCommandTerm(CommandTerm):
         self.foot_target = torch.stack([Ux,Uy_des], dim=-1)
 
         pelvis_ori = torch.zeros((N,3), device=self.device)
+        pelvis_ori[:,1] = self.cfg.pelv_pitch_ref
         #TODO enable heading control
-        heading_target = self.env.command_manager.get_term("base_velocity").heading_target
-        pelvis_ori[:,2] = heading_target
+        # heading_target = self.env.command_manager.get_term("base_velocity").heading_target
+   
+        # pelvis_ori[:,2] = heading_target
         # current_heading = self.robot.data.heading_w
-        # pelvis_ori[:,2] = current_heading + base_velocity[:,2] * self.env.cfg.sim.dt
+        pelvis_ori[:,2] = self.stance_foot_ori_0[:,2] + base_velocity[:,2] * self.env.cfg.sim.dt
 
         foot_ori = torch.zeros((N,3), device=self.device)
         #TODO enable foot orientation control
@@ -158,8 +193,8 @@ class HLIPCommandTerm(CommandTerm):
 
         pelvis_ori_vel[:,2] = base_velocity[:,2]
         foot_ori_vel[:,2] = pelvis_ori_vel[:,2]
-        z_sw_max = 0.1
-        z_sw_neg = 0.0
+        z_sw_max = self.cfg.z_sw_max
+        z_sw_neg = self.cfg.z_sw_min
 
         # Create horizontal control points with batch dimension
         horizontal_control_points = torch.tensor([0.0, 0.0, 1.0, 1.0, 1.0], device=self.device).repeat(N, 1)  # Shape: (N, 5)
@@ -194,7 +229,14 @@ class HLIPCommandTerm(CommandTerm):
         #setup up reference trajectory, com pos, pelvis orientation, swing foot pos, ori
         self.y_out = torch.concatenate([com_pos_des, pelvis_ori, foot_pos, foot_ori], dim=-1)
         self.dy_out = torch.concatenate([com_vel_des, pelvis_ori_vel, foot_vel, foot_ori_vel], dim=-1)
-        
+
+    def get_euler_from_quat(self, quat):
+
+        euler_x, euler_y, euler_z = euler_xyz_from_quat(quat)
+        euler_x = wrap_to_pi(euler_x)
+        euler_y = wrap_to_pi(euler_y)
+        euler_z = wrap_to_pi(euler_z)
+        return torch.stack([euler_x, euler_y, euler_z], dim=-1)
 
     def get_actual_state(self):
         """Populate actual state and its time derivative in the robot's local (yaw-aligned) frame."""
@@ -206,40 +248,31 @@ class HLIPCommandTerm(CommandTerm):
         foot_pos_w = data.body_pos_w[:, self.feet_bodies_idx, :]
         foot_ori_w = data.body_quat_w[:, self.feet_bodies_idx, :]
 
+
         # Store raw foot positions
-        self.actual_foot_pos = foot_pos_w
+        self.stance_foot_pos = foot_pos_w[:, self.stance_idx, :]
+        self.stance_foot_ori = self.get_euler_from_quat(foot_ori_w[:, self.stance_idx, :])
 
         # Convert foot positions to the robot's yaw-aligned local frame
-        stance_pos_local = _transfer_to_local_frame(
-            foot_pos_w[:, self.stance_idx, :], root_quat
-        )
-        swing_pos_local = _transfer_to_local_frame(
-            foot_pos_w[:, self.swing_idx, :], root_quat
+        # stance_pos_local = _transfer_to_local_frame(
+        #     foot_pos_w[:, self.stance_idx, :], root_quat
+        # )
+        swing2stance_local = _transfer_to_local_frame(
+            foot_pos_w[:, self.swing_idx, :]-self.stance_foot_pos_0, self.stance_foot_ori_quat_0
         )
 
         # Center of mass to stance foot vector in local frame
         com_w = data.root_com_pos_w
         com2stance_local = _transfer_to_local_frame(
-            com_w - foot_pos_w[:, self.stance_idx, :], root_quat
+            com_w - self.stance_foot_pos_0, self.stance_foot_ori_quat_0
         )
 
-        # Relative foot vector
-        swing2stance_local = swing_pos_local - stance_pos_local
 
         # Pelvis orientation (Euler XYZ)
-        pelvis_ori_euler_x, pelvis_ori_euler_y, pelvis_ori_euler_z = euler_xyz_from_quat(root_quat)
-        pelvis_ori_euler_x = wrap_to_pi(pelvis_ori_euler_x)
-        pelvis_ori_euler_y = wrap_to_pi(pelvis_ori_euler_y)
-        pelvis_ori_euler_z = wrap_to_pi(pelvis_ori_euler_z)
+        pelvis_ori = self.get_euler_from_quat(root_quat)
 
-        #rearange_
-        pelvis_ori = torch.stack([pelvis_ori_euler_x, pelvis_ori_euler_y, pelvis_ori_euler_z], dim=-1)
         # Foot orientations (Euler XYZ)
-        swing_foot_ori_euler_x, swing_foot_ori_euler_y, swing_foot_ori_euler_z = euler_xyz_from_quat(foot_ori_w[:,self.swing_idx,:])
-        swing_foot_ori_euler_x = wrap_to_pi(swing_foot_ori_euler_x)
-        swing_foot_ori_euler_y = wrap_to_pi(swing_foot_ori_euler_y)
-        swing_foot_ori_euler_z = wrap_to_pi(swing_foot_ori_euler_z)
-        swing_foot_ori = torch.stack([swing_foot_ori_euler_x, swing_foot_ori_euler_y, swing_foot_ori_euler_z], dim=-1)
+        swing_foot_ori = self.get_euler_from_quat(foot_ori_w[:,self.swing_idx,:])
 
         # 2. Velocities (world frame)
         com_vel_w = data.root_com_vel_w[:,0:3]
@@ -247,19 +280,22 @@ class HLIPCommandTerm(CommandTerm):
         foot_lin_vel_w = data.body_lin_vel_w[:, self.feet_bodies_idx, :]
         foot_ang_vel_w = data.body_ang_vel_w[:, self.feet_bodies_idx, :]
 
+        self.stance_foot_vel = foot_lin_vel_w[:,self.stance_idx,:]
+        self.stance_foot_ang_vel = foot_ang_vel_w[:,self.stance_idx,:]
         # Convert velocities to local frame
         # import pdb; pdb.set_trace()
-        com_vel_local = _transfer_to_local_frame(com_vel_w, root_quat)
-        pelvis_omega_local = _transfer_to_local_frame(pelvis_omega_w, root_quat)
+        com_vel_local = _transfer_to_local_frame(com_vel_w, self.stance_foot_ori_quat_0)
+      
+        pelvis_omega_local = _transfer_to_local_frame(pelvis_omega_w, self.stance_foot_ori_quat_0)
         foot_lin_vel_local_stance = _transfer_to_local_frame(
-            foot_lin_vel_w[:,self.stance_idx,:], root_quat
+            foot_lin_vel_w[:,self.stance_idx,:], self.stance_foot_ori_quat_0
         )
         foot_lin_vel_local_swing = _transfer_to_local_frame(
-            foot_lin_vel_w[:,self.swing_idx,:], root_quat
+            foot_lin_vel_w[:,self.swing_idx,:], self.stance_foot_ori_quat_0
         )
 
         foot_ang_vel_local_swing = _transfer_to_local_frame(
-            foot_ang_vel_w[:,self.swing_idx,:], root_quat
+            foot_ang_vel_w[:,self.swing_idx,:], self.stance_foot_ori_quat_0
         )
 
         swing2stance_vel = foot_lin_vel_local_swing - foot_lin_vel_local_stance
@@ -286,6 +322,11 @@ class HLIPCommandTerm(CommandTerm):
         self.generate_reference_trajectory()
         self.get_actual_state()
         
+        #how to handle for the first step?
+        #i.e. v is not defined
+        vdot,vcur = self.clf.compute_vdot(self.y_act,self.y_nom,self.dy_act,self.dy_out,self.v)
+        self.vdot = vdot
+        self.v = vcur
        
         if self.debug_vis:
             # Visualize foot target in global frame

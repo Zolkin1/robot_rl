@@ -20,6 +20,32 @@ if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedRLEnv
 
 
+def clf_reward(env: ManagerBasedRLEnv, command_name: str, max_clf: float = 10.0) -> torch.Tensor:
+    """Negative CLF value as a reward (i.e., -V(η)), clipped to [-1, 0]."""
+    ref_term = env.command_manager.get_term(command_name)
+    v = ref_term.v  # [B] scalar CLF value per env
+
+    reward = torch.clamp(v, min=0.0, max=max_clf)/max_clf
+    return reward
+
+
+def clf_decreasing_condition(env: ManagerBasedRLEnv, command_name: str, alpha: float = 1.0, max_clf_decreasing: float = 200.0) -> torch.Tensor:
+    """Penalty for violating the CLF decrease condition, clipped to [-1, 0]."""
+    ref_term = env.command_manager.get_term(command_name)
+    v = ref_term.v                     # [B]
+    vdot = ref_term.vdot # [B]
+
+    # Compute violation: ΔV + αV
+    clf_violation = vdot + alpha * v   # [B]
+
+    #also normalize by max_clf violation
+    clf_violation = clf_violation/max_clf_decreasing
+    penalty = torch.clamp(clf_violation, min=0.0)  # only penalize violations
+  
+    reward = torch.clamp(penalty, max=1.0) 
+    return reward
+
+
 def joint_pos_target(
         env, asset_cfg: SceneEntityCfg, joint_des: torch.Tensor, std: float, joint_weight: torch.Tensor
     ) -> torch.Tensor:
@@ -103,26 +129,66 @@ def feet_slide(env, sensor_cfg: SceneEntityCfg, asset_cfg: SceneEntityCfg = Scen
     asset = env.scene[asset_cfg.name]
 
     body_vel = asset.data.body_lin_vel_w[:, asset_cfg.body_ids, :2]
+    
     reward = torch.sum(torch.sum(body_vel**2, dim=-1) * contacts, dim=1)
     return reward
 
-#def phase_feet_contacts(env: ManagerBasedRLEnv, sensor_cfg: SceneEntityCfg, period: float) -> torch.Tensor:
-#     """Reward feet in contact with the ground in the correct phase."""
-#     # If the feet are in contact at the right time then positive reward, else 0 reward
-#
-#     # Contact sensor
-#     contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
-#
-#     # Get the current contacts
-#     in_contact = not contact_sensor.compute_first_air(period/200.)    # Checks if the foot recently broke contact - which tells us we are not in contact. Does not reward jitter but use the dt.
-#
-#     # Check if the foot should be in contact by comparing to the phase.
-#     ground_phase = is_ground_phase(env, period)
-#
-#     # Compute reward
-#     reward = torch.where(in_contact & ground_phase, 1.0, 0.0)
-#
-#     return reward
+def contact_no_vel(env, sensor_cfg: SceneEntityCfg, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")) -> torch.Tensor:
+    """Reward feet contact with zero velocity."""
+    # extract the used quantities (to enable type-hinting)
+    contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
+    contacts = contact_sensor.data.net_forces_w_history[:, :, sensor_cfg.body_ids, :].norm(dim=-1).max(dim=1)[0] > 1.0
+    asset = env.scene[asset_cfg.name]
+    body_vel = asset.data.body_lin_vel_w[:, asset_cfg.body_ids] * contacts.unsqueeze(-1)
+    # shape [B, num_feet, 3]
+    penalize = torch.square(body_vel[:,:,:3])
+    return torch.sum(penalize, dim=(1,2))
+
+
+
+def holonomic_constraint_vel(env: ManagerBasedRLEnv) -> torch.Tensor:
+    """Reward for enforcing holonomic velocity constraint during stance phase."""
+    hlip_cmd = env.command_manager.get_term("hlip_ref")
+
+    # [B, 3] linear velocity of stance foot
+    stance_foot_vel = hlip_cmd.stance_foot_vel  # [vx, vy, vz]
+    # [B] yaw angular velocity (only z-axis)
+    stance_foot_yaw_vel = hlip_cmd.stance_foot_ang_vel[:, 2]
+
+    # L2 norm of linear velocity + abs(yaw rate)
+    lin_vel_penalty = torch.norm(stance_foot_vel, dim=-1)
+    ang_vel_penalty = torch.abs(stance_foot_yaw_vel)
+
+    # Total penalty per env
+    return (torch.exp(-(lin_vel_penalty)/0.1) + torch.exp(-(ang_vel_penalty)/0.1))/2.0
+
+def holonomic_constraint(env: ManagerBasedRLEnv) -> torch.Tensor:
+    """Reward holonomic constraint."""
+    hlip_cmd = env.command_manager.get_term("hlip_ref")
+    stance_foot_pos = hlip_cmd.stance_foot_pos_0
+    stance_foot_pos_cur = hlip_cmd.stance_foot_pos
+    pos_err_xy = torch.norm(stance_foot_pos_cur[:, :2] - stance_foot_pos[:, :2], dim=-1)
+    z_des = torch.min(torch.tensor(0.037, device=env.device),stance_foot_pos[:, 2])
+    pos_err_z  = torch.abs(stance_foot_pos_cur[:, 2] - z_des)
+
+    # Orientation: roll, pitch, yaw
+    stance_ori_0 = hlip_cmd.stance_foot_ori_0  # [B, 3]
+    stance_ori_cur = hlip_cmd.stance_foot_ori  # [B, 3]
+  
+    # If enforcing zero roll, roll_0 is assumed to be 0
+    roll_error = torch.abs(stance_ori_cur[:, 0])  # roll deviation from 0
+    yaw_error = torch.abs(stance_ori_cur[:, 2] - stance_ori_0[:, 2])  # yaw deviation from fixed
+
+    # Wrap yaw error to [-pi, pi]
+    yaw_error = (yaw_error + torch.pi) % (2 * torch.pi) - torch.pi
+
+    # Rewards
+    pos_reward_xy = torch.exp(-pos_err_xy**2 / 0.01) 
+    pos_reward_z = torch.exp(-pos_err_z**2 / 0.01)
+    roll_reward = torch.exp(-roll_error**2 / 0.01)
+    yaw_reward = torch.exp(-yaw_error**2 / 0.01)
+
+    return (pos_reward_xy + pos_reward_z + roll_reward + yaw_reward)/4
 
 def lip_gait_tracking(env: ManagerBasedRLEnv, sensor_cfg: SceneEntityCfg, period: float, std: float,
                       nom_height: float, Tswing: float, command_name: str, wdes: float,
@@ -131,15 +197,12 @@ def lip_gait_tracking(env: ManagerBasedRLEnv, sensor_cfg: SceneEntityCfg, period
     # If the feet are in contact at the right time then positive reward, else 0 reward
 
     # Get the robot asset
-    robot = env.scene[asset_cfg.name]
-
     # Contact sensor
     contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
 
     # Get the current contacts
     # in_contact = ~contact_sensor.compute_first_air()[:, sensor_cfg.body_ids]  # Checks if the foot recently broke contact - which tells us we are not in contact. Does not reward jitter but use the dt.
     in_contact = contact_sensor.data.net_forces_w_history[:, :, sensor_cfg.body_ids, :].norm(dim=-1).max(dim=1)[0] > 1.0
-
     in_contact = in_contact.float()
 
     # Contact schedule function
@@ -149,46 +212,54 @@ def lip_gait_tracking(env: ManagerBasedRLEnv, sensor_cfg: SceneEntityCfg, period
     # Compute reward
     reward = (in_contact[:, 0] - in_contact[:, 1])*phi_c # TODO: Does it help to remove the schedule here? - seemed to get some instability
 
-    # Add in the foot tracking
-    foot_pos = robot.data.body_pos_w[:, asset_cfg.body_ids, :2]
-    swing_foot_pos = foot_pos[:, int(0.5 + 0.5*torch.sign(phi_c))]
-    # swing_foot_pos = foot_pos[:, ((env.cfg.control_count + 1) % 2), :]
+    return reward
 
-    # print(f"swing foot index: {((env.cfg.control_count + 1) % 2)}, in contact 0: {in_contact[:, 0]}")
-    # print(f"foot index: {int(0.5 + 0.5*torch.sign(phi_c))}")
-    # print(f"stance foot pos: {stance_foot_pos}, des pos: {env.cfg.current_des_step[:, :2]}")
+def reference_tracking(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    term_std: Sequence[float],
+    term_weight: Sequence[float],
+) -> torch.Tensor:
+    """
+    Exponential reward per dimension, scaled by weight — ignores zero-weight terms.
+    """
+    command = env.command_manager.get_term(command_name)
+    err = command.y_act - command.y_out  # [B, D]
 
-    # TODO: Debug and put back!
-    # reward = reward * torch.exp(-torch.norm(env.cfg.current_des_step[:, :2] - swing_foot_pos, dim=1) / std)
+    weight_vec = torch.as_tensor(term_weight, dtype=err.dtype, device=err.device)  # [D]
+    std_vec = torch.as_tensor(term_std, dtype=err.dtype, device=err.device)        # [D]
+
+    # [B, D] scaled squared error per dimension
+    err_sq_scaled = (err ** 2) / (std_vec ** 2)
+
+    # Apply element-wise exp(-error²/std²) and weight
+    reward_per_dim = weight_vec * torch.exp(-err_sq_scaled)  # [B, D]
+    reward = reward_per_dim.sum(dim=1)/torch.sum(weight_vec)  # [B]
 
     return reward
 
-def lip_feet_tracking(env: ManagerBasedRLEnv, period: float, std: float,
-                      Tswing: float,
-                      feet_bodies: SceneEntityCfg,
-                      asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"), ) -> torch.Tensor:
-    """Reward the lip foot step tracking."""
-    # Get the robot asset
-    robot = env.scene[asset_cfg.name]
 
-    # Contact schedule function
-    tp = (env.sim.current_time % period) / period     # Scaled between 0-1
-    phi_c = torch.tensor(math.sin(2*torch.pi*tp)/math.sqrt(math.sin(2*torch.pi*tp)**2 + Tswing), device=env.device)
+def reference_vel_tracking(    env: ManagerBasedRLEnv,
+    command_name: str,
+    term_std: Sequence[float],
+    term_weight: Sequence[float],
+) -> torch.Tensor:
+    """Reference tracking with element-wise term weights."""
+    # 1. fetch the command and compute error [B, D]
+    command = env.command_manager.get_term(command_name)
+    err = command.dy_act - command.dy_out
 
-    # Foot tracking
-    foot_pos = robot.data.body_pos_w[:, feet_bodies.body_ids, :2]
-    swing_foot_pos = foot_pos[:, int(0.5 + 0.5*torch.sign(phi_c))]
-    reward = torch.exp(-torch.norm(env.cfg.current_des_step[:, :2] - swing_foot_pos, dim=1) / std)
+    weight_vec = torch.as_tensor(term_weight, dtype=err.dtype, device=err.device)  # [D]
+    std_vec = torch.as_tensor(term_std, dtype=err.dtype, device=err.device)        # [D]
 
-    # print(f"swing_foot_norm: {torch.norm(swing_foot_pos, dim=1)}")
-    # print(f"distance: {torch.norm(env.cfg.current_des_step[:, :2] - swing_foot_pos, dim=1)}")
-    # print(f"reward: {reward}")
+    # [B, D] scaled squared error per dimension
+    err_sq_scaled = (err ** 2) / (std_vec ** 2)
 
-    # Update the com linear velocity running average
-    alpha = 0.25
-    env.cfg.com_lin_vel_avg = (1-alpha)*env.cfg.com_lin_vel_avg + alpha*robot.data.root_com_lin_vel_w
-
+    # Apply element-wise exp(-error²/std²) and weight
+    reward_per_dim = weight_vec * torch.exp(-err_sq_scaled)  # [B, D]
+    reward = reward_per_dim.sum(dim=1)/torch.sum(weight_vec)  # [B]
     return reward
+
 
 def track_heading(env: ManagerBasedRLEnv, command_name: str,
                   std: float,
@@ -375,12 +446,3 @@ def phase_contact(
             res += ~(contact ^ is_stance)
     return res
 
-def contact_no_vel(env, sensor_cfg: SceneEntityCfg, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")) -> torch.Tensor:
-    """Reward feet contact with zero velocity."""
-    # extract the used quantities (to enable type-hinting)
-    contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
-    contacts = contact_sensor.data.net_forces_w_history[:, :, sensor_cfg.body_ids, :].norm(dim=-1).max(dim=1)[0] > 1.0
-    asset = env.scene[asset_cfg.name]
-    body_vel = asset.data.body_lin_vel_w[:, asset_cfg.body_ids] * contacts.unsqueeze(-1)
-    penalize = torch.square(body_vel[:,:,:3])
-    return torch.sum(penalize, dim=(1,2))
