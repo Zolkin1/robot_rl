@@ -19,6 +19,16 @@ from isaaclab.utils.math import euler_xyz_from_quat, wrap_to_pi, quat_rotate_inv
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedRLEnv
 
+def track_lin_vel_x_exp(
+    env: ManagerBasedRLEnv, std: float, command_name: str, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")
+) -> torch.Tensor:
+    """Reward tracking of linear velocity commands (xy axes) using exponential kernel."""
+    # extract the used quantities (to enable type-hinting)
+    asset = env.scene[asset_cfg.name]
+    # compute the error
+    lin_vel_error = torch.square(env.command_manager.get_command(command_name)[:, :1] - asset.data.root_lin_vel_b[:, :1])
+    return torch.exp(-torch.squeeze(lin_vel_error) / std**2)
+
 def clf_reward(env: ManagerBasedRLEnv, command_name: str, max_clf: float = 100.0) -> torch.Tensor:
     """Negative CLF value as a reward (i.e., -V(η)), clipped to [-1, 0]."""
     ref_term = env.command_manager.get_term(command_name)

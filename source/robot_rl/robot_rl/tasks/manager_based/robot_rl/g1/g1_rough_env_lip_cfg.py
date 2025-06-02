@@ -23,11 +23,7 @@ from robot_rl.tasks.manager_based.robot_rl.mdp.cmd_cfg import HLIPCommandCfg
 ##
 from robot_rl.assets.robots.g1_21j import G1_MINIMAL_CFG  # isort: skip
 
-##
-# LIP Specific Constants
-##
-WDES = 0.6 #0.2 #0.25
-
+#
 
 @configclass
 class G1RoughLipCommandsCfg(CommandsCfg):
@@ -94,10 +90,10 @@ class G1RoughLipRewards(HumanoidRewardCfg):
                 0.1, 0.1, 0.05,   # swing foot x, y, z
                 0.5, 0.5, 0.5     # swing foot roll, pitch, yaw
                 ],
-            "term_weight": [1.0,1.0,1.0, #com x,y,z
+            "term_weight": [1.0,3.0,1.0, #com x,y,z
                             2.0,2.0,1.0, #pelvis roll, pitch, yaw
-                            15.0,5.0,20.0, #swing foot x,y,z
-                            1.0,0.0,0, #swing foot roll, pitch, yaw
+                            15.0,15.0,20.0, #swing foot x,y,z
+                            1.0,0.0,3.0, #swing foot roll, pitch, yaw
                           ]
         }
     )
@@ -108,39 +104,46 @@ class G1RoughLipRewards(HumanoidRewardCfg):
         params={
             "command_name": "hlip_ref",
             "term_std": [
-                0.3, 0.3, 0.1,    # COM velocity x, y, z  — less sensitive to x/y, tighter for z (often near 0)
+                0.3, 0.4, 0.1,    # COM velocity x, y, z  — less sensitive to x/y, tighter for z (often near 0)
                 0.5, 0.5, 0.5,    # Pelvis angular velocity roll, pitch, yaw — wide range, low precision needed
                 0.2, 0.2, 0.2,    # Swing foot linear velocity x, y, z — more critical
                 0.5, 0.5, 0.5     # Swing foot angular velocity roll, pitch, yaw — usually sloppy
             ],
             "term_weight": [
-                0.2, 0.4, 3.0,    # COM velocity x, y, z — prioritize planar motion
-                1.0, 1.0, 1.0,    # Pelvis angular vel roll, pitch, yaw — soft regularization
+                0.2, 3.0, 3.0,    # COM velocity x, y, z — prioritize planar motion
+                1.0, 1.0, 5.0,    # Pelvis angular vel roll, pitch, yaw — soft regularization
                 5.0, 5.0, 1.0,    # Swing foot linear vel x, y, z — z (vertical swing timing) is crucial
-                0.0, 0.0, 0.0     # Swing foot angular vel — low priority unless you're doing precision landings
+                0.0, 0.0, 5.0     # Swing foot angular vel — low priority unless you're doing precision landings
             ]
 
         }
     )
 
 
-    clf_reward = RewTerm(
-        func=mdp.clf_reward,
-        weight=-1.0,
+    # clf_reward = RewTerm(
+    #     func=mdp.clf_reward,
+    #     weight=-1.0,
+    #     params={
+    #         "command_name": "hlip_ref",
+    #     }
+    # )
+
+    # clf_decreasing_condition = RewTerm(
+    #     func=mdp.clf_decreasing_condition,
+    #     weight=-2.0,
+    #     params={
+    #         "command_name": "hlip_ref",
+    #     }
+    # )
+
+    track_lin_vel_x_exp = RewTerm(
+        func=mdp.track_lin_vel_x_exp,
+        weight=3.0,
         params={
-            "command_name": "hlip_ref",
+            "command_name": "base_velocity",
+            "std": 0.5,
         }
     )
-
-    clf_decreasing_condition = RewTerm(
-        func=mdp.clf_decreasing_condition,
-        weight=-2.0,
-        params={
-            "command_name": "hlip_ref",
-        }
-    )
-
-    
 
 
 @configclass
@@ -178,7 +181,7 @@ class G1RoughLipEnvCfg(HumanoidEnvCfg):
         # self.events.randomize_ground_contact_friction.params["static_friction_range"] = (0.1, 1.25)
         # self.events.randomize_ground_contact_friction.params["dynamic_friction_range"] = (0.1, 1.25)
         self.events.reset_robot_joints.params["position_range"] = (1.0, 1.0)
-        self.events.base_external_force_torque.params["asset_cfg"].body_names = ["pelvis_link"]
+        # self.events.base_external_force_torque.params["asset_cfg"].body_names = ["pelvis_link"]
         self.events.reset_base.params = {
             
             "pose_range": {"x": (-0.5, 0.5), "y": (-0.5, 0.5), "yaw": (0,0)}, #(-3.14, 3.14)},
@@ -220,8 +223,9 @@ class G1RoughLipEnvCfg(HumanoidEnvCfg):
         self.rewards.joint_deviation_hip = None
         self.rewards.contact_no_vel = None
         self.rewards.alive = None
-        # self.rewards.track_lin_vel_xy_exp = None
-        self.rewards.track_ang_vel_z_exp.weight = 1.0
+        self.rewards.track_lin_vel_xy_exp = None
+        self.rewards.track_ang_vel_z_exp = None
+        # self.rewards.track_ang_vel_z_exp.weight = 1.0
  
         # torque, acc, vel, action rate regularization
         self.rewards.dof_torques_l2.weight = -1.0e-5
@@ -249,7 +253,7 @@ class G1RoughLipEnvCfg(HumanoidEnvCfg):
         self.rewards.height_torso.weight = -1.0 #-10.0
         # self.rewards.feet_clearance.weight = -20.0
         # self.rewards.lin_vel_z_l2.weight =  -2.0 
-        self.rewards.track_lin_vel_xy_exp.weight = 3.5 #1
+        # self.rewards.track_lin_vel_xy_exp.weight = 3.5 #1
         # self.rewards.phase_contact.weight = 0 #0.25
         
         

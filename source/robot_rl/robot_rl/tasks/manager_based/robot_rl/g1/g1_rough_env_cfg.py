@@ -16,13 +16,15 @@ from robot_rl.tasks.manager_based.robot_rl.humanoid_env_cfg import HumanoidEnvCf
 # Pre-defined configs
 ##
 from robot_rl.assets.robots.g1_21j import G1_MINIMAL_CFG  # isort: skip
-
+from robot_rl.tasks.manager_based.robot_rl.g1.g1_rough_env_lip_cfg import G1RoughLipCommandsCfg
 ##
 # Environment configuration
 ##
 @configclass
 class G1RoughEnvCfg(HumanoidEnvCfg):
-    """Configuration for the G1 Flat environment."""
+    """Configuration for the G1 Rough environment."""
+    commands: G1RoughLipCommandsCfg = G1RoughLipCommandsCfg()
+    
     def __post_init__(self):
         # post init of parent
         super().__post_init__()
