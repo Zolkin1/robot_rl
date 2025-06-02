@@ -94,10 +94,10 @@ class G1RoughLipRewards(HumanoidRewardCfg):
                 0.1, 0.1, 0.05,   # swing foot x, y, z
                 0.5, 0.5, 0.5     # swing foot roll, pitch, yaw
                 ],
-            "term_weight": [1.0,0.0,1.0, #com x,y,z
-                            1.0,2.0,1.0, #pelvis roll, pitch, yaw
+            "term_weight": [1.0,1.0,1.0, #com x,y,z
+                            2.0,2.0,1.0, #pelvis roll, pitch, yaw
                             15.0,5.0,20.0, #swing foot x,y,z
-                            0.0,0.0,0, #swing foot roll, pitch, yaw
+                            1.0,0.0,0, #swing foot roll, pitch, yaw
                           ]
         }
     )
@@ -114,7 +114,7 @@ class G1RoughLipRewards(HumanoidRewardCfg):
                 0.5, 0.5, 0.5     # Swing foot angular velocity roll, pitch, yaw — usually sloppy
             ],
             "term_weight": [
-                0.0, 0.0, 3.0,    # COM velocity x, y, z — prioritize planar motion
+                0.2, 0.4, 3.0,    # COM velocity x, y, z — prioritize planar motion
                 1.0, 1.0, 1.0,    # Pelvis angular vel roll, pitch, yaw — soft regularization
                 5.0, 5.0, 1.0,    # Swing foot linear vel x, y, z — z (vertical swing timing) is crucial
                 0.0, 0.0, 0.0     # Swing foot angular vel — low priority unless you're doing precision landings
@@ -134,7 +134,7 @@ class G1RoughLipRewards(HumanoidRewardCfg):
 
     clf_decreasing_condition = RewTerm(
         func=mdp.clf_decreasing_condition,
-        weight=-1.0,
+        weight=-2.0,
         params={
             "command_name": "hlip_ref",
         }
@@ -224,10 +224,10 @@ class G1RoughLipEnvCfg(HumanoidEnvCfg):
         self.rewards.track_ang_vel_z_exp.weight = 1.0
  
         # torque, acc, vel, action rate regularization
-        # self.rewards.dof_torques_l2.weight = -1.0e-5
+        self.rewards.dof_torques_l2.weight = -1.0e-5
         # self.rewards.dof_pos_limits.weight = -5.0
-        # self.rewards.dof_acc_l2.weight = -2.5e-7
-        # self.rewards.dof_vel_l2.weight = -1.0e-3
+        self.rewards.dof_acc_l2.weight = -2.5e-7
+        self.rewards.dof_vel_l2.weight = -1.0e-5
         # self.rewards.action_rate_l2.weight = -0.001
         self.rewards.joint_deviation_arms.weight = -1.0             # Arms regularization
         self.rewards.joint_deviation_torso.weight = -1.0
@@ -235,9 +235,9 @@ class G1RoughLipEnvCfg(HumanoidEnvCfg):
         # self.rewards.joint_deviation_arms = None
         # self.rewards.joint_deviation_torso = None
         self.rewards.dof_pos_limits = None
-        self.rewards.dof_vel_l2 = None
-        self.rewards.dof_acc_l2 = None
-        self.rewards.dof_torques_l2 = None
+        # self.rewards.dof_vel_l2 = None
+        # self.rewards.dof_acc_l2 = None
+        # self.rewards.dof_torques_l2 = None
         self.rewards.action_rate_l2 = None  
         
         

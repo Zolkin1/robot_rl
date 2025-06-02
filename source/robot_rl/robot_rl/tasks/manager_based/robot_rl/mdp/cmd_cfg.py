@@ -6,19 +6,20 @@ import isaaclab.sim as sim_utils
 
 
 Q_weights = [
-        1.0,  0.5,   # com_x: position error weighted more than velocity
-        1.0,  0.5,   # com_y
-        0.8,  0.4,   # com_z: vertical less critical than horizontal
-        0.6,  0.3,   # pelvis_roll
-        0.6,  0.3,   # pelvis_pitch
-        0.6,  0.3,   # pelvis_yaw
-        0.5,  0.25,  # swing_x: moderate foot placement error
-        0.5,  0.25,  # swing_y
-        0.5,  0.25,  # swing_z
-        0.3,  0.15,  # swing_ori_roll: orientation less critical
-        0.3,  0.15,  # swing_ori_pitch
-        0.3,  0.15   # swing_ori_yaw
-    ]
+    25.0,   0.0,    # com_x pos, vel
+    25.0,   2.22,   # com_y pos, vel
+    100.0,  300.0,  # com_z pos, vel
+    4.0,    4.0,    # pelvis_roll pos, vel
+    8.0,    4.0,    # pelvis_pitch pos, vel
+    4.0,    4.0,    # pelvis_yaw pos, vel
+    1500.0, 125.0,  # swing_x pos, vel
+    500.0,  125.0,  # swing_y pos, vel
+    2000.0, 25.0,   # swing_z pos, vel
+    4.0,    0.0,    # swing_ori_roll pos, vel
+    0.0,    0.0,    # swing_ori_pitch pos, vel
+    0.0,    0.0,    # swing_ori_yaw pos, vel
+]
+
 
 R_weights = [
         0.1, 0.1, 0.1,    # CoM inputs: allow moderate effort

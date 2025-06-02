@@ -19,15 +19,14 @@ from isaaclab.utils.math import euler_xyz_from_quat, wrap_to_pi, quat_rotate_inv
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedRLEnv
 
-
-def clf_reward(env: ManagerBasedRLEnv, command_name: str, max_clf: float = 10.0) -> torch.Tensor:
+def clf_reward(env: ManagerBasedRLEnv, command_name: str, max_clf: float = 100.0) -> torch.Tensor:
     """Negative CLF value as a reward (i.e., -V(η)), clipped to [-1, 0]."""
     ref_term = env.command_manager.get_term(command_name)
     v = ref_term.v  # [B] scalar CLF value per env
 
     reward = torch.clamp(v, min=0.0, max=max_clf)/max_clf
+    
     return reward
-
 
 def clf_decreasing_condition(env: ManagerBasedRLEnv, command_name: str, alpha: float = 1.0, max_clf_decreasing: float = 200.0) -> torch.Tensor:
     """Penalty for violating the CLF decrease condition, clipped to [-1, 0]."""
@@ -42,7 +41,8 @@ def clf_decreasing_condition(env: ManagerBasedRLEnv, command_name: str, alpha: f
     clf_violation = clf_violation/max_clf_decreasing
     penalty = torch.clamp(clf_violation, min=0.0)  # only penalize violations
   
-    reward = torch.clamp(penalty, max=1.0) 
+    v_dot_penalty = torch.clamp(vdot,min=0.0)
+    reward = torch.clamp(penalty, max=1.0) + 0.1*v_dot_penalty
     return reward
 
 
@@ -168,7 +168,7 @@ def holonomic_constraint(env: ManagerBasedRLEnv) -> torch.Tensor:
     stance_foot_pos = hlip_cmd.stance_foot_pos_0
     stance_foot_pos_cur = hlip_cmd.stance_foot_pos
     pos_err_xy = torch.norm(stance_foot_pos_cur[:, :2] - stance_foot_pos[:, :2], dim=-1)
-    z_des = torch.min(torch.tensor(0.037, device=env.device),stance_foot_pos[:, 2])
+    z_des = torch.min(torch.tensor(0.036, device=env.device),stance_foot_pos[:, 2])
     pos_err_z  = torch.abs(stance_foot_pos_cur[:, 2] - z_des)
 
     # Orientation: roll, pitch, yaw
