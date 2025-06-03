@@ -342,6 +342,280 @@ def plot_trajectories(data, save_dir=None):
     #             plt.savefig(os.path.join(save_dir, 'log_terms.png'), dpi=300, bbox_inches='tight')
     #             plt.show()
 
+def plot_hzd_trajectories(data, save_dir=None):
+    """Plot HZD trajectories with proper labels and units"""
+    # Convert lists to numpy arrays and handle torch tensors
+    processed_data = {}
+    for key, values in data.items():
+        if isinstance(values[0], torch.Tensor):
+            processed_data[key] = np.array([v.cpu().numpy() for v in values])
+        else:
+            processed_data[key] = np.array(values)
+    
+    # Create time array
+    time_steps = np.arange(len(processed_data[list(processed_data.keys())[0]]))
+    
+    # Define state labels and units for HZD
+    state_labels = {
+        'y_out': [
+            'LeftFrontalHipJoint', 'RightFrontalHipJoint',
+            'LeftTransverseHipJoint', 'RightTransverseHipJoint',
+            'LeftSagittalHipJoint', 'RightSagittalHipJoint',
+            'LeftSagittalKneeJoint', 'RightSagittalKneeJoint',
+            'LeftSagittalAnkleJoint', 'RightSagittalAnkleJoint',
+            'LeftHenkeAnkleJoint', 'RightHenkeAnkleJoint'
+        ],
+        'dy_out': [
+            'LeftFrontalHipJoint', 'RightFrontalHipJoint',
+            'LeftTransverseHipJoint', 'RightTransverseHipJoint',
+            'LeftSagittalHipJoint', 'RightSagittalHipJoint',
+            'LeftSagittalKneeJoint', 'RightSagittalKneeJoint',
+            'LeftSagittalAnkleJoint', 'RightSagittalAnkleJoint',
+            'LeftHenkeAnkleJoint', 'RightHenkeAnkleJoint'
+        ],
+        'base_velocity': ['Linear x', 'Linear y', 'Angular z'],
+        "stance_foot_pos": ['x', 'y', 'z'],
+        "stance_foot_ori": ['roll', 'pitch', 'yaw'],
+        'cur_swing_time': ['Time'],
+        'y_act': [
+            'LeftFrontalHipJoint', 'RightFrontalHipJoint',
+            'LeftTransverseHipJoint', 'RightTransverseHipJoint',
+            'LeftSagittalHipJoint', 'RightSagittalHipJoint',
+            'LeftSagittalKneeJoint', 'RightSagittalKneeJoint',
+            'LeftSagittalAnkleJoint', 'RightSagittalAnkleJoint',
+            'LeftHenkeAnkleJoint', 'RightHenkeAnkleJoint'
+        ],
+        'dy_act': [
+            'LeftFrontalHipJoint', 'RightFrontalHipJoint',
+            'LeftTransverseHipJoint', 'RightTransverseHipJoint',
+            'LeftSagittalHipJoint', 'RightSagittalHipJoint',
+            'LeftSagittalKneeJoint', 'RightSagittalKneeJoint',
+            'LeftSagittalAnkleJoint', 'RightSagittalAnkleJoint',
+            'LeftHenkeAnkleJoint', 'RightHenkeAnkleJoint'
+        ],
+        'v': ['Velocity'],
+        'vdot': ['Acceleration'],
+        'reward': ['Reward']
+    }
+    
+    units = {
+        'y_out': ['rad'] * 12,  # All joint angles are in radians
+        'dy_out': ['rad/s'] * 12,  # All joint velocities are in rad/s
+        'base_velocity': ['m/s', 'm/s', 'rad/s'],
+        'stance_foot_pos': ['m', 'm', 'm'],
+        'stance_foot_ori': ['rad', 'rad', 'rad'],
+        'cur_swing_time': ['s'],
+        'y_act': ['rad'] * 12,
+        'dy_act': ['rad/s'] * 12,
+        'v': ['m/s'],
+        'vdot': ['m/s²'],
+        'reward': ['']
+    }
+
+    # Add error metrics labels and units
+    error_labels = {
+        'error_LeftFrontalHipJoint': 'Left Frontal Hip Error',
+        'error_RightFrontalHipJoint': 'Right Frontal Hip Error',
+        'error_LeftTransverseHipJoint': 'Left Transverse Hip Error',
+        'error_RightTransverseHipJoint': 'Right Transverse Hip Error',
+        'error_LeftSagittalHipJoint': 'Left Sagittal Hip Error',
+        'error_RightSagittalHipJoint': 'Right Sagittal Hip Error',
+        'error_LeftSagittalKneeJoint': 'Left Knee Error',
+        'error_RightSagittalKneeJoint': 'Right Knee Error',
+        'error_LeftSagittalAnkleJoint': 'Left Ankle Error',
+        'error_RightSagittalAnkleJoint': 'Right Ankle Error',
+        'error_LeftHenkeAnkleJoint': 'Left Henke Ankle Error',
+        'error_RightHenkeAnkleJoint': 'Right Henke Ankle Error'
+    }
+
+    error_units = {
+        'error_LeftFrontalHipJoint': 'rad',
+        'error_RightFrontalHipJoint': 'rad',
+        'error_LeftTransverseHipJoint': 'rad',
+        'error_RightTransverseHipJoint': 'rad',
+        'error_LeftSagittalHipJoint': 'rad',
+        'error_RightSagittalHipJoint': 'rad',
+        'error_LeftSagittalKneeJoint': 'rad',
+        'error_RightSagittalKneeJoint': 'rad',
+        'error_LeftSagittalAnkleJoint': 'rad',
+        'error_RightSagittalAnkleJoint': 'rad',
+        'error_LeftHenkeAnkleJoint': 'rad',
+        'error_RightHenkeAnkleJoint': 'rad'
+    }
+    
+    # Helper for subplot indexing
+    def get_ax(axs, idx, n_cols):
+        if axs.ndim == 1:
+            return axs[idx]
+        return axs[idx // n_cols, idx % n_cols]
+
+    env_ids = 0
+
+    if "stance_foot_pos" and "stance_foot_ori" in processed_data:
+        pos_data = processed_data["stance_foot_pos"]
+        ori_data = processed_data["stance_foot_ori"]
+        pos_data_0 = processed_data["stance_foot_pos_0"]
+        ori_data_0 = processed_data["stance_foot_ori_0"]
+
+        fig, axs = plt.subplots(2, 3, figsize=(15, 6))
+        fig.suptitle("Stance Foot Position and Orientation", fontsize=16)
+
+        # Position
+        pos_labels = ["x", "y", "z"]
+        for i in range(3):
+            ax = axs[0, i]
+            ax.plot(time_steps, pos_data[:, env_ids, i], label=f"pos {pos_labels[i]}")
+            ax.plot(time_steps, pos_data_0[:, env_ids, i], label=f"pos_0 {pos_labels[i]}", linestyle='--')
+            ax.set_title(f"Position {pos_labels[i]}")
+            ax.set_xlabel("Time Steps")
+            ax.set_ylabel("m")
+            ax.grid(True)
+            ax.legend()
+
+        # Orientation
+        ori_labels = ["roll", "pitch", "yaw"]
+        for i in range(3):
+            ax = axs[1, i]
+            ax.plot(time_steps, ori_data[:, env_ids, i], label=f"ori {ori_labels[i]}")
+            ax.plot(time_steps, ori_data_0[:, env_ids, i], label=f"ori_0 {ori_labels[i]}", linestyle='--')
+            ax.set_title(f"Orientation {ori_labels[i]}")
+            ax.set_xlabel("Time Steps")
+            ax.set_ylabel("rad")
+            ax.grid(True)
+            ax.legend()
+
+        plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+        if save_dir:
+            plt.savefig(os.path.join(save_dir, "stance_foot_pos_ori.png"), dpi=300, bbox_inches="tight")
+        plt.show()
+
+    # Plot positions (y_out vs y_act)
+    if 'y_out' in processed_data and 'y_act' in processed_data:
+        n_dims = processed_data['y_out'].shape[2]
+        n_cols = 4
+        n_rows = (n_dims + n_cols - 1) // n_cols
+        fig, axs = plt.subplots(n_rows, n_cols, figsize=(5 * n_cols, 3 * n_rows))
+        fig.suptitle('Reference vs Actual Positions', fontsize=16)
+        axs = np.array(axs)
+        for i in range(n_dims):
+            ax = get_ax(axs, i, n_cols)
+            ax.plot(time_steps, processed_data['y_out'][:, env_ids, i], label='Reference', color='b')
+            ax.plot(time_steps, processed_data['y_act'][:, env_ids, i], label='Actual', color='r', linestyle='--')
+            label = state_labels['y_out'][i] if i < len(state_labels['y_out']) else f'Var {i}'
+            unit = units['y_out'][i] if i < len(units['y_out']) else ''
+            ax.set_title(label)
+            ax.set_xlabel('Time Steps')
+            ax.set_ylabel(unit)
+            ax.grid(True)
+            if i == 0:
+                ax.legend()
+        for i in range(n_dims, n_rows * n_cols):
+            ax = get_ax(axs, i, n_cols)
+            ax.set_visible(False)
+        plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+        if save_dir:
+            plt.savefig(os.path.join(save_dir, 'positions.png'), dpi=300, bbox_inches='tight')
+        plt.show()
+    
+    # Plot velocities (dy_out vs dy_act)
+    if 'dy_out' in processed_data and 'dy_act' in processed_data:
+        n_dims = processed_data['dy_out'].shape[2]
+        n_cols = 4
+        n_rows = (n_dims + n_cols - 1) // n_cols
+        fig, axs = plt.subplots(n_rows, n_cols, figsize=(5 * n_cols, 3 * n_rows))
+        fig.suptitle('Reference vs Actual Velocities', fontsize=16)
+        axs = np.array(axs)
+        for i in range(n_dims):
+            ax = get_ax(axs, i, n_cols)
+            ax.plot(time_steps, processed_data['dy_out'][:, env_ids, i], label='Reference', color='b')
+            ax.plot(time_steps, processed_data['dy_act'][:, env_ids, i], label='Actual', color='r', linestyle='--')
+            label = state_labels['dy_out'][i] if i < len(state_labels['dy_out']) else f'Var {i}'
+            unit = units['dy_out'][i] if i < len(units['dy_out']) else ''
+            ax.set_title(label)
+            ax.set_xlabel('Time Steps')
+            ax.set_ylabel(unit)
+            ax.grid(True)
+            if i == 0:
+                ax.legend()
+        for i in range(n_dims, n_rows * n_cols):
+            ax = get_ax(axs, i, n_cols)
+            ax.set_visible(False)
+        plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+        if save_dir:
+            plt.savefig(os.path.join(save_dir, 'velocities.png'), dpi=300, bbox_inches='tight')
+        plt.show()
+    
+    # Plot base velocity
+    if 'base_velocity' in processed_data:
+        n_dims = processed_data['base_velocity'].shape[2]
+        fig, axs = plt.subplots(1, n_dims, figsize=(5 * n_dims, 3))
+        fig.suptitle('Base Velocity', fontsize=16)
+        for i in range(n_dims):
+            ax = axs[i] if n_dims > 1 else axs
+            ax.plot(time_steps, processed_data['base_velocity'][:, env_ids, i])
+            label = state_labels['base_velocity'][i] if i < len(state_labels['base_velocity']) else f'Var {i}'
+            unit = units['base_velocity'][i] if i < len(units['base_velocity']) else ''
+            ax.set_title(label)
+            ax.set_xlabel('Time Steps')
+            ax.set_ylabel(unit)
+            ax.grid(True)
+        plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+        if save_dir:
+            plt.savefig(os.path.join(save_dir, 'base_velocity.png'), dpi=300, bbox_inches='tight')
+        plt.show()
+
+    # Plot v and vdot as two subplots in one figure
+    if 'v' in processed_data and 'vdot' in processed_data:
+        v_data = processed_data['v']
+        vdot_data = processed_data['vdot']
+        fig, axs = plt.subplots(2, 1, figsize=(10, 8), sharex=True)
+        
+        axs[0].plot(time_steps, v_data[:, env_ids], label='v', color='g')
+        axs[0].set_title('clf v')
+        axs[0].set_ylabel(units['v'][0] if 'v' in units else '')
+        axs[0].grid(True)
+        axs[0].legend()
+        
+        axs[1].plot(time_steps, vdot_data[:, env_ids], label='vdot', color='m')
+        axs[1].set_title('clf vdot')
+        axs[1].set_xlabel('Time Steps')
+        axs[1].set_ylabel(units['vdot'][0] if 'vdot' in units else '')
+        axs[1].grid(True)
+        axs[1].legend()
+        
+        plt.tight_layout()
+        if save_dir:
+            plt.savefig(os.path.join(save_dir, 'v_and_vdot.png'), dpi=300, bbox_inches='tight')
+        plt.show()
+
+    # Plot error metrics
+    error_metrics = [key for key in processed_data.keys() if key.startswith('error_')]
+    if error_metrics:
+        n_metrics = len(error_metrics)
+        n_cols = 4
+        n_rows = (n_metrics + n_cols - 1) // n_cols
+        fig, axs = plt.subplots(n_rows, n_cols, figsize=(5 * n_cols, 3 * n_rows))
+        fig.suptitle('Error Metrics', fontsize=16)
+        axs = np.array(axs)
+        
+        for i, metric in enumerate(error_metrics):
+            ax = get_ax(axs, i, n_cols)
+            ax.plot(time_steps, processed_data[metric][:, env_ids], label=error_labels.get(metric, metric))
+            ax.set_title(error_labels.get(metric, metric))
+            ax.set_xlabel('Time Steps')
+            ax.set_ylabel(error_units.get(metric, ''))
+            ax.grid(True)
+            ax.legend()
+        
+        # Hide unused subplots
+        for i in range(n_metrics, n_rows * n_cols):
+            ax = get_ax(axs, i, n_cols)
+            ax.set_visible(False)
+        
+        plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+        if save_dir:
+            plt.savefig(os.path.join(save_dir, 'error_metrics.png'), dpi=300, bbox_inches='tight')
+        plt.show()
 
 def main():
     # Find the most recent log directory

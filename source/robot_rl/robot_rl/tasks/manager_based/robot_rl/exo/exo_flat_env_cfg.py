@@ -156,3 +156,16 @@ class ExoPlayEnvCfg(ExoFlatEnvCfg):
         
         self.scene.num_envs = 2
         self.scene.env_spacing = 2.5
+
+@configclass
+class ExoHZDPlayEnvCfg(ExoHZDEnvCfg):
+    
+    def __post_init__(self):
+        super().__post_init__()
+
+        self.commands.base_velocity.ranges.lin_vel_x = (0.13,0.13)
+        self.commands.base_velocity.ranges.lin_vel_y = (0.0, 0.0)
+        self.commands.base_velocity.ranges.ang_vel_z = (0.0, 0.0)
+        
+        self.scene.num_envs = 2
+        self.scene.env_spacing = 2.5

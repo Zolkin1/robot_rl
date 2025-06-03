@@ -19,7 +19,7 @@ from isaaclab.app import AppLauncher
 import cli_args
 
 # Import plot_trajectories functions
-from plot_trajectories import plot_trajectories
+from plot_trajectories import plot_trajectories, plot_hzd_trajectories
 from train_policy import ENVIRONMENTS
 # Experiment names mapping for different environments
 EXPERIMENT_NAMES = {
@@ -28,6 +28,7 @@ EXPERIMENT_NAMES = {
     "clf": "g1",
     "ref_tracking": "g1",
     "exo_hlip": "exo",
+    "exo_hzd": "exo",
 }
 
 SIM_ENVIRONMENTS = {
@@ -36,6 +37,7 @@ SIM_ENVIRONMENTS = {
     "clf": "G1-flat-ref-play",
     "ref_tracking": "G1-flat-ref-play",
     "exo_hlip": "Exo-play-vel",
+    "exo_hzd": "Exo-hzd-play-vel",
 }
 
 class DataLogger:
@@ -122,15 +124,19 @@ def parse_args():
 def extract_reference_trajectory(env, log_vars):
     # Get the underlying environment by unwrapping
     unwrapped_env = env.unwrapped
-    # Get the HLIP reference term from the command manager
-    hlip_Ref = unwrapped_env.command_manager.get_term("hlip_ref")
+
+    cfg_name = type(env.cfg).__name__
+    if "hzd" in cfg_name.lower():
+        ref = unwrapped_env.command_manager.get_term("hzd_ref")
+    else:
+        ref = unwrapped_env.command_manager.get_term("hlip_ref")
     results = {}
 
     for var in log_vars:
-        if hasattr(hlip_Ref, var):
-            results[var] = getattr(hlip_Ref, var)
-        elif var in hlip_Ref.metrics:
-            results[var] = hlip_Ref.metrics[var]
+        if hasattr(ref, var):
+            results[var] = getattr(ref, var)
+        elif var in ref.metrics:
+            results[var] = ref.metrics[var]
         elif var == "base_velocity":
             results[var] = unwrapped_env.command_manager.get_command("base_velocity")
         else:
@@ -363,7 +369,11 @@ def main():
         plot_dir = os.path.join(play_log_dir, "plots")
         os.makedirs(plot_dir, exist_ok=True)
         print(f"[DEBUG] Generating plots in directory: {plot_dir}")
-        plot_trajectories(logger.data, save_dir=plot_dir)
+        
+        if args_cli.env_type == "exo_hzd":
+            plot_hzd_trajectories(logger.data, save_dir=plot_dir)
+        else:
+            plot_trajectories(logger.data, save_dir=plot_dir)
 
     except Exception as e:
         print(f"[ERROR] An error occurred: {str(e)}")
