@@ -1,9 +1,10 @@
 from .hlip_cmd import HLIPCommandTerm
+from .hzd_cmd import HZDCommandTerm
 from isaaclab.managers import CommandTermCfg
 from isaaclab.utils import configclass
 from isaaclab.markers import VisualizationMarkers, VisualizationMarkersCfg
 import isaaclab.sim as sim_utils
-
+import torch
 
 Q_weights = [
     25.0,   0.0,    # com_x pos, vel
@@ -88,5 +89,26 @@ class HLIPCommandCfg(CommandTermCfg):
     )
     current_pose_visualizer_cfg.markers["current"].scale = (0.1, 0.1, 0.1)
 
+    Q_weights = Q_weights
+    R_weights = R_weights
+
+
+
+@configclass
+class HZDCommandCfg(CommandTermCfg):
+    """
+    Configuration for the HZDCommandTerm.
+    """
+    class_type: type = HZDCommandTerm
+    asset_name: str = "robot"
+    foot_body_name: str = ".*_ankle_roll_link"
+    num_joints: int = 12
+    num_coeffs: int = 8
+    joint_patterns: list = [".*HipJoint", ".*KneeJoint", ".*AnkleJoint"]  # Regex patterns to match joint names
+    resampling_time_range: tuple[float, float] = (5.0, 15.0)
+    traj_coeff: dict[str, torch.Tensor] = {}
+    traj_coeff_remap: dict[str, torch.Tensor] = {}
+    debug_vis: bool = False
+    trajectory_tracking_visualizer_cfg: dict = {}
     Q_weights = Q_weights
     R_weights = R_weights

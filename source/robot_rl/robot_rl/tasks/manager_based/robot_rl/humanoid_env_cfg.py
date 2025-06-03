@@ -39,7 +39,6 @@ from . import mdp
 ##
 
 # Constants (do this better)
-# TODO: Try playing with the period for the lip model
 cf = HLIPCommandCfg()
 PERIOD = cf.gait_period
 

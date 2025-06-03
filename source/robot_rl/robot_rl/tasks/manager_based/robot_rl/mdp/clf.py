@@ -25,8 +25,7 @@ class CLF:
         self.n_outputs = n_outputs
 
         # Convert LIP dynamics to NumPy
-        self.A_lip = A_lip.cpu().numpy()
-        self.B_lip = B_lip.cpu().numpy()
+   
 
         # Set up default Q, R if not provided
         # Q_weights should be length = n_states, R_weights length = n_inputs

@@ -72,11 +72,17 @@ class G1RoughLipRewards(HumanoidRewardCfg):
     holonomic_constraint = RewTerm(
         func=mdp.holonomic_constraint,
         weight=4.0,
+        params={
+            "command_name": "hlip_ref",
+        }
     )
 
     holonomic_constraint_vel = RewTerm(
         func=mdp.holonomic_constraint_vel,
         weight=2.0,
+        params={
+            "command_name": "hlip_ref",
+        }
     )
 
     reference_tracking = RewTerm(

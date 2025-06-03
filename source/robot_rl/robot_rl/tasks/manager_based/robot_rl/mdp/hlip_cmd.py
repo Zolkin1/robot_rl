@@ -148,7 +148,9 @@ class HLIPCommandTerm(CommandTerm):
 
 
     def generate_reference_trajectory(self):
+        
         base_velocity = self.env.command_manager.get_command("base_velocity")  # (N,2)
+
         N = base_velocity.shape[0]
         T = torch.full((N,), self.T, dtype=torch.float32, device=base_velocity.device)
 
@@ -323,7 +325,7 @@ class HLIPCommandTerm(CommandTerm):
         
         #how to handle for the first step?
         #i.e. v is not defined
-        vdot,vcur = self.clf.compute_vdot(self.y_act,self.y_nom,self.dy_act,self.dy_out,self.v)
+        vdot,vcur = self.clf.compute_vdot(self.y_act,self.y_out,self.dy_act,self.dy_out,self.v)
         self.vdot = vdot
         self.v = vcur
        

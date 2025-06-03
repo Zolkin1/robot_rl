@@ -12,7 +12,8 @@ ENVIRONMENTS = {
     "custom": "G1-flat-vel",
     "ref_tracking": "G1-flat-ref-tracking",
     "clf": "G1-flat-clf",
-    "exo_ref": "Exo-flat-vel",
+    "exo_hlip": "Exo-flat-vel",
+    "exo_hzd": "Exo-hzd-vel",
 }
 
 def parse_args():

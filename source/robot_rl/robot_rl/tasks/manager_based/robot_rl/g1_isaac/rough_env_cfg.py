@@ -102,7 +102,10 @@ class G1Rewards(RewardsCfg):
 
 
 class G1_Observations(G1RoughLipObservationsCfg):
-    des_foot_pos = None
+    def __post_init__(self):
+        super().__post_init__()
+        self.policy.des_foot_pos = None
+        self.critic.des_foot_pos = None
 
 @configclass
 class G1RoughEnvCfg(LocomotionVelocityRoughEnvCfg):

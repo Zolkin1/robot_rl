@@ -5,6 +5,7 @@ from isaaclab.assets.articulation import ArticulationCfg
 from dataclasses import dataclass
 import torch,yaml
 import numpy as np
+from copy import deepcopy
 @dataclass
 class JointTrajectoryConfig:
     """Configuration for storing joint trajectory data."""
@@ -26,16 +27,16 @@ class JointTrajectoryConfig:
 
     joint_trajectories = {
         "LeftFrontalHipJoint": [0.0584, 0.0389, 0.1169, 0.1863, 0.2513, 0.1205, 0.1200, 0.1320],
-        "LeftTransverseHipJoint": [-0.0446, 0.0532, 0.0369, -0.1133, -0.0761, -0.0337, -0.0313, -0.0349],
-        "LeftSagittalHipJoint": [-0.3070, -0.3056, -0.4172, -0.7477, -0.5681, -0.6444, -0.5866, -0.4932],
-        "LeftSagittalKneeJoint": [0.2147, 0.2096, 0.3116, 0.6107, 0.4086, 0.5875, 0.4639, 0.2843],
-        "LeftSagittalAnkleJoint": [-0.1642, -0.2070, -0.2000, -0.1416, -0.0845, -0.1001, -0.0902, -0.0460],
-        "LeftHenkeAnkleJoint": [-0.1277, -0.1793, -0.3425, -0.0403, -0.3654, -0.2275, -0.2114, -0.1167],
         "RightFrontalHipJoint": [-0.1346, -0.1457, -0.0767, -0.0197, 0.0412, -0.0329, -0.0819, -0.0564],
+        "LeftTransverseHipJoint": [-0.0446, 0.0532, 0.0369, -0.1133, -0.0761, -0.0337, -0.0313, -0.0349],
         "RightTransverseHipJoint": [0.0344, 0.0985, 0.1124, 0.0109, 0.0258, 0.0424, 0.0526, 0.0458],
+        "LeftSagittalHipJoint": [-0.3070, -0.3056, -0.4172, -0.7477, -0.5681, -0.6444, -0.5866, -0.4932],
         "RightSagittalHipJoint": [-0.4929, -0.5712, -0.5351, -0.3030, -0.4423, -0.2313, -0.2596, -0.3062],
+        "LeftSagittalKneeJoint": [0.2147, 0.2096, 0.3116, 0.6107, 0.4086, 0.5875, 0.4639, 0.2843],
         "RightSagittalKneeJoint": [0.2830, 0.3422, 0.3160, 0.0257, 0.4833, 0.1644, 0.1561, 0.2124],
+        "LeftSagittalAnkleJoint": [-0.1642, -0.2070, -0.2000, -0.1416, -0.0845, -0.1001, -0.0902, -0.0460],
         "RightSagittalAnkleJoint": [-0.0461, -0.0866, -0.0964, -0.0025, -0.2497, -0.1070, -0.1093, -0.1637],
+        "LeftHenkeAnkleJoint": [-0.1277, -0.1793, -0.3425, -0.0403, -0.3654, -0.2275, -0.2114, -0.1167],
         "RightHenkeAnkleJoint": [0.1192, 0.0613, 0.0067, -0.0504, -0.0242, -0.0022, 0.0456, 0.1241],
     }
 
@@ -87,7 +88,7 @@ class JointTrajectoryConfig:
         return torch.stack(trajectories)
 
     def remap_base_symmetric(self)->dict:
-        remapped_trajectories = self.base_trajectories
+        remapped_trajectories = deepcopy(self.base_trajectories)
         # Negate specific joint trajectories
         joints_to_negate = ["y", "roll", "yaw"]
         for joint in joints_to_negate:
