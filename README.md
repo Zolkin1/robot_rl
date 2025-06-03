@@ -149,6 +149,10 @@ python /robot_rl/scripts/rsl_rl/play.py --task=G1-vel --num_envs=10 --checkpoint
 
 ```
 
+# Obelisk Transfer
+First, set the environment variable `ROBOT_RL_ROOT` to the repo path.
+
+
 ## Other Deps
 pygame
 mujoco

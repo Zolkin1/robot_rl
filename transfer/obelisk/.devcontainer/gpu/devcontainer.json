@@ -1,0 +1,20 @@
+{
+    "name": "Robot RL GPU Dev Container",
+    "dockerComposeFile": "../../docker/docker-compose.yml",
+    "service": "robot_rl_obk",
+    "workspaceFolder": "${localWorkspaceFolder}",
+    "shutdownAction": "stopCompose",
+    "customizations": {
+        "vscode": {
+            "extensions": [
+                "mutantdino.resourcemonitor",
+                "ms-azuretools.vscode-docker",
+                "nvidia.nsight-vscode-edition",
+                "ritwickdey.liveserver",
+                "ms-vscode.cmake-tools",
+                "ms-python.python",
+                "charliermarsh.ruff"
+            ]
+        }
+    },
+}
