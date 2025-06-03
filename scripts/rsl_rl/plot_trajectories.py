@@ -85,6 +85,37 @@ def plot_trajectories(data, save_dir=None):
         'vdot': ['m/s²'],
         'reward': ['']
     }
+
+    # Add error metrics labels and units
+    error_labels = {
+        'error_sw_x': 'Swing Foot X Error',
+        'error_sw_y': 'Swing Foot Y Error',
+        'error_sw_z': 'Swing Foot Z Error',
+        'error_sw_roll': 'Swing Foot Roll Error',
+        'error_sw_pitch': 'Swing Foot Pitch Error',
+        'error_sw_yaw': 'Swing Foot Yaw Error',
+        'error_com_x': 'COM X Error',
+        'error_com_y': 'COM Y Error',
+        'error_com_z': 'COM Z Error',
+        'error_pelvis_roll': 'Pelvis Roll Error',
+        'error_pelvis_pitch': 'Pelvis Pitch Error',
+        'error_pelvis_yaw': 'Pelvis Yaw Error'
+    }
+
+    error_units = {
+        'error_sw_x': 'm',
+        'error_sw_y': 'm',
+        'error_sw_z': 'm',
+        'error_sw_roll': 'rad',
+        'error_sw_pitch': 'rad',
+        'error_sw_yaw': 'rad',
+        'error_com_x': 'm',
+        'error_com_y': 'm',
+        'error_com_z': 'm',
+        'error_pelvis_roll': 'rad',
+        'error_pelvis_pitch': 'rad',
+        'error_pelvis_yaw': 'rad'
+    }
     
     # Helper for subplot indexing
     def get_ax(axs, idx, n_cols):
@@ -93,8 +124,6 @@ def plot_trajectories(data, save_dir=None):
         return axs[idx // n_cols, idx % n_cols]
 
     env_ids = 0
-
-    
 
     if "stance_foot_pos" and "stance_foot_ori" in processed_data:
         pos_data = processed_data["stance_foot_pos"]
@@ -247,6 +276,35 @@ def plot_trajectories(data, save_dir=None):
         plt.tight_layout()
         if save_dir:
             plt.savefig(os.path.join(save_dir, 'v_and_vdot.png'), dpi=300, bbox_inches='tight')
+        plt.show()
+
+    # Plot error metrics
+    error_metrics = [key for key in processed_data.keys() if key.startswith('error_')]
+    if error_metrics:
+        n_metrics = len(error_metrics)
+        n_cols = 4
+        n_rows = (n_metrics + n_cols - 1) // n_cols
+        fig, axs = plt.subplots(n_rows, n_cols, figsize=(5 * n_cols, 3 * n_rows))
+        fig.suptitle('Error Metrics', fontsize=16)
+        axs = np.array(axs)
+        
+        for i, metric in enumerate(error_metrics):
+            ax = get_ax(axs, i, n_cols)
+            ax.plot(time_steps, processed_data[metric][:, env_ids], label=error_labels.get(metric, metric))
+            ax.set_title(error_labels.get(metric, metric))
+            ax.set_xlabel('Time Steps')
+            ax.set_ylabel(error_units.get(metric, ''))
+            ax.grid(True)
+            ax.legend()
+        
+        # Hide unused subplots
+        for i in range(n_metrics, n_rows * n_cols):
+            ax = get_ax(axs, i, n_cols)
+            ax.set_visible(False)
+        
+        plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+        if save_dir:
+            plt.savefig(os.path.join(save_dir, 'error_metrics.png'), dpi=300, bbox_inches='tight')
         plt.show()
 
     # Plot log_terms.pkl if it exists

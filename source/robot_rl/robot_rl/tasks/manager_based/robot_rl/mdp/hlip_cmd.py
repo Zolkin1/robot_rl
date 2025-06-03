@@ -46,13 +46,12 @@ class HLIPCommandTerm(CommandTerm):
        
         self.env = env
         self.robot = env.scene[cfg.asset_name]
-        self.feet_bodies_idx = self.robot.find_bodies(".*_ankle_roll_link")[0]
+        self.feet_bodies_idx = self.robot.find_bodies(cfg.foot_body_name)[0]
 
         self.foot_target = torch.zeros((self.num_envs, 2), device=self.device)
 
         self.metrics = {}
-        self.metrics["error_sw_z"] = torch.zeros((self.num_envs), device=self.device)
-
+     
         self.y_out = torch.zeros((self.num_envs, 12), device=self.device)
         self.dy_out = torch.zeros((self.num_envs, 12), device=self.device)
 
@@ -90,12 +89,12 @@ class HLIPCommandTerm(CommandTerm):
     
     def _update_metrics(self):
         # Foot tracking
-        foot_pos = self.robot.data.body_pos_w[:, self.feet_bodies_idx, :2]  # Only take x,y coordinates
-        # Contact schedule function
-        tp = (self.env.sim.current_time % (2 * self.T)) / (2 * self.T)  # Scaled between 0-1
-        phi_c = torch.tensor(math.sin(2 * torch.pi * tp) / math.sqrt(math.sin(2 * torch.pi * tp)**2 + self.T), device=self.env.device)
+        # foot_pos = self.robot.data.body_pos_w[:, self.feet_bodies_idx, :2]  # Only take x,y coordinates
+        # # Contact schedule function
+        # tp = (self.env.sim.current_time % (2 * self.T)) / (2 * self.T)  # Scaled between 0-1
+        # phi_c = torch.tensor(math.sin(2 * torch.pi * tp) / math.sqrt(math.sin(2 * torch.pi * tp)**2 + self.T), device=self.env.device)
 
-        swing_foot_pos = foot_pos[:, int(0.5 + 0.5 * torch.sign(phi_c))]
+        # swing_foot_pos = foot_pos[:, int(0.5 + 0.5 * torch.sign(phi_c))]
         # Only compare x,y coordinates of foot target
         self.metrics["error_sw_z"] = torch.abs(self.y_out[:,8] - self.y_act[:,8])
         self.metrics["error_sw_x"] = torch.abs(self.y_out[:,6] - self.y_act[:,6])
@@ -105,12 +104,12 @@ class HLIPCommandTerm(CommandTerm):
         self.metrics["error_sw_yaw"] = torch.abs(self.y_out[:,11] - self.y_act[:,11])
         
 
-        self.metrics["com_x"] = torch.abs(self.y_out[:,0] - self.y_act[:,0])
-        self.metrics["com_y"] = torch.abs(self.y_out[:,1] - self.y_act[:,1])
-        self.metrics["com_z"] = torch.abs(self.y_out[:,2] - self.y_act[:,2])
-        self.metrics["pelvis_roll"] = torch.abs(self.y_out[:,3] - self.y_act[:,3])
-        self.metrics["pelvis_pitch"] = torch.abs(self.y_out[:,4] - self.y_act[:,4])
-        self.metrics["pelvis_yaw"] = torch.abs(self.y_out[:,5] - self.y_act[:,5])
+        self.metrics["error_com_x"] = torch.abs(self.y_out[:,0] - self.y_act[:,0])
+        self.metrics["error_com_y"] = torch.abs(self.y_out[:,1] - self.y_act[:,1])
+        self.metrics["error_com_z"] = torch.abs(self.y_out[:,2] - self.y_act[:,2])
+        self.metrics["error_pelvis_roll"] = torch.abs(self.y_out[:,3] - self.y_act[:,3])
+        self.metrics["error_pelvis_pitch"] = torch.abs(self.y_out[:,4] - self.y_act[:,4])
+        self.metrics["error_pelvis_yaw"] = torch.abs(self.y_out[:,5] - self.y_act[:,5])
 
         self.metrics["v"] = self.v
         self.metrics["vdot"] = self.vdot

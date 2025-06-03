@@ -420,6 +420,7 @@ def phase_contact(
     env: ManagerBasedRLEnv,
         period: float = 0.8,
         command_name: str | None = None,
+        Tswing: float =0.4,
     sensor_cfg: SceneEntityCfg = SceneEntityCfg("contact_sensor"),
     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")
 ) -> torch.Tensor:
@@ -431,11 +432,10 @@ def phase_contact(
 
     # Contact phase
     tp = (env.sim.current_time % period) / period     # Scaled between 0-1
-    phi_c = torch.tensor(math.sin(2*torch.pi*tp)/math.sqrt(math.sin(2*torch.pi*tp)**2 + 0.04), device=env.device)
+    phi_c = torch.tensor(math.sin(2*torch.pi*tp)/math.sqrt(math.sin(2*torch.pi*tp)**2 + Tswing), device=env.device)
 
-    stance_i = 0
-    if phi_c > 0:
-        stance_i = 1
+    stance_i = int(0.5 - 0.5 * torch.sign(phi_c))
+
 
      # check if robot needs to be standing
     if command_name is not None:

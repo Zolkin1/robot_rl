@@ -166,6 +166,7 @@ class HumanoidRewardCfg(RewardsCfg):
         weight=0.18,
         params={
             # "command_name": "base_velocity",
+            "Tswing": PERIOD/2.,
             "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*_ankle_roll_link")},
     )
 
@@ -269,40 +270,40 @@ class HumanoidEnvCfg(LocomotionVelocityRoughEnvCfg):
         # self.control_count = 0
 
 
-    def __prepare_tensors__(self):
-        """Move tensors to GPU"""
-        # self.rewards.joint_reg.params["joint_des"] = torch.tensor(
-        #     self.rewards.joint_reg.params["joint_des"],
-        #     device=self.sim.device
-        # )
-        #
-        # self.rewards.joint_reg.params["joint_weight"] = torch.tensor(
-        #     self.rewards.joint_reg.params["joint_weight"],
-        #     device=self.sim.device
-        # )
+    # def __prepare_tensors__(self):
+    #     """Move tensors to GPU"""
+    #     # self.rewards.joint_reg.params["joint_des"] = torch.tensor(
+    #     #     self.rewards.joint_reg.params["joint_des"],
+    #     #     device=self.sim.device
+    #     # )
+    #     #
+    #     # self.rewards.joint_reg.params["joint_weight"] = torch.tensor(
+    #     #     self.rewards.joint_reg.params["joint_weight"],
+    #     #     device=self.sim.device
+    #     # )
 
-        self.current_des_step = torch.zeros(self.scene.num_envs, 3, device=self.sim.device)
-        self.com_lin_vel_avg = torch.zeros(self.scene.num_envs, 3, device=self.sim.device)
+    #     self.current_des_step = torch.zeros(self.scene.num_envs, 3, device=self.sim.device)
+    #     self.com_lin_vel_avg = torch.zeros(self.scene.num_envs, 3, device=self.sim.device)
 
 
-    def define_markers(self) -> VisualizationMarkers:
-        """Define markers with various different shapes."""
-        self.footprint_cfg = VisualizationMarkersCfg(
-            prim_path="/Visuals/footprint",
-            markers={
-                "des_foot": sim_utils.CuboidCfg(
-                    size=(0.2, 0.065, 0.018),
-                    visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(1.0, 0.0, 0.0)),
-                ),
-                # "stance_foot": sim_utils.CuboidCfg(
-                #     size=(0.2, 0.065, 0.018),
-                #     visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.0, 1.0, 0.0)),
-                # ),
-            }
-        )
-        self.footprint_visualizer = VisualizationMarkers(self.footprint_cfg)
+    # def define_markers(self) -> VisualizationMarkers:
+    #     """Define markers with various different shapes."""
+    #     self.footprint_cfg = VisualizationMarkersCfg(
+    #         prim_path="/Visuals/footprint",
+    #         markers={
+    #             "des_foot": sim_utils.CuboidCfg(
+    #                 size=(0.2, 0.065, 0.018),
+    #                 visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(1.0, 0.0, 0.0)),
+    #             ),
+    #             # "stance_foot": sim_utils.CuboidCfg(
+    #             #     size=(0.2, 0.065, 0.018),
+    #             #     visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.0, 1.0, 0.0)),
+    #             # ),
+    #         }
+    #     )
+    #     self.footprint_visualizer = VisualizationMarkers(self.footprint_cfg)
 
-    # def post_physics_step(self):
+    # # def post_physics_step(self):
     #     super().post_physics_step()
     #
     #     # Re-compute the desired foot step location

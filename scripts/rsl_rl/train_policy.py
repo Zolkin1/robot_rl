@@ -10,7 +10,9 @@ import cli_args
 ENVIRONMENTS = {
     "vanilla": "custom-Isaac-Velocity-Flat-G1-v0",
     "custom": "G1-flat-vel",
-    "clf": "G1-flat-lip-vel"
+    "ref_tracking": "G1-flat-ref-tracking",
+    "clf": "G1-flat-clf",
+    "exo_ref": "Exo-flat-vel",
 }
 
 def parse_args():

@@ -16,7 +16,7 @@ from isaaclab_tasks.manager_based.locomotion.velocity.velocity_env_cfg import Lo
 # from isaaclab_assets import G1_MINIMAL_CFG  # isort: skip
 from robot_rl.assets.robots.g1_21j import G1_MINIMAL_CFG 
 from robot_rl.tasks.manager_based.robot_rl.g1.g1_rough_env_lip_cfg import G1RoughLipCommandsCfg, G1RoughLipObservationsCfg
-from robot_rl.tasks.manager_based.robot_rl.humanoid_env_cfg import HumanoidActionsCfg
+from robot_rl.tasks.manager_based.robot_rl.humanoid_env_cfg import HumanoidActionsCfg, HumanoidEventsCfg
 
 @configclass
 class G1Rewards(RewardsCfg):
@@ -110,6 +110,7 @@ class G1RoughEnvCfg(LocomotionVelocityRoughEnvCfg):
     commands: G1RoughLipCommandsCfg = G1RoughLipCommandsCfg()
     observations: G1RoughLipObservationsCfg = G1_Observations()
     actions: HumanoidActionsCfg = HumanoidActionsCfg()
+    events: HumanoidEventsCfg = HumanoidEventsCfg()
 
     def __post_init__(self):
         # post init of parent

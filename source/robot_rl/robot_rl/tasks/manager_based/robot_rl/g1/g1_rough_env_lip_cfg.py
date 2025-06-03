@@ -91,7 +91,7 @@ class G1RoughLipRewards(HumanoidRewardCfg):
                 0.5, 0.5, 0.5     # swing foot roll, pitch, yaw
                 ],
             "term_weight": [1.0,3.0,1.0, #com x,y,z
-                            2.0,2.0,1.0, #pelvis roll, pitch, yaw
+                            5.0,5.0,1.0, #pelvis roll, pitch, yaw
                             15.0,15.0,20.0, #swing foot x,y,z
                             1.0,0.0,3.0, #swing foot roll, pitch, yaw
                           ]
@@ -120,21 +120,21 @@ class G1RoughLipRewards(HumanoidRewardCfg):
     )
 
 
-    # clf_reward = RewTerm(
-    #     func=mdp.clf_reward,
-    #     weight=-1.0,
-    #     params={
-    #         "command_name": "hlip_ref",
-    #     }
-    # )
+    clf_reward = RewTerm(
+        func=mdp.clf_reward,
+        weight=-1.0,
+        params={
+            "command_name": "hlip_ref",
+        }
+    )
 
-    # clf_decreasing_condition = RewTerm(
-    #     func=mdp.clf_decreasing_condition,
-    #     weight=-2.0,
-    #     params={
-    #         "command_name": "hlip_ref",
-    #     }
-    # )
+    clf_decreasing_condition = RewTerm(
+        func=mdp.clf_decreasing_condition,
+        weight=-2.0,
+        params={
+            "command_name": "hlip_ref",
+        }
+    )
 
     track_lin_vel_x_exp = RewTerm(
         func=mdp.track_lin_vel_x_exp,

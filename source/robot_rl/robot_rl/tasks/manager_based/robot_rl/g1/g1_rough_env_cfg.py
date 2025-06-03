@@ -17,6 +17,7 @@ from robot_rl.tasks.manager_based.robot_rl.humanoid_env_cfg import HumanoidEnvCf
 ##
 from robot_rl.assets.robots.g1_21j import G1_MINIMAL_CFG  # isort: skip
 from robot_rl.tasks.manager_based.robot_rl.g1.g1_rough_env_lip_cfg import G1RoughLipCommandsCfg
+from robot_rl.tasks.manager_based.robot_rl.g1_isaac.rough_env_cfg import G1_Observations
 ##
 # Environment configuration
 ##
@@ -24,7 +25,7 @@ from robot_rl.tasks.manager_based.robot_rl.g1.g1_rough_env_lip_cfg import G1Roug
 class G1RoughEnvCfg(HumanoidEnvCfg):
     """Configuration for the G1 Rough environment."""
     commands: G1RoughLipCommandsCfg = G1RoughLipCommandsCfg()
-    
+    observations: G1_Observations = G1_Observations()
     def __post_init__(self):
         # post init of parent
         super().__post_init__()
@@ -64,6 +65,7 @@ class G1RoughEnvCfg(HumanoidEnvCfg):
             },
         }
 
+        self.events.base_external_force_torque = None
         ##
         # Commands
         ##

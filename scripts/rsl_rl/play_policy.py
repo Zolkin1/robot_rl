@@ -13,27 +13,28 @@ import os
 import sys
 import time
 import pickle
+import glob
 
 from isaaclab.app import AppLauncher
 import cli_args
 
 # Import plot_trajectories functions
 from plot_trajectories import plot_trajectories
-
-# Environment names mapping
-ENVIRONMENTS = {
-    "vanilla": "custom-Isaac-Velocity-Flat-G1-Play-v0",
-    "custom": "G1-flat-vel-play",
-    "clf": "G1-flat-lip-vel-play",
-}
-
+from train_policy import ENVIRONMENTS
 # Experiment names mapping for different environments
 EXPERIMENT_NAMES = {
     "vanilla": "g1_isaac",
     "custom": "g1",
-    "clf": "g1_clf",
+    "clf": "g1",
+    "ref_tracking": "g1",
 }
 
+SIM_ENVIRONMENTS = {
+    "vanilla": "custom-Isaac-Velocity-Flat-G1-Play-v0",
+    "custom": "custom-Isaac-Velocity-Flat-G1-Play-v0",
+    "clf": "G1-flat-ref-play",
+    "ref_tracking": "G1-flat-ref-play",
+}
 
 class DataLogger:
     def __init__(self, enabled=True, log_dir=None, variables=None):
@@ -126,12 +127,37 @@ def extract_reference_trajectory(env, log_vars):
     for var in log_vars:
         if hasattr(hlip_Ref, var):
             results[var] = getattr(hlip_Ref, var)
+        elif var in hlip_Ref.metrics:
+            results[var] = hlip_Ref.metrics[var]
         elif var == "base_velocity":
             results[var] = unwrapped_env.command_manager.get_command("base_velocity")
         else:
             results[var] = None  # or raise an error/warning if you prefer
 
     return results
+
+
+def find_latest_checkpoint(log_root_path):
+    """Find the latest checkpoint in the given directory."""
+    # Find all run directories
+    run_dirs = glob.glob(os.path.join(log_root_path, "*"))
+    if not run_dirs:
+        return None, None
+    
+    # Get the latest run directory
+    latest_run = max(run_dirs, key=os.path.getmtime)
+    
+    # Find all checkpoint files in the latest run
+    checkpoint_files = glob.glob(os.path.join(latest_run, "model_*.pt"))
+    if not checkpoint_files:
+        return None, None
+    
+    # Get the latest checkpoint
+    latest_checkpoint = max(checkpoint_files, key=os.path.getmtime)
+    checkpoint_num = int(os.path.basename(latest_checkpoint).split("_")[1].split(".")[0])
+    run_name = os.path.basename(latest_run)
+    
+    return run_name, checkpoint_num
 
 
 def main():
@@ -142,11 +168,14 @@ def main():
         print("Available options:", list(ENVIRONMENTS.keys()))
         sys.exit(1)
 
+    print("[DEBUG] Starting main function")
     # Set the task based on environment type
-    args_cli.task = ENVIRONMENTS[args_cli.env_type]
+    args_cli.task = SIM_ENVIRONMENTS[args_cli.env_type]
+    print(f"[DEBUG] Using task: {args_cli.task}")
     
     # Get experiment name (use override if provided, otherwise use default)
     experiment_name = args_cli.exp_name or EXPERIMENT_NAMES[args_cli.env_type]
+    print(f"[DEBUG] Using experiment name: {experiment_name}")
     
     # always enable cameras to record video
     if args_cli.video:
@@ -155,11 +184,14 @@ def main():
     # clear out sys.argv for Hydra
     sys.argv = [sys.argv[0]] + hydra_args
 
+    print("[DEBUG] Launching Omniverse app")
     # launch omniverse app
     app_launcher = AppLauncher(args_cli)
     simulation_app = app_launcher.app
+    print("[DEBUG] Omniverse app launched")
 
     try:
+        print("[DEBUG] Importing required modules")
         # Import necessary modules after app launch
         import gymnasium as gym
         import torch
@@ -172,6 +204,7 @@ def main():
         from isaaclab_rl.rsl_rl import RslRlOnPolicyRunnerCfg, RslRlVecEnvWrapper
         from isaaclab_tasks.utils import get_checkpoint_path, parse_env_cfg
         import robot_rl.tasks  # noqa: F401
+        print("[DEBUG] Modules imported successfully")
 
         # Configure PyTorch
         torch.backends.cuda.matmul.allow_tf32 = True
@@ -179,29 +212,45 @@ def main():
         torch.backends.cudnn.deterministic = False
         torch.backends.cudnn.benchmark = False
 
+        print("[DEBUG] Parsing configurations")
         # parse configuration
         env_cfg = parse_env_cfg(
             args_cli.task, device=args_cli.device, num_envs=args_cli.num_envs
         )
         agent_cfg: RslRlOnPolicyRunnerCfg = cli_args.parse_rsl_rl_cfg(args_cli.task, args_cli)
+        print("[DEBUG] Configurations parsed")
 
         # specify directory for logging experiments
         log_root_path = os.path.join("logs", "g1_policies", args_cli.env_type, experiment_name)
         log_root_path = os.path.abspath(log_root_path)
-        print(f"[INFO] Loading experiment from directory: {log_root_path}")
+        print(f"[DEBUG] Log root path: {log_root_path}")
+        
+        # If no checkpoint is specified, find the latest one
+        if not agent_cfg.load_run or not agent_cfg.load_checkpoint:
+            print("[DEBUG] Finding latest checkpoint")
+            latest_run, latest_checkpoint = find_latest_checkpoint(log_root_path)
+            if latest_run and latest_checkpoint:
+                print(f"[DEBUG] Found latest checkpoint: run={latest_run}, checkpoint={latest_checkpoint}")
+                agent_cfg.load_run = latest_run
+                agent_cfg.load_checkpoint = latest_checkpoint
+            else:
+                print("[ERROR] No checkpoints found in the specified directory")
+                sys.exit(1)
         
         # Get checkpoint path from the training directory
         resume_path = get_checkpoint_path(log_root_path, agent_cfg.load_run, agent_cfg.load_checkpoint)
-        print(f"[INFO] Loading checkpoint from: {resume_path}")
+        print(f"[DEBUG] Checkpoint path: {resume_path}")
         
         # Use the checkpoint directory for saving results
         play_log_dir = os.path.dirname(resume_path)
-        print(f"[INFO] Saving results to directory: {play_log_dir}")
+        print(f"[DEBUG] Play log directory: {play_log_dir}")
 
+        print("[DEBUG] Creating environment")
         # create isaac environment
         if hasattr(env_cfg, "__prepare_tensors__") and callable(getattr(env_cfg, "__prepare_tensors__")):
             env_cfg.__prepare_tensors__()
         env = gym.make(args_cli.task, cfg=env_cfg, render_mode="rgb_array" if args_cli.video else None)
+        print("[DEBUG] Environment created")
 
         # convert to single-agent instance if required
         if isinstance(env.unwrapped, DirectMARLEnv):
@@ -215,20 +264,23 @@ def main():
                 "video_length": args_cli.video_length,
                 "disable_logger": True,
             }
-            print("[INFO] Recording videos during playback.")
+            print("[DEBUG] Setting up video recording")
             print_dict(video_kwargs, nesting=4)
             env = gym.wrappers.RecordVideo(env, **video_kwargs)
 
+        print("[DEBUG] Wrapping environment for rsl-rl")
         # wrap around environment for rsl-rl
         env = RslRlVecEnvWrapper(env, clip_actions=agent_cfg.clip_actions)
 
-        print(f"[INFO]: Loading model checkpoint from: {resume_path}")
+        print(f"[DEBUG] Loading model checkpoint from: {resume_path}")
         # load previously trained model
         ppo_runner = OnPolicyRunner(env, agent_cfg.to_dict(), log_dir=None, device=agent_cfg.device)
         ppo_runner.load(resume_path)
+        print("[DEBUG] Model loaded")
 
         # obtain the trained policy for inference
         policy = ppo_runner.get_inference_policy(device=env.unwrapped.device)
+        print("[DEBUG] Inference policy obtained")
 
         dt = env.unwrapped.step_dt
 
@@ -246,14 +298,29 @@ def main():
             'vdot',
             'stance_foot_pos_0',
             'stance_foot_ori_0',
+            "error_sw_x",
+            "error_sw_y",
+            "error_sw_z",
+            "error_sw_roll",
+            "error_sw_pitch",
+            "error_sw_yaw",
+            "error_com_x",
+            "error_com_y",
+            "error_com_z",
+            "error_pelvis_roll",
+            "error_pelvis_pitch",
+            "error_pelvis_yaw" 
         ]
 
         # Setup logging
         logger = DataLogger(enabled=True, log_dir=play_log_dir, variables=log_vars)
+        print("[DEBUG] Logger setup complete")
 
         # reset environment
+        print("[DEBUG] Resetting environment")
         obs, _ = env.get_observations()
         timestep = 0
+        print("[DEBUG] Starting simulation loop")
 
         # simulate environment
         while simulation_app.is_running():
@@ -283,6 +350,7 @@ def main():
             if args_cli.real_time and sleep_time > 0:
                 time.sleep(sleep_time)
 
+        print("[DEBUG] Simulation loop ended")
         # close the simulator
         env.close()
 
@@ -292,13 +360,18 @@ def main():
         # Create plots directory and generate plots
         plot_dir = os.path.join(play_log_dir, "plots")
         os.makedirs(plot_dir, exist_ok=True)
-        print(f"[INFO] Generating plots in directory: {plot_dir}")
+        print(f"[DEBUG] Generating plots in directory: {plot_dir}")
         plot_trajectories(logger.data, save_dir=plot_dir)
 
+    except Exception as e:
+        print(f"[ERROR] An error occurred: {str(e)}")
+        import traceback
+        traceback.print_exc()
     finally:
         # Ensure simulation app is closed
         if simulation_app is not None:
             simulation_app.close()
+            print("[DEBUG] Simulation app closed")
 
 
 if __name__ == "__main__":

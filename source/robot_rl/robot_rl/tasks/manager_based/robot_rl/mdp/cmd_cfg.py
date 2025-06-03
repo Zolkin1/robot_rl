@@ -63,6 +63,8 @@ class HLIPCommandCfg(CommandTermCfg):
         }
     )
 
+    foot_body_name: str = ".*_ankle_roll_link"
+
     goal_pose_visualizer_cfg: VisualizationMarkersCfg = VisualizationMarkersCfg(
         prim_path="/Visuals/goal_pose",
         markers={
