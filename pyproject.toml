@@ -1,0 +1,39 @@
+# pyproject.toml
+[build-system]
+requires = ["setuptools>=61.0"] # Specifies the build tools needed
+build-backend = "setuptools.build_meta" # Specifies which build backend to use
+
+[project]
+name = "robot-rl"
+version = "0.1.0"
+description = "RL tools for robots."
+readme = "README.md"
+requires-python = "=3.10" # Specify required Python version
+license = { file = "LICENSE" }
+keywords = ["robots", "rl"]
+authors = [
+  { name="Zach Olkin", email="your.email@example.com" },
+]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
+]
+
+# Define the core dependencies of your package
+# TODO: Verify all of these
+dependencies = [
+    "mujoco>=3.3",
+    "rerun-sdk"
+]
+
+## Define optional dependencies (e.g., for testing, documentation, or extra features)
+#[project.optional-dependencies]
+#testing = [
+#  "pytest>=7.0",
+#  "pytest-cov",
+#]
+#docs = [
+#  "sphinx>=5.0",
+#  "sphinx_rtd_theme",
+#]
