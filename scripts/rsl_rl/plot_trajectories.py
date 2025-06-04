@@ -290,7 +290,13 @@ def plot_trajectories(data, save_dir=None):
         
         for i, metric in enumerate(error_metrics):
             ax = get_ax(axs, i, n_cols)
-            ax.plot(time_steps, processed_data[metric][:, env_ids], label=error_labels.get(metric, metric))
+            data = processed_data[metric]
+            # Handle both 1D and 2D arrays
+            if data.ndim > 1:
+                plot_data = data[:, env_ids]
+            else:
+                plot_data = data
+            ax.plot(time_steps, plot_data, label=error_labels.get(metric, metric))
             ax.set_title(error_labels.get(metric, metric))
             ax.set_xlabel('Time Steps')
             ax.set_ylabel(error_units.get(metric, ''))
@@ -358,6 +364,8 @@ def plot_hzd_trajectories(data, save_dir=None):
     # Define state labels and units for HZD
     state_labels = {
         'y_out': [
+            'Pelvis x', 'Pelvis y', 'Pelvis z',
+            'Pelvis roll', 'Pelvis pitch', 'Pelvis yaw',
             'LeftFrontalHipJoint', 'RightFrontalHipJoint',
             'LeftTransverseHipJoint', 'RightTransverseHipJoint',
             'LeftSagittalHipJoint', 'RightSagittalHipJoint',
@@ -366,6 +374,8 @@ def plot_hzd_trajectories(data, save_dir=None):
             'LeftHenkeAnkleJoint', 'RightHenkeAnkleJoint'
         ],
         'dy_out': [
+            'Pelvis x', 'Pelvis y', 'Pelvis z',
+            'Pelvis roll', 'Pelvis pitch', 'Pelvis yaw',
             'LeftFrontalHipJoint', 'RightFrontalHipJoint',
             'LeftTransverseHipJoint', 'RightTransverseHipJoint',
             'LeftSagittalHipJoint', 'RightSagittalHipJoint',
@@ -378,6 +388,8 @@ def plot_hzd_trajectories(data, save_dir=None):
         "stance_foot_ori": ['roll', 'pitch', 'yaw'],
         'cur_swing_time': ['Time'],
         'y_act': [
+            'Pelvis x', 'Pelvis y', 'Pelvis z',
+            'Pelvis roll', 'Pelvis pitch', 'Pelvis yaw',
             'LeftFrontalHipJoint', 'RightFrontalHipJoint',
             'LeftTransverseHipJoint', 'RightTransverseHipJoint',
             'LeftSagittalHipJoint', 'RightSagittalHipJoint',
@@ -386,6 +398,8 @@ def plot_hzd_trajectories(data, save_dir=None):
             'LeftHenkeAnkleJoint', 'RightHenkeAnkleJoint'
         ],
         'dy_act': [
+            'Pelvis x', 'Pelvis y', 'Pelvis z',
+            'Pelvis roll', 'Pelvis pitch', 'Pelvis yaw',
             'LeftFrontalHipJoint', 'RightFrontalHipJoint',
             'LeftTransverseHipJoint', 'RightTransverseHipJoint',
             'LeftSagittalHipJoint', 'RightSagittalHipJoint',
@@ -600,7 +614,13 @@ def plot_hzd_trajectories(data, save_dir=None):
         
         for i, metric in enumerate(error_metrics):
             ax = get_ax(axs, i, n_cols)
-            ax.plot(time_steps, processed_data[metric][:, env_ids], label=error_labels.get(metric, metric))
+            data = processed_data[metric]
+            # Handle both 1D and 2D arrays
+            if data.ndim > 1:
+                plot_data = data[:, env_ids]
+            else:
+                plot_data = data
+            ax.plot(time_steps, plot_data, label=error_labels.get(metric, metric))
             ax.set_title(error_labels.get(metric, metric))
             ax.set_xlabel('Time Steps')
             ax.set_ylabel(error_units.get(metric, ''))

@@ -11,6 +11,7 @@ from isaaclab.utils.noise import AdditiveUniformNoiseCfg as Unoise
 from robot_rl.assets.robots.exo_cfg import EXO_CFG  # isort: skip
 from robot_rl.tasks.manager_based.robot_rl import mdp
 from isaaclab.managers import ObservationTermCfg as ObsTerm
+from robot_rl.tasks.manager_based.robot_rl.mdp.ResidualActionCfg import ResidualActionCfg
 from robot_rl.tasks.manager_based.robot_rl.mdp.cmd_cfg import HLIPCommandCfg, HZDCommandCfg
 EXO_PERIOD = 2.0
 
@@ -56,10 +57,12 @@ class ExoRewardsCfg(G1RoughLipRewards):
           self.feet_clearance.params["target_height"] = 0.05
           self.contact_no_vel.params["sensor_cfg"].body_names = ".*HenkeAnkleLink"
           self.contact_no_vel.params["asset_cfg"].body_names = ".*HenkeAnkleLink"
+          self.holonomic_constraint.params["z_offset"] = 0.163
 
           
-
-                  
+@configclass
+class ExoResidualActionCfg():
+     joint_pos = ResidualActionCfg(scale=0.1, joint_names=[".*"], asset_name="robot")
 
 @configclass
 class ExoObservationsCfg(G1RoughLipObservationsCfg):
@@ -70,7 +73,7 @@ class ExoObservationsCfg(G1RoughLipObservationsCfg):
           self.policy.sin_phase.params["period"] = EXO_PERIOD
           self.policy.cos_phase.params["period"] = EXO_PERIOD
           self.policy.joint_vel.noise = Unoise(n_min=-0.1, n_max=0.1)
-          self.policy.des_jt_pos = ObsTerm(func=mdp.joint_pos_des)
+          # self.policy.des_jt_pos = ObsTerm(func=mdp.joint_pos_des,params={"command_name":"hzd_ref"})
 
 
 @configclass
@@ -80,11 +83,11 @@ class ExoFlatEnvCfg(HumanoidEnvCfg):
    observations: ExoObservationsCfg = ExoObservationsCfg()
    rewards: ExoRewardsCfg = ExoRewardsCfg()
 
-
+   
    def __post_init__(self):
      super().__post_init__()
 
-     
+     # self.observations.policy.des_jt_pos = None
      self.scene.robot = EXO_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
         
      self.commands.base_velocity.ranges.lin_vel_x = (0.13,0.13)
@@ -114,7 +117,7 @@ class ExoFlatEnvCfg(HumanoidEnvCfg):
      self.events.reset_robot_joints.params["position_range"] = (1.0, 1.0)
      self.events.base_external_force_torque.params["asset_cfg"].body_names = ["PelvisLink"]
      self.events.reset_base.params = {
-          "pose_range": {"x": (-0.5, 0.5), "y": (-0.5, 0.5), "yaw": (-3.14, 3.14)},
+          "pose_range": {"x": (-0.5, 0.5), "y": (-0.5, 0.5), "yaw": (0.0, 0.0)},
           "velocity_range": {
                "x": (0.0, 0.4),
                "y": (0.0, 0.0),
@@ -134,7 +137,7 @@ class ExoHZDEnvCfg(ExoFlatEnvCfg):
    """Config for the ExoRoughEnv."""
    commands: ExoHZDCommandsCfg = ExoHZDCommandsCfg()
    observations: G1_Observations = G1_Observations()
- 
+   actions: ExoResidualActionCfg = ExoResidualActionCfg()
 
 
    def __post_init__(self):
@@ -154,8 +157,8 @@ class ExoHZDEnvCfg(ExoFlatEnvCfg):
                                                            0.1,0.1,0.1,
                                                            0.1,0.1,0.1,
                                                            0.1,0.1,0.1]
-     self.rewards.reference_tracking.params["term_weight"] = [0.0,0.0,1.0,
-                                                              1.0,1.0,1.0,
+     self.rewards.reference_tracking.params["term_weight"] = [2.0,2.0,2.0,
+                                                              2.0,5.0,1.0,
                                                                1.0,1.0,1.0,
                                                                1.0,1.0,1.0,
                                                                1.0,1.0,1.0,
@@ -188,6 +191,7 @@ class ExoHZDEnvCfg(ExoFlatEnvCfg):
      self.rewards.track_lin_vel_xy_exp = None
      self.rewards.track_ang_vel_z_exp = None
      self.rewards.action_rate_l2.weight = -1e-5
+     self.rewards.dof_torque_l2.weight = -1e-7
  
 
 

@@ -95,8 +95,8 @@ class HLIPCommandCfg(CommandTermCfg):
 
 
 HZD_Q_weights = [
-    0.0,0.0,#base_x
-    0.0,0.0,#base_y
+    1.0,1.0,#base_x
+    1.0,1.0,#base_y
     1.0,1.0,#base_z
     1.0,1.0,#base_roll
     1.0,1.0,#base_pitch

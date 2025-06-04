@@ -305,7 +305,7 @@ class HZDCommandTerm(CommandTerm):
         N = base_velocity.shape[0]
         T = torch.full((N,), self.T, dtype=torch.float32, device=base_velocity.device)
 
-        if self.stance_idx == 0:
+        if self.stance_idx == 1:
             ctrl_points = self.right_coeffs
         else:
             ctrl_points = self.left_coeffs
@@ -362,7 +362,6 @@ class HZDCommandTerm(CommandTerm):
         # Convenience
         data = self.robot.data
 
-        data = self.robot.data
         root_quat = data.root_quat_w
 
         # 1. Foot positions and orientations (world frame)
@@ -380,7 +379,8 @@ class HZDCommandTerm(CommandTerm):
         self.stance_foot_vel = foot_lin_vel_w[:,self.stance_idx,:]
         self.stance_foot_ang_vel = foot_ang_vel_w[:,self.stance_idx,:]
 
-        base_pos = data.root_pos_w
+        base_pos = data.root_pos_w 
+        base_pos_stance = base_pos - self.stance_foot_pos_0
         base_vel = data.root_lin_vel_w
         pelvis_ori = self.get_euler_from_quat(data.root_quat_w)
         pelvis_omega_local = _transfer_to_local_frame(data.root_ang_vel_w, self.stance_foot_ori_quat_0)
@@ -391,7 +391,7 @@ class HZDCommandTerm(CommandTerm):
         jt_vel = data.joint_vel
         # 4. Assemble state vectors
         self.y_act = torch.cat([
-            base_pos,
+            base_pos_stance,
             pelvis_ori,
             jt_pos
         ], dim=-1)

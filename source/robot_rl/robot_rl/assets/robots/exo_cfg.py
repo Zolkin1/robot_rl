@@ -175,75 +175,75 @@ EXO_CFG = ArticulationCfg(
         ),
     ),
     
-    # init_state=ArticulationCfg.InitialStateCfg(
-    #     # Floating base (x, y, z) position and quaternion (w, x, y, z) for orientation
-    #     pos=(-0.014008593589966438, 0.0796781833923272, 0.9354441930494577),  # Position in world coordinates
-    #     rot=(0.9987690404068765, -0.006123545141481294, 0.04554959911180042, 0.01865851388459936),  # Quaternion for orientation
-
-    #     # Joint positions
-    #     joint_pos={
-    #         "LeftFrontalHipJoint": 0.18028152949275983,
-    #         "LeftTransverseHipJoint": -0.021132895502285864,
-    #         "LeftSagittalHipJoint": -0.09113022902079292,
-    #         "LeftSagittalKneeJoint": 0.08726666711960272,
-    #         "LeftSagittalAnkleJoint": -0.08070105776323688,
-    #         "LeftHenkeAnkleJoint": -0.22689276924459834,
-    #         "RightFrontalHipJoint": 0.01216398608384502,
-    #         "RightTransverseHipJoint": 0.08726530893357537,
-    #         "RightSagittalHipJoint": -0.20524332222769187,
-    #         "RightSagittalKneeJoint": 0.306769990413718,
-    #         "RightSagittalAnkleJoint": -0.19197628136257563,
-    #         "RightHenkeAnkleJoint": 0.021800551650373128,
-    #     },
-
-    #     # Joint velocities (assuming starting at rest)
-    #     joint_vel={".*": 0.0},  # All joints start with zero velocity
-    # ),
-
-
-
     init_state=ArticulationCfg.InitialStateCfg(
         # Floating base (x, y, z) position and quaternion (w, x, y, z) for orientation
-        pos=(0.023188588723930748, 0.15, 0.9387507676324566),  # Position in world coordinates
-        rot=(0.9972708203428684, 9.257248108811524E-19, 0.07383028438697906, 1.2906817772851895E-17),  # Quaternion for orientation
+        pos=(-0.014008593589966438, 0.0796781833923272, 0.9354441930494577),  # Position in world coordinates
+        rot=(0.9987690404068765, -0.006123545141481294, 0.04554959911180042, 0.01865851388459936),  # Quaternion for orientation
 
         # Joint positions
         joint_pos={
-            "LeftFrontalHipJoint": 0.08349606121006133,
-            "LeftTransverseHipJoint": -0.05015773774547203,
-            "LeftSagittalHipJoint": -0.11985110552995228,
-            "LeftSagittalKneeJoint": 0.13291080512603076,
-            "LeftSagittalAnkleJoint": -0.1570693091810952,
-            "LeftHenkeAnkleJoint": -0.1235453418940121,
-            "RightFrontalHipJoint": -0.08349606121006133,
-            "RightTransverseHipJoint": 0.05015773774547201,
-            "RightSagittalHipJoint": -0.11985110552995229,
-            "RightSagittalKneeJoint": 0.13291080512603076,
-            "RightSagittalAnkleJoint": -0.1570693091810952,
-            "RightHenkeAnkleJoint": 0.1235453418940121,
+            "LeftFrontalHipJoint": 0.18028152949275983,
+            "LeftTransverseHipJoint": -0.021132895502285864,
+            "LeftSagittalHipJoint": -0.09113022902079292,
+            "LeftSagittalKneeJoint": 0.08726666711960272,
+            "LeftSagittalAnkleJoint": -0.08070105776323688,
+            "LeftHenkeAnkleJoint": -0.22689276924459834,
+            "RightFrontalHipJoint": 0.01216398608384502,
+            "RightTransverseHipJoint": 0.08726530893357537,
+            "RightSagittalHipJoint": -0.20524332222769187,
+            "RightSagittalKneeJoint": 0.306769990413718,
+            "RightSagittalAnkleJoint": -0.19197628136257563,
+            "RightHenkeAnkleJoint": 0.021800551650373128,
         },
 
         # Joint velocities (assuming starting at rest)
         joint_vel={".*": 0.0},  # All joints start with zero velocity
     ),
 
+
+
+    # init_state=ArticulationCfg.InitialStateCfg(
+    #     # Floating base (x, y, z) position and quaternion (w, x, y, z) for orientation
+    #     pos=(0.023188588723930748, 0.15, 0.9387507676324566),  # Position in world coordinates
+    #     rot=(0.9972708203428684, 9.257248108811524E-19, 0.07383028438697906, 1.2906817772851895E-17),  # Quaternion for orientation
+
+    #     # Joint positions
+    #     joint_pos={
+    #         "LeftFrontalHipJoint": 0.08349606121006133,
+    #         "LeftTransverseHipJoint": -0.05015773774547203,
+    #         "LeftSagittalHipJoint": -0.11985110552995228,
+    #         "LeftSagittalKneeJoint": 0.13291080512603076,
+    #         "LeftSagittalAnkleJoint": -0.1570693091810952,
+    #         "LeftHenkeAnkleJoint": -0.1235453418940121,
+    #         "RightFrontalHipJoint": -0.08349606121006133,
+    #         "RightTransverseHipJoint": 0.05015773774547201,
+    #         "RightSagittalHipJoint": -0.11985110552995229,
+    #         "RightSagittalKneeJoint": 0.13291080512603076,
+    #         "RightSagittalAnkleJoint": -0.1570693091810952,
+    #         "RightHenkeAnkleJoint": 0.1235453418940121,
+    #     },
+
+    #     # Joint velocities (assuming starting at rest)
+    #     joint_vel={".*": 0.0},  # All joints start with zero velocity
+    # ),
+
     soft_joint_pos_limit_factor=0.95,
     actuators = {
     # Left Side Actuators
     "left_hips": ImplicitActuatorCfg(
         joint_names_expr=["LeftFrontalHipJoint", "LeftTransverseHipJoint", "LeftSagittalHipJoint"],
-        effort_limit={
+        effort_limit_sim={
             "LeftFrontalHipJoint": 350.0,
             "LeftTransverseHipJoint": 180.0,
             "LeftSagittalHipJoint": 219.0,
         },
-        velocity_limit={
+        velocity_limit_sim={
             "LeftFrontalHipJoint": 2.61799,
             "LeftTransverseHipJoint": 4.18879,
             "LeftSagittalHipJoint": 4.18879,
         },
         stiffness={
-            "LeftFrontalHipJoint": 21000.0,
+            "LeftFrontalHipJoint": 41000.0,
             "LeftTransverseHipJoint": 16000.0,
             "LeftSagittalHipJoint": 16000.0,
         },
@@ -256,8 +256,8 @@ EXO_CFG = ArticulationCfg(
     ),
     "left_knees": ImplicitActuatorCfg(
         joint_names_expr=["LeftSagittalKneeJoint"],
-        effort_limit=219.0,
-        velocity_limit=4.18879,
+        effort_limit_sim=219.0,
+        velocity_limit_sim=4.18879,
         stiffness={"LeftSagittalKneeJoint": 16000.0},
         damping={"LeftSagittalKneeJoint": 140.0},
     ),
@@ -272,11 +272,11 @@ EXO_CFG = ArticulationCfg(
             "LeftHenkeAnkleJoint": 5.24,
         },
         stiffness={
-            "LeftSagittalAnkleJoint": 2500.0,
-            "LeftHenkeAnkleJoint": 1100.0,
+            "LeftSagittalAnkleJoint": 5000.0,
+            "LeftHenkeAnkleJoint": 2500.0,
         },
         damping={
-            "LeftSagittalAnkleJoint": 20.0,
+            "LeftSagittalAnkleJoint": 40.0,
             "LeftHenkeAnkleJoint": 15.0,
         },
         armature=0.01,
@@ -296,7 +296,7 @@ EXO_CFG = ArticulationCfg(
             "RightSagittalHipJoint": 4.18879,
         },
         stiffness={
-            "RightFrontalHipJoint": 21000.0,
+            "RightFrontalHipJoint": 41000.0,
             "RightTransverseHipJoint": 16000.0,
             "RightSagittalHipJoint": 16000.0,
         },
@@ -326,11 +326,11 @@ EXO_CFG = ArticulationCfg(
             "RightHenkeAnkleJoint": 5.24,
         },
         stiffness={
-            "RightSagittalAnkleJoint": 2500.0,
-            "RightHenkeAnkleJoint": 1100.0,
+            "RightSagittalAnkleJoint": 3500.0,
+            "RightHenkeAnkleJoint": 2500.0,
         },
         damping={
-            "RightSagittalAnkleJoint": 20.0,
+            "RightSagittalAnkleJoint": 40.0,
             "RightHenkeAnkleJoint": 15.0,
         },
         armature=0.01,

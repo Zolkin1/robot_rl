@@ -178,13 +178,14 @@ def holonomic_constraint_vel(env: ManagerBasedRLEnv, command_name: str) -> torch
     # Total penalty per env
     return (torch.exp(-(lin_vel_penalty)/0.1) + torch.exp(-(ang_vel_penalty)/0.1))/2.0
 
-def holonomic_constraint(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
+def holonomic_constraint(env: ManagerBasedRLEnv, command_name: str, z_offset: float = 0.036) -> torch.Tensor:
     """Reward holonomic constraint."""
     ref_cmd = env.command_manager.get_term(command_name)
     stance_foot_pos = ref_cmd.stance_foot_pos_0
     stance_foot_pos_cur = ref_cmd.stance_foot_pos
     pos_err_xy = torch.norm(stance_foot_pos_cur[:, :2] - stance_foot_pos[:, :2], dim=-1)
-    z_des = torch.min(torch.tensor(0.036, device=env.device),stance_foot_pos[:, 2])
+    z_des = torch.min(torch.tensor(z_offset, device=env.device),stance_foot_pos[:, 2])
+    
     pos_err_z  = torch.abs(stance_foot_pos_cur[:, 2] - z_des)
 
     # Orientation: roll, pitch, yaw

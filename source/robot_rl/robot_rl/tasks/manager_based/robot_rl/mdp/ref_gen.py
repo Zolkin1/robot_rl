@@ -121,10 +121,10 @@ class HLIP(torch.nn.Module):
         self.grav = grav
         self.z0 = z0
         self.y_nom = y_nom
-        self.lambda_ = torch.sqrt(torch.tensor(grav / z0))
+        self.lambda_ = torch.sqrt(torch.tensor(grav / z0, device=torch.device('cuda' if torch.cuda.is_available() else 'cpu')))
         
         # Get device from grav tensor
-        device = torch.tensor(grav).device
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         
         # Initialize and store constant matrices on the correct device
         self.A_ss = torch.tensor([[0.0, 1.0], [grav / z0, 0.0]], device=device)

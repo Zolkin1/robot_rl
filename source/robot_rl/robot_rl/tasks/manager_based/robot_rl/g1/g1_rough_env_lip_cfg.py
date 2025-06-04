@@ -74,6 +74,7 @@ class G1RoughLipRewards(HumanoidRewardCfg):
         weight=4.0,
         params={
             "command_name": "hlip_ref",
+            "z_offset": 0.036,
         }
     )
 
