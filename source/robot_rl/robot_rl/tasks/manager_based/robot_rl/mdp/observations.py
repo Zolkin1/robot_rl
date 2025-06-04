@@ -7,6 +7,11 @@ from isaaclab.managers import SceneEntityCfg
 from isaaclab.envs import ManagerBasedRLEnv
 
 
+def joint_pos_des(env: ManagerBasedRLEnv, cmd_name:str) -> torch.Tensor:
+    cmd = env.command_manager.get_term(cmd_name)
+    joint_pos_des = cmd.joint_pos_des
+    return joint_pos_des
+
 def sin_phase(env: ManagerBasedRLEnv, period: float) -> torch.Tensor:
     phase = torch.tensor(2*torch.pi * (env.sim.current_time / period))
     sphase = torch.sin(phase)

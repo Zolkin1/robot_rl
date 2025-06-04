@@ -8,17 +8,17 @@ import torch
 
 Q_weights = [
     25.0,   0.0,    # com_x pos, vel
-    25.0,   2.22,   # com_y pos, vel
-    100.0,  300.0,  # com_z pos, vel
+    100.0,   50.0,   # com_y pos, vel
+    200.0,  100.0,  # com_z pos, vel
     4.0,    4.0,    # pelvis_roll pos, vel
     8.0,    4.0,    # pelvis_pitch pos, vel
     4.0,    4.0,    # pelvis_yaw pos, vel
     1500.0, 125.0,  # swing_x pos, vel
-    500.0,  125.0,  # swing_y pos, vel
+    1000.0,  125.0,  # swing_y pos, vel
     2000.0, 25.0,   # swing_z pos, vel
-    4.0,    0.0,    # swing_ori_roll pos, vel
-    0.0,    0.0,    # swing_ori_pitch pos, vel
-    0.0,    0.0,    # swing_ori_yaw pos, vel
+    4.0,    1.0,    # swing_ori_roll pos, vel
+    1.0,    1.0,    # swing_ori_pitch pos, vel
+    1.0,    1.0,    # swing_ori_yaw pos, vel
 ]
 
 
@@ -94,6 +94,50 @@ class HLIPCommandCfg(CommandTermCfg):
 
 
 
+HZD_Q_weights = [
+    0.0,0.0,#base_x
+    0.0,0.0,#base_y
+    1.0,1.0,#base_z
+    1.0,1.0,#base_roll
+    1.0,1.0,#base_pitch
+    1.0,1.0,#base_yaw
+    1.0,1.0,#left hip
+    1.0,1.0,#right hip
+    1.0,1.0,#left_hip 2
+    1.0,1.0,#right hip 2
+    1.0,1.0,#left hip 3
+    1.0,1.0,#right hip 3
+    1.0,1.0,#left knee
+    1.0,1.0,#right knee
+    1.0,1.0,#left ankle
+    1.0,1.0,#right ankle
+    1.0,1.0,#left ankle 2
+    1.0,1.0,#right ankle 2
+]
+
+
+HZD_R_weights = [
+      1.0,#base x
+      1.0,#base y
+      1.0,#base z
+      1.0,#base roll
+      1.0,#base pitch
+      1.0,#base yaw
+      1.0,#left hip
+      1.0,#right hip
+      1.0,#left_hip 2
+      1.0,#right hip 2
+      1.0,#left hip 3
+      1.0,#right hip 3
+      1.0,#left knee
+      1.0,#right knee
+      1.0,#left ankle
+      1.0,#right ankle
+      1.0,#left ankle 2
+      1.0,#right ankle 2
+    ]
+
+
 @configclass
 class HZDCommandCfg(CommandTermCfg):
     """
@@ -110,5 +154,5 @@ class HZDCommandCfg(CommandTermCfg):
     traj_coeff_remap: dict[str, torch.Tensor] = {}
     debug_vis: bool = False
     trajectory_tracking_visualizer_cfg: dict = {}
-    Q_weights = Q_weights
-    R_weights = R_weights
+    Q_weights = HZD_Q_weights
+    R_weights = HZD_R_weights

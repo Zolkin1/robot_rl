@@ -99,7 +99,7 @@ class G1RoughLipRewards(HumanoidRewardCfg):
             "term_weight": [1.0,3.0,1.0, #com x,y,z
                             5.0,5.0,1.0, #pelvis roll, pitch, yaw
                             15.0,15.0,20.0, #swing foot x,y,z
-                            1.0,0.0,3.0, #swing foot roll, pitch, yaw
+                            1.0,1.0,3.0, #swing foot roll, pitch, yaw
                           ]
         }
     )
@@ -144,7 +144,7 @@ class G1RoughLipRewards(HumanoidRewardCfg):
 
     track_lin_vel_x_exp = RewTerm(
         func=mdp.track_lin_vel_x_exp,
-        weight=3.0,
+        weight=2.0,
         params={
             "command_name": "base_velocity",
             "std": 0.5,
@@ -205,7 +205,7 @@ class G1RoughLipEnvCfg(HumanoidEnvCfg):
         ##
         # Commands
         ##
-        self.commands.base_velocity.ranges.lin_vel_x = (1.0,1.0)
+        self.commands.base_velocity.ranges.lin_vel_x = (0.0,1.0)
         self.commands.base_velocity.ranges.lin_vel_y = (-0.0, 0.0)
         self.commands.base_velocity.ranges.ang_vel_z = (-0.0, 0.0)
 

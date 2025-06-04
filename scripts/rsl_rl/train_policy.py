@@ -110,7 +110,10 @@ def main():
             agent_cfg.seed = seed
 
         # Create organized directory structure for logging
-        base_log_path = os.path.join("logs", "g1_policies", args_cli.env_type)
+        if args_cli.env_type == "exo_hzd" or args_cli.env_type == "exo_hlip":
+            base_log_path = os.path.join("logs", "exo_policies", args_cli.env_type)
+        else:
+            base_log_path = os.path.join("logs", "g1_policies", args_cli.env_type)
         log_root_path = os.path.join(base_log_path, agent_cfg.experiment_name)
         log_root_path = os.path.abspath(log_root_path)
         print(f"[INFO] Logging experiment in directory: {log_root_path}")

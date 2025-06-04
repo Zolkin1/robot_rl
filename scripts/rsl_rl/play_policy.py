@@ -229,7 +229,10 @@ def main():
         print("[DEBUG] Configurations parsed")
 
         # specify directory for logging experiments
-        log_root_path = os.path.join("logs", "g1_policies", args_cli.env_type, experiment_name)
+        if args_cli.env_type == "exo_hzd" or args_cli.env_type == "exo_hlip":
+            log_root_path = os.path.join("logs", "exo_policies", args_cli.env_type, experiment_name)
+        else:
+            log_root_path = os.path.join("logs", "g1_policies", args_cli.env_type, experiment_name)
         log_root_path = os.path.abspath(log_root_path)
         print(f"[DEBUG] Log root path: {log_root_path}")
         

@@ -167,8 +167,8 @@ class HZDCommandTerm(CommandTerm):
 
         self.metrics = {}
      
-        self.y_out = torch.zeros((self.num_envs, 12), device=self.device)
-        self.dy_out = torch.zeros((self.num_envs, 12), device=self.device)
+        self.y_out = torch.zeros((self.num_envs, 18), device=self.device)
+        self.dy_out = torch.zeros((self.num_envs, 18), device=self.device)
 
         # self.com_z = torch.ones((self.num_envs), device=self.device)*self.z0
 
@@ -217,7 +217,7 @@ class HZDCommandTerm(CommandTerm):
         self.mass = sum(self.robot.data.default_mass.T)[0]
         
         self.clf = CLF(
-            [],[], 12, self.env.cfg.sim.dt,
+            [],[], 18, self.env.cfg.sim.dt,
             Q_weights=np.array(cfg.Q_weights),
             R_weights=np.array(cfg.R_weights),
             device=self.device
@@ -248,20 +248,21 @@ class HZDCommandTerm(CommandTerm):
 
         # swing_foot_pos = foot_pos[:, int(0.5 + 0.5 * torch.sign(phi_c))]
         # Only compare x,y coordinates of foot target
-        self.metrics["error_sw_z"] = torch.abs(self.y_out[:,8] - self.y_act[:,8])
-        self.metrics["error_sw_x"] = torch.abs(self.y_out[:,6] - self.y_act[:,6])
-        self.metrics["error_sw_y"] = torch.abs(self.y_out[:,7] - self.y_act[:,7])
-        self.metrics["error_sw_roll"] = torch.abs(self.y_out[:,9] - self.y_act[:,9])
-        self.metrics["error_sw_pitch"] = torch.abs(self.y_out[:,10] - self.y_act[:,10])
-        self.metrics["error_sw_yaw"] = torch.abs(self.y_out[:,11] - self.y_act[:,11])
+        base_offset = 6
+        self.metrics["err_left_sagittal_knee"] = torch.abs(self.y_out[:,6+base_offset] - self.y_act[:,6+base_offset])
+        self.metrics["err_right_sagittal_knee"] = torch.abs(self.y_out[:,7+base_offset] - self.y_act[:,7+base_offset])
+        self.metrics["err_left_sagittal_ankle"] = torch.abs(self.y_out[:,8+base_offset] - self.y_act[:,8+base_offset])
+        self.metrics["err_right_sagittal_ankle"] = torch.abs(self.y_out[:,9+base_offset] - self.y_act[:,9+base_offset])
+        self.metrics["err_left_henke_ankle"] = torch.abs(self.y_out[:,10+base_offset] - self.y_act[:,10+base_offset])
+        self.metrics["err_right_henke_ankle"] = torch.abs(self.y_out[:,11+base_offset] - self.y_act[:,11+base_offset])
         
 
-        self.metrics["error_com_x"] = torch.abs(self.y_out[:,0] - self.y_act[:,0])
-        self.metrics["error_com_y"] = torch.abs(self.y_out[:,1] - self.y_act[:,1])
-        self.metrics["error_com_z"] = torch.abs(self.y_out[:,2] - self.y_act[:,2])
-        self.metrics["error_pelvis_roll"] = torch.abs(self.y_out[:,3] - self.y_act[:,3])
-        self.metrics["error_pelvis_pitch"] = torch.abs(self.y_out[:,4] - self.y_act[:,4])
-        self.metrics["error_pelvis_yaw"] = torch.abs(self.y_out[:,5] - self.y_act[:,5])
+        self.metrics["err_left_frontal_hip"] = torch.abs(self.y_out[:,0+base_offset] - self.y_act[:,0+base_offset])
+        self.metrics["err_right_frontal_hip"] = torch.abs(self.y_out[:,1+base_offset] - self.y_act[:,1+base_offset])
+        self.metrics["err_left_transverse_hip"] = torch.abs(self.y_out[:,2+base_offset] - self.y_act[:,2+base_offset])
+        self.metrics["err_right_transverse_hip"] = torch.abs(self.y_out[:,3+base_offset] - self.y_act[:,3+base_offset])
+        self.metrics["err_left_sagittal_hip"] = torch.abs(self.y_out[:,4+base_offset] - self.y_act[:,4+base_offset])
+        self.metrics["err_right_sagittal_hip"] = torch.abs(self.y_out[:,5+base_offset] - self.y_act[:,5+base_offset])
 
         self.metrics["v"] = self.v
         self.metrics["vdot"] = self.vdot
@@ -316,8 +317,8 @@ class HZDCommandTerm(CommandTerm):
         
         des_jt_vel = bezier_deg(1, phase_var_tensor, T, ctrl_points, 7)
 
-        self.y_out = des_jt_pos[:,6:]
-        self.dy_out = des_jt_vel[:,6:]
+        self.y_out = des_jt_pos
+        self.dy_out = des_jt_vel
 
 
     def nom_bezier_curve(self,control_points: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
@@ -390,10 +391,14 @@ class HZDCommandTerm(CommandTerm):
         jt_vel = data.joint_vel
         # 4. Assemble state vectors
         self.y_act = torch.cat([
+            base_pos,
+            pelvis_ori,
             jt_pos
         ], dim=-1)
 
         self.dy_act = torch.cat([
+            base_vel,
+            pelvis_omega_local,
             jt_vel,
         ], dim=-1)
 
