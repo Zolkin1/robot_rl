@@ -86,50 +86,50 @@ class G1RoughLipRewards(HumanoidRewardCfg):
         }
     )
 
-    reference_tracking = RewTerm(
-        func=mdp.reference_tracking,
-        weight=5.0,
-        params={
-            "command_name": "hlip_ref",
-            "term_std": [
-                0.2, 0.2, 0.1,    # com x, y, z
-                0.5, 0.5, 0.5,    # pelvis roll, pitch, yaw
-                0.1, 0.1, 0.05,   # swing foot x, y, z
-                0.5, 0.5, 0.5     # swing foot roll, pitch, yaw
-                ],
-            "term_weight": [1.0,3.0,1.0, #com x,y,z
-                            5.0,5.0,1.0, #pelvis roll, pitch, yaw
-                            15.0,15.0,20.0, #swing foot x,y,z
-                            1.0,1.0,3.0, #swing foot roll, pitch, yaw
-                          ]
-        }
-    )
+    # reference_tracking = RewTerm(
+    #     func=mdp.reference_tracking,
+    #     weight=5.0,
+    #     params={
+    #         "command_name": "hlip_ref",
+    #         "term_std": [
+    #             0.2, 0.2, 0.1,    # com x, y, z
+    #             0.5, 0.5, 0.5,    # pelvis roll, pitch, yaw
+    #             0.1, 0.1, 0.05,   # swing foot x, y, z
+    #             0.5, 0.5, 0.5     # swing foot roll, pitch, yaw
+    #             ],
+    #         "term_weight": [1.0,3.0,4.0, #com x,y,z
+    #                         5.0,5.0,1.0, #pelvis roll, pitch, yaw
+    #                         15.0,15.0,20.0, #swing foot x,y,z
+    #                         1.0,1.0,3.0, #swing foot roll, pitch, yaw
+    #                       ]
+    #     }
+    # )
 
-    reference_vel_tracking = RewTerm(
-        func=mdp.reference_vel_tracking,
-        weight=5.0,
-        params={
-            "command_name": "hlip_ref",
-            "term_std": [
-                0.3, 0.4, 0.1,    # COM velocity x, y, z  — less sensitive to x/y, tighter for z (often near 0)
-                0.5, 0.5, 0.5,    # Pelvis angular velocity roll, pitch, yaw — wide range, low precision needed
-                0.2, 0.2, 0.2,    # Swing foot linear velocity x, y, z — more critical
-                0.5, 0.5, 0.5     # Swing foot angular velocity roll, pitch, yaw — usually sloppy
-            ],
-            "term_weight": [
-                0.2, 3.0, 3.0,    # COM velocity x, y, z — prioritize planar motion
-                1.0, 1.0, 5.0,    # Pelvis angular vel roll, pitch, yaw — soft regularization
-                5.0, 5.0, 1.0,    # Swing foot linear vel x, y, z — z (vertical swing timing) is crucial
-                0.0, 0.0, 5.0     # Swing foot angular vel — low priority unless you're doing precision landings
-            ]
+    # reference_vel_tracking = RewTerm(
+    #     func=mdp.reference_vel_tracking,
+    #     weight=5.0,
+    #     params={
+    #         "command_name": "hlip_ref",
+    #         "term_std": [
+    #             0.3, 0.4, 0.1,    # COM velocity x, y, z  — less sensitive to x/y, tighter for z (often near 0)
+    #             0.5, 0.5, 0.5,    # Pelvis angular velocity roll, pitch, yaw — wide range, low precision needed
+    #             0.2, 0.2, 0.2,    # Swing foot linear velocity x, y, z — more critical
+    #             0.5, 0.5, 0.5     # Swing foot angular velocity roll, pitch, yaw — usually sloppy
+    #         ],
+    #         "term_weight": [
+    #             0.2, 3.0, 2.0,    # COM velocity x, y, z — prioritize planar motion
+    #             1.0, 1.0, 5.0,    # Pelvis angular vel roll, pitch, yaw — soft regularization
+    #             5.0, 5.0, 1.0,    # Swing foot linear vel x, y, z — z (vertical swing timing) is crucial
+    #             0.0, 0.0, 5.0     # Swing foot angular vel — low priority unless you're doing precision landings
+    #         ]
 
-        }
-    )
+    #     }
+    # )
 
 
     clf_reward = RewTerm(
         func=mdp.clf_reward,
-        weight=-1.0,
+        weight=10.0,
         params={
             "command_name": "hlip_ref",
         }
@@ -206,9 +206,9 @@ class G1RoughLipEnvCfg(HumanoidEnvCfg):
         ##
         # Commands
         ##
-        self.commands.base_velocity.ranges.lin_vel_x = (0.0,1.0)
-        self.commands.base_velocity.ranges.lin_vel_y = (-0.0, 0.0)
-        self.commands.base_velocity.ranges.ang_vel_z = (-0.0, 0.0)
+        self.commands.base_velocity.ranges.lin_vel_x = (1.0,1.0)
+        self.commands.base_velocity.ranges.lin_vel_y = (0.0, 0.0)
+        self.commands.base_velocity.ranges.ang_vel_z = (-0.3, 0.3)
 
         ##
         # Terminations

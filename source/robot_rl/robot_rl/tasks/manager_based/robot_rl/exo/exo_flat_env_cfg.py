@@ -54,7 +54,7 @@ class ExoRewardsCfg(G1RoughLipRewards):
           self.height_torso.params["target_height"] = 0.92
           self.feet_clearance.params["sensor_cfg"].body_names = ".*HenkeAnkleLink"
           self.feet_clearance.params["asset_cfg"].body_names = ".*HenkeAnkleLink"
-          self.feet_clearance.params["target_height"] = 0.05
+          self.feet_clearance.params["target_height"] = 0.20
           self.contact_no_vel.params["sensor_cfg"].body_names = ".*HenkeAnkleLink"
           self.contact_no_vel.params["asset_cfg"].body_names = ".*HenkeAnkleLink"
           self.holonomic_constraint.params["z_offset"] = 0.163
@@ -106,8 +106,9 @@ class ExoFlatEnvCfg(HumanoidEnvCfg):
      # Set base contact sensor to use PelvisLink
      self.terminations.base_contact.params["sensor_cfg"].body_names = "PelvisLink"   
 
-     self.events.push_robot.params["velocity_range"] = {"x": (-1, 1), "y": (-1, 1), "roll": (-0.4, 0.4),
-                                                       "pitch": (-0.4, 0.4), "yaw": (-0.4, 0.4)}
+     self.events.push_robot = None
+     # self.events.push_robot.params["velocity_range"] = {"x": (-1, 1), "y": (-1, 1), "roll": (-0.4, 0.4),
+     #                                                   "pitch": (-0.4, 0.4), "yaw": (-0.4, 0.4)}
      self.events.add_base_mass.params["asset_cfg"].body_names = ["PelvisLink"]
      self.events.add_base_mass.params["mass_distribution_params"] = (0.8, 1.2)
      self.events.add_base_mass.params["operation"] = "scale"
@@ -119,7 +120,7 @@ class ExoFlatEnvCfg(HumanoidEnvCfg):
      self.events.reset_base.params = {
           "pose_range": {"x": (-0.5, 0.5), "y": (-0.5, 0.5), "yaw": (0.0, 0.0)},
           "velocity_range": {
-               "x": (0.0, 0.4),
+               "x": (0.0, 0.0),
                "y": (0.0, 0.0),
                "z": (0.0, 0.0),
                "roll": (0.0, 0.0),
@@ -177,7 +178,7 @@ class ExoHZDEnvCfg(ExoFlatEnvCfg):
                                                                   1.0,1.0,1.0,
                                                                   1.0,1.0,1.0]
 
-     self.rewards.feet_air_time = None
+     # self.rewards.feet_air_time = None
      self.rewards.phase_contact = None
      self.rewards.lin_vel_z_l2 = None
      # self.rewards.height_torso = None
@@ -191,7 +192,7 @@ class ExoHZDEnvCfg(ExoFlatEnvCfg):
      self.rewards.track_lin_vel_xy_exp = None
      self.rewards.track_ang_vel_z_exp = None
      self.rewards.action_rate_l2.weight = -1e-5
-     self.rewards.dof_torque_l2.weight = -1e-7
+     self.rewards.dof_torques_l2.weight = -1e-7
  
 
 

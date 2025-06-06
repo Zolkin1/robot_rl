@@ -11,14 +11,14 @@ Q_weights = [
     100.0,   50.0,   # com_y pos, vel
     200.0,  100.0,  # com_z pos, vel
     4.0,    4.0,    # pelvis_roll pos, vel
-    8.0,    4.0,    # pelvis_pitch pos, vel
-    4.0,    4.0,    # pelvis_yaw pos, vel
+    30.0,    4.0,    # pelvis_pitch pos, vel
+    100.0,    50.0,    # pelvis_yaw pos, vel
     1500.0, 125.0,  # swing_x pos, vel
     1000.0,  125.0,  # swing_y pos, vel
     2000.0, 25.0,   # swing_z pos, vel
     4.0,    1.0,    # swing_ori_roll pos, vel
     1.0,    1.0,    # swing_ori_pitch pos, vel
-    1.0,    1.0,    # swing_ori_yaw pos, vel
+    10.0,    1.0,    # swing_ori_yaw pos, vel
 ]
 
 
@@ -42,6 +42,7 @@ class HLIPCommandCfg(CommandTermCfg):
     debug_vis: bool = False    # enable debug visualization
     z_sw_max: float = 0.14    # max swing foot z height (m); this is ankle height so different from actual foot position
     z_sw_min: float = 0.0
+    v_history_len: int = 5
     pelv_pitch_ref: float = 0.2
     resampling_time_range: tuple[float, float] = (5.0, 15.0)  # Resampling time range in seconds
     # Command sampling ranges

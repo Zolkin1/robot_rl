@@ -295,8 +295,61 @@ def main():
 
         dt = env.unwrapped.step_dt
 
-        # Define variables to log
-        log_vars = [
+        # Define variables to log for different environments
+        hzd_log_vars = [
+            # Base velocity and state
+            'base_velocity',
+            'error_vel_xy',
+            'error_vel_yaw',
+            
+            # HZD reference tracking
+            'v',
+            'vdot',
+            'err_left_sagittal_knee',
+            'err_right_sagittal_knee',
+            'err_left_sagittal_ankle',
+            'err_right_sagittal_ankle',
+            'err_left_henke_ankle',
+            'err_right_henke_ankle',
+            'err_left_frontal_hip',
+            'err_right_frontal_hip',
+            'err_left_transverse_hip',
+            'err_right_transverse_hip',
+            'err_left_sagittal_hip',
+            'err_right_sagittal_hip',
+            
+            # Foot state
+            'stance_foot_pos',
+            'stance_foot_ori',
+            'stance_foot_pos_0',
+            'stance_foot_ori_0',
+            
+            # Swing foot errors
+            'error_sw_x',
+            'error_sw_y',
+            'error_sw_z',
+            'error_sw_roll',
+            'error_sw_pitch',
+            'error_sw_yaw',
+            
+            # COM and pelvis errors
+            'error_com_x',
+            'error_com_y',
+            'error_com_z',
+            'error_pelvis_roll',
+            'error_pelvis_pitch',
+            'error_pelvis_yaw',
+            
+            # Timing
+            'cur_swing_time',
+
+            'y_out',
+            'dy_out',
+             'y_act',
+            'dy_act',
+        ]
+
+        standard_log_vars = [
             'y_out',
             'dy_out',
             'base_velocity',
@@ -322,6 +375,12 @@ def main():
             "error_pelvis_pitch",
             "error_pelvis_yaw" 
         ]
+
+        # Select appropriate logging variables based on environment type
+        if args_cli.env_type == "exo_hzd":
+            log_vars = hzd_log_vars
+        else:
+            log_vars = standard_log_vars
 
         # Setup logging
         logger = DataLogger(enabled=True, log_dir=play_log_dir, variables=log_vars)

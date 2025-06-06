@@ -29,14 +29,16 @@ def track_lin_vel_x_exp(
     lin_vel_error = torch.square(env.command_manager.get_command(command_name)[:, :1] - asset.data.root_lin_vel_b[:, :1])
     return torch.exp(-torch.squeeze(lin_vel_error) / std**2)
 
-def clf_reward(env: ManagerBasedRLEnv, command_name: str, max_clf: float = 100.0) -> torch.Tensor:
+def clf_reward(env: ManagerBasedRLEnv, command_name: str, max_clf: float = 200.0) -> torch.Tensor:
     """Negative CLF value as a reward (i.e., -V(η)), clipped to [-1, 0]."""
     ref_term = env.command_manager.get_term(command_name)
     v = ref_term.v  # [B] scalar CLF value per env
 
-    reward = torch.clamp(v, min=0.0, max=max_clf)/max_clf
+    # reward = torch.clamp(v, min=0.0, max=max_clf)/max_clf
+    reward = torch.exp(-v/max_clf)
     
     return reward
+
 
 def clf_decreasing_condition(env: ManagerBasedRLEnv, command_name: str, alpha: float = 1.0, max_clf_decreasing: float = 200.0) -> torch.Tensor:
     """Penalty for violating the CLF decrease condition, clipped to [-1, 0]."""
@@ -172,8 +174,12 @@ def holonomic_constraint_vel(env: ManagerBasedRLEnv, command_name: str) -> torch
     stance_foot_yaw_vel = hlip_cmd.stance_foot_ang_vel[:, 2]
 
     # L2 norm of linear velocity + abs(yaw rate)
-    lin_vel_penalty = torch.norm(stance_foot_vel, dim=-1)
-    ang_vel_penalty = torch.abs(stance_foot_yaw_vel)
+    # squared L2‐norm instead of torch.norm(…)
+    lin_vel_penalty = (stance_foot_vel ** 2).sum(dim=-1)
+
+    # square of the yaw‐velocity instead of absolute‐value
+    ang_vel_penalty = stance_foot_yaw_vel ** 2
+
 
     # Total penalty per env
     return (torch.exp(-(lin_vel_penalty)/0.1) + torch.exp(-(ang_vel_penalty)/0.1))/2.0

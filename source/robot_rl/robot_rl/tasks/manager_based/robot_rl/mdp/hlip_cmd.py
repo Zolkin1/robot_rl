@@ -6,7 +6,7 @@ import numpy as np
 from isaaclab.managers import CommandTermCfg,CommandTerm
 from isaaclab.markers import VisualizationMarkers, VisualizationMarkersCfg
 import isaaclab.sim as sim_utils
-from isaaclab.utils.math import euler_xyz_from_quat, wrap_to_pi, quat_rotate_inverse, yaw_quat, quat_rotate, quat_inv
+from isaaclab.utils.math import euler_xyz_from_quat, wrap_to_pi, quat_from_euler_xyz,quat_rotate_inverse, yaw_quat, quat_rotate, quat_inv, quat_apply
 
 from .ref_gen import bezier_deg, calculate_cur_swing_foot_pos, HLIP
 from .clf import CLF
@@ -17,13 +17,6 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from .cmd_cfg import HLIPCommandCfg
 
-
-def wrap_to_pi(angle):
-    """
-    Wraps angles in radians to the range [-pi, pi].
-    Works with torch tensors or scalars.
-    """
-    return (angle + torch.pi) % (2 * torch.pi) - torch.pi
 
 def _transfer_to_global_frame(vec, root_quat):
     return quat_rotate(yaw_quat(root_quat), vec)
@@ -65,13 +58,14 @@ class HLIPCommandTerm(CommandTerm):
         B_lip = torch.tensor([[0.0], [1.0 / (self.mass * self.z0)]], device=self.device)
 
         self.clf = CLF(
-            A_lip, B_lip, 12, self.env.cfg.sim.dt,
+            A_lip, B_lip, 12, self.env.cfg.sim.dt*self.env.cfg.sim.render_interval,
             Q_weights=np.array(cfg.Q_weights),
             R_weights=np.array(cfg.R_weights),
             device=self.device
         )
         
         self.v = torch.zeros((self.num_envs), device=self.device)
+        self.v_buffer = torch.zeros((self.num_envs,self.cfg.v_history_len), device=self.device)
         self.stance_idx = None
 
 
@@ -174,16 +168,26 @@ class HLIPCommandTerm(CommandTerm):
         com_pos_des = torch.stack([com_pos_des_x, com_pos_des_y,self.com_z], dim=-1)  # Shape: (N,2)
         com_vel_des = torch.stack([com_vel_des_x, com_vel_des_y,torch.zeros((N), device=self.device)], dim=-1)  # Shape: (N,2)
 
-        self.foot_target = torch.stack([Ux,Uy_des], dim=-1)
+        
+        foot_target = torch.stack([Ux,Uy_des,torch.zeros((N), device=self.device)], dim=-1)
 
+        # based on yaw velocity, update com_pos_des, com_vel_des, foot_target,
+        delta_psi = base_velocity[:,2] * self.T
+        q_delta_yaw = quat_from_euler_xyz(
+            torch.zeros_like(delta_psi),               # roll=0
+            torch.zeros_like(delta_psi),               # pitch=0
+            delta_psi                                  # yaw=Δψ
+        ) 
+
+        foot_target_yaw_adjusted = quat_apply(q_delta_yaw, foot_target)  # [B,3]
+        com_pos_des_yaw_adjusted = quat_apply(q_delta_yaw, com_pos_des)  # [B,3]
+        com_vel_des_yaw_adjusted = quat_apply(q_delta_yaw, com_vel_des)  # [B,3]
+        
+        self.foot_target = foot_target_yaw_adjusted[:,0:2]
         pelvis_ori = torch.zeros((N,3), device=self.device)
         pelvis_ori[:,1] = self.cfg.pelv_pitch_ref
-        #TODO enable heading control
-        # heading_target = self.env.command_manager.get_term("base_velocity").heading_target
-   
-        # pelvis_ori[:,2] = heading_target
-        # current_heading = self.robot.data.heading_w
-        pelvis_ori[:,2] = self.stance_foot_ori_0[:,2] + base_velocity[:,2] * self.env.cfg.sim.dt
+    
+        pelvis_ori[:,2] = self.stance_foot_ori_0[:,2] + base_velocity[:,2] * self.cur_swing_time
 
         foot_ori = torch.zeros((N,3), device=self.device)
         #TODO enable foot orientation control
@@ -218,7 +222,7 @@ class HLIPCommandTerm(CommandTerm):
         
         foot_pos, sw_z = calculate_cur_swing_foot_pos(
             bht_tensor, z_init, z_sw_max_tensor, phase_var_tensor, T_tensor, z_sw_neg_tensor,
-            self.foot_target[:, 0], self.foot_target[:, 1]
+            foot_target_yaw_adjusted[:, 0], foot_target_yaw_adjusted[:, 1]
         )
 
         
@@ -228,8 +232,8 @@ class HLIPCommandTerm(CommandTerm):
         foot_vel[:,1] = -dbht * self.foot_target[:,1] + dbht * self.foot_target[:,1]
         foot_vel[:,2] = sw_z.squeeze(-1)  # Remove the last dimension to match foot_vel[:,2] shape
         #setup up reference trajectory, com pos, pelvis orientation, swing foot pos, ori
-        self.y_out = torch.concatenate([com_pos_des, pelvis_ori, foot_pos, foot_ori], dim=-1)
-        self.dy_out = torch.concatenate([com_vel_des, pelvis_ori_vel, foot_vel, foot_ori_vel], dim=-1)
+        self.y_out = torch.concatenate([com_pos_des_yaw_adjusted, pelvis_ori, foot_pos, foot_ori], dim=-1)
+        self.dy_out = torch.concatenate([com_vel_des_yaw_adjusted, pelvis_ori_vel, foot_vel, foot_ori_vel], dim=-1)
 
     def get_euler_from_quat(self, quat):
 
@@ -299,7 +303,7 @@ class HLIPCommandTerm(CommandTerm):
             foot_ang_vel_w[:,self.swing_idx,:], self.stance_foot_ori_quat_0
         )
 
-        swing2stance_vel = foot_lin_vel_local_swing - foot_lin_vel_local_stance
+        swing2stance_vel = foot_lin_vel_local_swing 
     
         # 4. Assemble state vectors
         self.y_act = torch.cat([
@@ -328,6 +332,9 @@ class HLIPCommandTerm(CommandTerm):
         vdot,vcur = self.clf.compute_vdot(self.y_act,self.y_out,self.dy_act,self.dy_out,self.v)
         self.vdot = vdot
         self.v = vcur
+        self.v_buffer[:,1:] = self.v_buffer[:,:-1]
+        self.v_buffer[:,0] = vcur
+
        
         if self.debug_vis:
             # Visualize foot target in global frame
