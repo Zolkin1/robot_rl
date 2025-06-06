@@ -60,6 +60,7 @@ def calculate_cur_swing_foot_pos(
     z_init: torch.Tensor,
     z_sw_max: torch.Tensor,
     tau: torch.Tensor,
+    step_y_init: torch.Tensor,
     T_gait: torch.Tensor,
     zsw_neg: torch.Tensor,
     clipped_step_x: torch.Tensor,
@@ -92,7 +93,7 @@ def calculate_cur_swing_foot_pos(
 
     # Horizontal X and Y (linear interpolation)
     p_swing_x = ((1 - bht) * -clipped_step_x + bht * clipped_step_x).unsqueeze(1)
-    p_swing_y = ((1 - bht) * clipped_step_y + bht * clipped_step_y).unsqueeze(1)
+    p_swing_y = ((1 - bht) * step_y_init + bht * clipped_step_y).unsqueeze(1)
 
     # Z via 5th-degree Bezier
     p_swing_z = bezier_deg(

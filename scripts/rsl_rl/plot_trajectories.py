@@ -46,12 +46,22 @@ def plot_trajectories(data, save_dir=None):
         'y_out': [
             'COM x', 'COM y', 'COM z', 'Pelvis Roll', 'Pelvis Pitch', 'Pelvis Yaw',
             'swing foot x', 'swing foot y', 'swing foot z',
-            'swing foot roll', 'swing foot pitch', 'swing foot yaw'
+            'swing foot roll', 'swing foot pitch', 'swing foot yaw',
+            "waist_yaw",
+            'left sholder pitch', 'right sholder pitch',
+            'left sholder roll', 'right sholder roll',
+            'left sholder yaw', 'right sholder yaw',
+            'left elbow ', 'right elbow '
         ],
         'dy_out': [
             'COM x', 'COM y', 'COM z', 'Pelvis Roll', 'Pelvis Pitch', 'Pelvis Yaw',
             'swing foot x', 'swing foot y', 'swing foot z',
-            'swing foot roll', 'swing foot pitch', 'swing foot yaw'
+            'swing foot roll', 'swing foot pitch', 'swing foot yaw',
+            "waist_yaw",
+            'left sholder pitch', 'right sholder pitch',
+            'left sholder roll', 'right sholder roll',
+            'left sholder yaw', 'right sholder yaw',
+            'left elbow ', 'right elbow '
         ],
         'base_velocity': ['Linear x', 'Linear y', 'Angular z'],
         "stance_foot_pos": ['x', 'y', 'z'],
@@ -60,12 +70,22 @@ def plot_trajectories(data, save_dir=None):
         'y_act': [
             'COM x', 'COM y', 'COM z', 'Pelvis Roll', 'Pelvis Pitch', 'Pelvis Yaw',
             'swing foot x', 'swing foot y', 'swing foot z',
-            'swing foot roll', 'swing foot pitch', 'swing foot yaw'
+            'swing foot roll', 'swing foot pitch', 'swing foot yaw',
+            "waist_yaw",
+            'left sholder pitch', 'right sholder pitch',
+            'left sholder roll', 'right sholder roll',
+            'left sholder yaw', 'right sholder yaw',
+            'left elbow ', 'right elbow '
         ],
         'dy_act': [
             'COM x', 'COM y', 'COM z', 'Pelvis Roll', 'Pelvis Pitch', 'Pelvis Yaw',
             'swing foot x', 'swing foot y', 'swing foot z',
-            'swing foot roll', 'swing foot pitch', 'swing foot yaw'
+            'swing foot roll', 'swing foot pitch', 'swing foot yaw',
+            "waist_yaw",
+            'left sholder pitch', 'right sholder pitch',
+            'left sholder roll', 'right sholder roll',
+            'left sholder yaw', 'right sholder yaw',
+            'left elbow ', 'right elbow '
         ],
         'v': ['Velocity'],
         'vdot': ['Acceleration'],

@@ -7,18 +7,27 @@ import isaaclab.sim as sim_utils
 import torch
 
 Q_weights = [
-    25.0,   0.0,    # com_x pos, vel
-    100.0,   50.0,   # com_y pos, vel
-    200.0,  100.0,  # com_z pos, vel
-    4.0,    4.0,    # pelvis_roll pos, vel
-    30.0,    4.0,    # pelvis_pitch pos, vel
-    100.0,    50.0,    # pelvis_yaw pos, vel
+    25.0,   200.0,    # com_x pos, vel
+    200.0,   50.0,   # com_y pos, vel
+    300.0,  10.0,  # com_z pos, vel
+    400.0,    100.0,    # pelvis_roll pos, vel
+    60.0,    10.0,    # pelvis_pitch pos, vel
+    200.0,    100.0,    # pelvis_yaw pos, vel
     1500.0, 125.0,  # swing_x pos, vel
-    1000.0,  125.0,  # swing_y pos, vel
-    2000.0, 25.0,   # swing_z pos, vel
-    4.0,    1.0,    # swing_ori_roll pos, vel
-    1.0,    1.0,    # swing_ori_pitch pos, vel
-    10.0,    1.0,    # swing_ori_yaw pos, vel
+    1500.0,  125.0,  # swing_y pos, vel
+    2500.0, 25.0,   # swing_z pos, vel
+    20.0,    1.0,    # swing_ori_roll pos, vel
+    5.0,    1.0,    # swing_ori_pitch pos, vel
+    200.0,    1.0,    # swing_ori_yaw pos, vel
+    500.0,    10.0,    # waist_yaw pos, vel
+    15.0,1.0, #left sholder pitch
+    15.0,1.0, #right sholder pitch
+    100,1.0, #left sholder roll
+    100,1.0, #right sholder roll
+    100,1.0, #left sholder yaw
+    100,1.0, #right sholder yaw
+    30.0,1.0, #left elbow 
+    30.0,1.0, #right elbow 
 ]
 
 
@@ -26,7 +35,10 @@ R_weights = [
         0.1, 0.1, 0.1,    # CoM inputs: allow moderate effort
         0.05,0.05,0.05,   # pelvis inputs: lower torque priority
         0.05,0.05,0.05,   # swing foot linear inputs
-        0.02,0.02,0.02    # swing foot orientation inputs: small adjustments
+        0.02,0.02,0.02,    # swing foot orientation inputs: small adjustments
+        0.1,0.01,0.01,
+        0.01,0.01,0.01,
+        0.01,0.01,0.01,
     ]
 @configclass
 class HLIPCommandCfg(CommandTermCfg):
@@ -37,13 +49,13 @@ class HLIPCommandCfg(CommandTermCfg):
     asset_name: str = "robot"
     T_ds: float = 0.0          # double support duration (s)
     z0: float = 0.65           # CoM height (m)
-    y_nom: float = 0.25        # nominal lateral foot offset (m)
+    y_nom: float = 0.2        # nominal lateral foot offset (m)
     gait_period: float = 0.8   # gait cycle period (s)
     debug_vis: bool = False    # enable debug visualization
     z_sw_max: float = 0.14    # max swing foot z height (m); this is ankle height so different from actual foot position
     z_sw_min: float = 0.0
     v_history_len: int = 5
-    pelv_pitch_ref: float = 0.2
+    pelv_pitch_ref: float = 0.1
     resampling_time_range: tuple[float, float] = (5.0, 15.0)  # Resampling time range in seconds
     # Command sampling ranges
     ranges: dict = {
@@ -66,6 +78,13 @@ class HLIPCommandCfg(CommandTermCfg):
     )
 
     foot_body_name: str = ".*_ankle_roll_link"
+    const_joint_name: list[str] = [
+                    "waist_yaw_joint",
+                    ".*_shoulder_pitch_joint",
+                    ".*_shoulder_roll_joint",
+                    ".*_shoulder_yaw_joint",
+                    ".*_elbow_joint",
+                ]
 
     goal_pose_visualizer_cfg: VisualizationMarkersCfg = VisualizationMarkersCfg(
         prim_path="/Visuals/goal_pose",

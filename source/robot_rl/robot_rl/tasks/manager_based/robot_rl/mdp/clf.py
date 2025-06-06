@@ -11,10 +11,9 @@ class CLF:
     """
     def __init__(
         self,
-        A_lip: torch.Tensor,
-        B_lip: torch.Tensor,
         n_outputs: int,
         sim_dt: float,
+        batch_size: int,
         device: torch.device = None,
         Q_weights: np.ndarray = None,
         R_weights: np.ndarray = None,
@@ -46,6 +45,9 @@ class CLF:
         # K shape: (n_inputs, n_states)
         self.K = torch.from_numpy(K_np).to(self.device)
 
+        self.v_buffer = torch.zeros((batch_size, 3), device=self.device)
+        self.step_count = 0
+
     def _compute_PK_np(self) -> tuple[np.ndarray, np.ndarray]:
         """
         Construct a pure double integrator system for all outputs,
@@ -64,6 +66,7 @@ class CLF:
 
         A_full = np.kron(np.eye(n_outputs), A_blk)   # (2n x 2n)
         B_full = np.kron(np.eye(n_outputs), B_blk)   # (2n x n)
+
 
         # 2) Solve CARE: A^T P + P A - P B R^{-1} B^T P + Q = 0
         P = solve_continuous_are(A_full, B_full, self.Q_np, self.R_np)
@@ -92,6 +95,13 @@ class CLF:
         eta[:,1::2] = dy_err     # odd indices: velocities
 
         V = torch.einsum('bi,ij,bj->b', eta, self.P, eta)
+
+        self.v_buffer[:, 2] = self.v_buffer[:, 1]
+        self.v_buffer[:, 1] = self.v_buffer[:, 0]
+        # We detach() so that backprop does not try to flow through the history buffer.
+        self.v_buffer[:, 0] = V.detach()
+
+        self.step_count += 1
         return V
 
     def compute_vdot(
@@ -100,12 +110,37 @@ class CLF:
         y_nom: torch.Tensor,
         dy_act: torch.Tensor,
         dy_nom: torch.Tensor,
-        v_prev: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Compute V_dot = (V_curr - V_prev) / sim_dt, returns (vdot, V_curr).
         """
         v_curr = self.compute_v(y_act, y_nom,dy_act,dy_nom)
-        vdot = (v_curr - v_prev) / self.sim_dt
+       
+        dt = self.sim_dt
+        B = v_curr.shape[0]
 
-        return vdot, v_curr
+        if self.step_count >= 3:
+            # We have [V_k, V_{k−1}, V_{k−2}] → 3‐point backward difference
+            V_k  = self.v_buffer[:, 0]   # V_k
+            V_k1 = self.v_buffer[:, 1]   # V_{k−1}
+            V_k2 = self.v_buffer[:, 2]   # V_{k−2}
+            # Formula: (3 V_k − 4 V_{k−1} + V_{k−2}) / (2 Δt)
+            vdot_raw = (3.0 * V_k - 4.0 * V_k1 + V_k2) / (2.0 * dt)
+
+        elif self.step_count == 2:
+            # We only have [V_k, V_{k−1}] → 2‐point fallback
+            V_k  = self.v_buffer[:, 0]
+            V_k1 = self.v_buffer[:, 1]
+            vdot_raw = (V_k - V_k1) / dt
+
+        else:
+            # step_count == 1 → no previous sample; just return zero
+            vdot_raw = torch.zeros((B,), device=self.device)
+
+        # 5) (Optional) Exponential moving average on the raw derivative
+        #    If you do not want smoothing, skip these two lines and set vdot_smooth = vdot_raw.
+        # vdot_smooth = self.ema_beta * self.vdot_ema + (1.0 - self.ema_beta) * vdot_raw
+        # self.vdot_ema.copy_(vdot_smooth)
+
+
+        return vdot_raw, v_curr

@@ -40,13 +40,15 @@ class HLIPCommandTerm(CommandTerm):
         self.env = env
         self.robot = env.scene[cfg.asset_name]
         self.feet_bodies_idx = self.robot.find_bodies(cfg.foot_body_name)[0]
+        self.const_joint_idx = self.robot.find_joints(cfg.const_joint_name)[0]
 
         self.foot_target = torch.zeros((self.num_envs, 2), device=self.device)
 
         self.metrics = {}
      
-        self.y_out = torch.zeros((self.num_envs, 12), device=self.device)
-        self.dy_out = torch.zeros((self.num_envs, 12), device=self.device)
+        n_output = 12 + len(self.const_joint_idx)
+        self.y_out = torch.zeros((self.num_envs, n_output), device=self.device)
+        self.dy_out = torch.zeros((self.num_envs, n_output), device=self.device)
 
         self.com_z = torch.ones((self.num_envs), device=self.device)*self.z0
 
@@ -54,18 +56,16 @@ class HLIPCommandTerm(CommandTerm):
         self.hlip_controller = HLIP(grav, self.z0, self.T_ds, self.T, self.y_nom)
 
         self.mass = sum(self.robot.data.default_mass.T)[0]
-        A_lip = torch.tensor([[0.0, 1.0], [grav / self.z0, 0.0]], device=self.device)
-        B_lip = torch.tensor([[0.0], [1.0 / (self.mass * self.z0)]], device=self.device)
 
-        self.clf = CLF(
-            A_lip, B_lip, 12, self.env.cfg.sim.dt*self.env.cfg.sim.render_interval,
+
+        self.clf = CLF(n_output, self.env.cfg.sim.dt*self.env.cfg.sim.render_interval,
+            batch_size=self.num_envs,
             Q_weights=np.array(cfg.Q_weights),
             R_weights=np.array(cfg.R_weights),
             device=self.device
         )
         
         self.v = torch.zeros((self.num_envs), device=self.device)
-        self.v_buffer = torch.zeros((self.num_envs,self.cfg.v_history_len), device=self.device)
         self.stance_idx = None
 
 
@@ -130,6 +130,9 @@ class HLIPCommandTerm(CommandTerm):
             self.stance_foot_pos_0 = foot_pos_w[:, new_stance_idx, :]
             self.stance_foot_ori_quat_0 = foot_ori_w[:,new_stance_idx,:]
             self.stance_foot_ori_0 = self.get_euler_from_quat(foot_ori_w[:,new_stance_idx,:])
+            self.swing2stance_foot_pos_0 = _transfer_to_local_frame(
+                foot_pos_w[:, self.swing_idx, :]-self.stance_foot_pos_0, self.stance_foot_ori_quat_0
+            )
        
         self.stance_idx = new_stance_idx
 
@@ -220,20 +223,24 @@ class HLIPCommandTerm(CommandTerm):
         # Convert bht to tensor if it's not already
         bht_tensor = torch.tensor(bht, device=self.device) if not isinstance(bht, torch.Tensor) else bht
         
+        sign = torch.sign(foot_target_yaw_adjusted[:, 1])
         foot_pos, sw_z = calculate_cur_swing_foot_pos(
-            bht_tensor, z_init, z_sw_max_tensor, phase_var_tensor, T_tensor, z_sw_neg_tensor,
+            bht_tensor, z_init, z_sw_max_tensor, phase_var_tensor, sign*self.cfg.y_nom,T_tensor, z_sw_neg_tensor,
             foot_target_yaw_adjusted[:, 0], foot_target_yaw_adjusted[:, 1]
         )
 
         
         dbht = bezier_deg(1, phase_var_tensor, T_tensor, horizontal_control_points, four_tensor)
 
-        foot_vel[:,0] = -dbht * -self.foot_target[:,0]+ dbht * self.foot_target[:,0]
-        foot_vel[:,1] = -dbht * self.foot_target[:,1] + dbht * self.foot_target[:,1]
+        foot_vel[:,0] = -dbht * -foot_target_yaw_adjusted[:,0]+ dbht * foot_target_yaw_adjusted[:,0]
+        foot_vel[:,1] = -dbht * foot_target_yaw_adjusted[:,1] + dbht * foot_target_yaw_adjusted[:,1]
         foot_vel[:,2] = sw_z.squeeze(-1)  # Remove the last dimension to match foot_vel[:,2] shape
+
+        const_joint_pos = self.robot.data.default_joint_pos[:, self.const_joint_idx]
+        const_joint_vel = torch.zeros_like(const_joint_pos)
         #setup up reference trajectory, com pos, pelvis orientation, swing foot pos, ori
-        self.y_out = torch.concatenate([com_pos_des_yaw_adjusted, pelvis_ori, foot_pos, foot_ori], dim=-1)
-        self.dy_out = torch.concatenate([com_vel_des_yaw_adjusted, pelvis_ori_vel, foot_vel, foot_ori_vel], dim=-1)
+        self.y_out = torch.concatenate([com_pos_des_yaw_adjusted, pelvis_ori, foot_pos, foot_ori,const_joint_pos], dim=-1)
+        self.dy_out = torch.concatenate([com_vel_des_yaw_adjusted, pelvis_ori_vel, foot_vel, foot_ori_vel,const_joint_vel], dim=-1)
 
     def get_euler_from_quat(self, quat):
 
@@ -305,19 +312,23 @@ class HLIPCommandTerm(CommandTerm):
 
         swing2stance_vel = foot_lin_vel_local_swing 
     
+        const_joint_pos = self.robot.data.joint_pos[:, self.const_joint_idx]
+        const_joint_vel = self.robot.data.joint_vel[:, self.const_joint_idx]
         # 4. Assemble state vectors
         self.y_act = torch.cat([
             com2stance_local,
             pelvis_ori,
             swing2stance_local,
-            swing_foot_ori
+            swing_foot_ori,
+            const_joint_pos
         ], dim=-1)
 
         self.dy_act = torch.cat([
             com_vel_local,
             pelvis_omega_local,
             swing2stance_vel,
-            foot_ang_vel_local_swing
+            foot_ang_vel_local_swing,
+            const_joint_vel
         ], dim=-1)
 
 
@@ -329,11 +340,10 @@ class HLIPCommandTerm(CommandTerm):
         
         #how to handle for the first step?
         #i.e. v is not defined
-        vdot,vcur = self.clf.compute_vdot(self.y_act,self.y_out,self.dy_act,self.dy_out,self.v)
+        vdot,vcur = self.clf.compute_vdot(self.y_act,self.y_out,self.dy_act,self.dy_out)
         self.vdot = vdot
         self.v = vcur
-        self.v_buffer[:,1:] = self.v_buffer[:,:-1]
-        self.v_buffer[:,0] = vcur
+
 
        
         if self.debug_vis:
