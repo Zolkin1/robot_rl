@@ -76,6 +76,13 @@ class DataLogger:
                 print(f"[INFO] Saved {var} data to {filepath}")
 
 
+def parse_sim_speed(value):
+    try:
+        # Split the input string by commas and convert each value to float
+        return [float(x) for x in value.split(',')]
+    except:
+        raise argparse.ArgumentTypeError("Sim speed must be comma-separated floats (e.g. '1.0,0.0,0.0')")
+
 def parse_args():
     parser = argparse.ArgumentParser(description="Play trained RL policies for different environments.")
     parser.add_argument(
@@ -113,6 +120,13 @@ def parse_args():
         action="store_true",
         default=False,
         help="Run in real-time, if possible."
+    )
+
+    parser.add_argument(
+        "--sim_speed",
+        type=parse_sim_speed,
+        default=None,
+        help="Simulation speed as comma-separated values for x,y,z velocities (e.g. '1.0,0.0,0.0')."
     )
     # append RSL-RL cli arguments
     cli_args.add_rsl_rl_args(parser)
@@ -225,6 +239,12 @@ def main():
         env_cfg = parse_env_cfg(
             args_cli.task, device=args_cli.device, num_envs=args_cli.num_envs
         )
+
+        if args_cli.sim_speed is not None:
+            env_cfg.commands.base_velocity.ranges.lin_vel_x = (args_cli.sim_speed[0], args_cli.sim_speed[0])
+            env_cfg.commands.base_velocity.ranges.lin_vel_y = (args_cli.sim_speed[1], args_cli.sim_speed[1])
+            env_cfg.commands.base_velocity.ranges.ang_vel_z = (args_cli.sim_speed[2], args_cli.sim_speed[2])
+
         agent_cfg: RslRlOnPolicyRunnerCfg = cli_args.parse_rsl_rl_cfg(args_cli.task, args_cli)
         print("[DEBUG] Configurations parsed")
 

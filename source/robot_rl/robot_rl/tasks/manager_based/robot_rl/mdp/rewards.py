@@ -164,54 +164,70 @@ def contact_no_vel(env, sensor_cfg: SceneEntityCfg, asset_cfg: SceneEntityCfg = 
 
 
 
-def holonomic_constraint_vel(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
-    """Reward for enforcing holonomic velocity constraint during stance phase."""
-    hlip_cmd = env.command_manager.get_term(command_name)
+def holonomic_constraint_vel(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    sigma_vel: float = (0.1)**0.5
+) -> torch.Tensor:
+    """
+    Unified holonomic‐velocity constraint reward:
+      r = exp( – ‖[v, ω_z]‖² / σ_vel² )
+    where v∈R³ is the foot’s linear velocity and ω_z its yaw rate.
+    Using σ_vel=√0.1 matches the original bandwidth (denominator=0.1).
+    """
+    cmd = env.command_manager.get_term(command_name)
 
-    # [B, 3] linear velocity of stance foot
-    stance_foot_vel = hlip_cmd.stance_foot_vel  # [vx, vy, vz]
-    # [B] yaw angular velocity (only z-axis)
-    stance_foot_yaw_vel = hlip_cmd.stance_foot_ang_vel[:, 2]
+    # linear velocity [B,3] and yaw rate [B,1]
+    v   = cmd.stance_foot_vel                        # [vx, vy, vz]
+    wz  = cmd.stance_foot_ang_vel[:, 2].unsqueeze(-1) # [ω_z]
 
-    # L2 norm of linear velocity + abs(yaw rate)
-    # squared L2‐norm instead of torch.norm(…)
-    lin_vel_penalty = (stance_foot_vel ** 2).sum(dim=-1)
+    # stack into [B,4] error vector
+    e_vel = torch.cat([v, wz], dim=-1)
 
-    # square of the yaw‐velocity instead of absolute‐value
-    ang_vel_penalty = stance_foot_yaw_vel ** 2
+    # unified exponential‐norm reward
+    return torch.exp(- (e_vel**2).sum(dim=-1) / sigma_vel**2)
 
+def holonomic_constraint(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    sigma_pose: float = (5 * 0.01) ** 0.5,
+    z_offset: float = 0.036
+) -> torch.Tensor:
+    """
+    Unified holonomic‐pose constraint reward:
+        r = exp( – ‖e_pose‖² / σ_pose² )
+    where e_pose = [Δx, Δy, Δz, φ, Δψ] and
+      • Δx, Δy are planar errors from the recorded foot position,
+      • Δz = p_z_cur – z_offset (encourages foot to stay on the floor),
+      • φ is roll,
+      • Δψ is yaw error wrapped to [–π, π].
+    """
 
-    # Total penalty per env
-    return (torch.exp(-(lin_vel_penalty)/0.1) + torch.exp(-(ang_vel_penalty)/0.1))/2.0
+    cmd = env.command_manager.get_term(command_name)
 
-def holonomic_constraint(env: ManagerBasedRLEnv, command_name: str, z_offset: float = 0.036) -> torch.Tensor:
-    """Reward holonomic constraint."""
-    ref_cmd = env.command_manager.get_term(command_name)
-    stance_foot_pos = ref_cmd.stance_foot_pos_0
-    stance_foot_pos_cur = ref_cmd.stance_foot_pos
-    pos_err_xy = torch.norm(stance_foot_pos_cur[:, :2] - stance_foot_pos[:, :2], dim=-1)
-    z_des = torch.min(torch.tensor(z_offset, device=env.device),stance_foot_pos[:, 2])
-    
-    pos_err_z  = torch.abs(stance_foot_pos_cur[:, 2] - z_des)
+    # planar position error [B,2]
+    p0_xy = cmd.stance_foot_pos_0[:, :2]
+    p_xy  = cmd.stance_foot_pos[:, :2]
+    delta_xy = p_xy - p0_xy
 
-    # Orientation: roll, pitch, yaw
-    stance_ori_0 = ref_cmd.stance_foot_ori_0  # [B, 3]
-    stance_ori_cur = ref_cmd.stance_foot_ori  # [B, 3]
-  
-    # If enforcing zero roll, roll_0 is assumed to be 0
-    roll_error = torch.abs(stance_ori_cur[:, 0])  # roll deviation from 0
-    yaw_error = torch.abs(stance_ori_cur[:, 2] - stance_ori_0[:, 2])  # yaw deviation from fixed
+    # vertical error to the floor plane [B,1]
+    z_cur    = cmd.stance_foot_pos[:, 2].unsqueeze(-1)
+    delta_z  = z_cur - z_offset
 
-    # Wrap yaw error to [-pi, pi]
-    yaw_error = (yaw_error + torch.pi) % (2 * torch.pi) - torch.pi
+    # roll error [B,1]
+    roll = cmd.stance_foot_ori[:, 0].unsqueeze(-1)
 
-    # Rewards
-    pos_reward_xy = torch.exp(-pos_err_xy**2 / 0.01) 
-    pos_reward_z = torch.exp(-pos_err_z**2 / 0.01)
-    roll_reward = torch.exp(-roll_error**2 / 0.01)
-    yaw_reward = torch.exp(-yaw_error**2 / 0.01)
+    # yaw error wrapped to [–π, π] [B,1]
+    psi0 = cmd.stance_foot_ori_0[:, 2]
+    psi  = cmd.stance_foot_ori[:, 2]
+    delta_psi = ((psi - psi0 + torch.pi) % (2 * torch.pi) - torch.pi).unsqueeze(-1)
 
-    return (pos_reward_xy + pos_reward_z + roll_reward + yaw_reward)/4
+    # stack into [B,5] error vector
+    e_pose = torch.cat([delta_xy, delta_z, roll, delta_psi], dim=-1)
+
+    # unified Gaussian‐like reward
+    return torch.exp(- (e_pose**2).sum(dim=-1) / sigma_pose**2)
+
 
 def lip_gait_tracking(env: ManagerBasedRLEnv, sensor_cfg: SceneEntityCfg, period: float, std: float,
                       nom_height: float, Tswing: float, command_name: str, wdes: float,
