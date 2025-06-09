@@ -76,15 +76,18 @@ class HLIPCommandTerm(CommandTerm):
         self.env = env
         self.robot = env.scene[cfg.asset_name]
         self.feet_bodies_idx = self.robot.find_bodies(cfg.foot_body_name)[0]
-        self.const_joint_idx = self.robot.find_joints(cfg.const_joint_name)[0]
+        self.upper_body_joint_idx = self.robot.find_joints(cfg.upper_body_joint_name)[0]
 
         self.foot_target = torch.zeros((self.num_envs, 2), device=self.device)
 
         self.metrics = {}
      
-        n_output = 12 + len(self.const_joint_idx)
+        n_output = 12 + len(self.upper_body_joint_idx)
         self.y_out = torch.zeros((self.num_envs, n_output), device=self.device)
         self.dy_out = torch.zeros((self.num_envs, n_output), device=self.device)
+        self.y_act = torch.zeros((self.num_envs, n_output), device=self.device)
+        self.dy_act = torch.zeros((self.num_envs, n_output), device=self.device)
+
 
         self.com_z = torch.ones((self.num_envs), device=self.device)*self.z0
 
@@ -102,6 +105,7 @@ class HLIPCommandTerm(CommandTerm):
         )
         
         self.v = torch.zeros((self.num_envs), device=self.device)
+        self.vdot = torch.zeros((self.num_envs), device=self.device)
         self.stance_idx = None
 
 
@@ -149,8 +153,8 @@ class HLIPCommandTerm(CommandTerm):
 
     def update_Stance_Swing_idx(self):
         Tswing = self.T - self.T_ds
-        tp = (self.env.sim.current_time % (2*Tswing)) / (2*Tswing)  
-        phi_c = torch.tensor(math.sin(2 * torch.pi * tp) / math.sqrt(math.sin(2 * torch.pi * tp)**2 + self.T), device=self.env.device)
+        self.tp = (self.env.sim.current_time % (2*Tswing)) / (2*Tswing)  
+        phi_c = torch.tensor(math.sin(2 * torch.pi * self.tp) / math.sqrt(math.sin(2 * torch.pi * self.tp)**2 + self.T), device=self.env.device)
 
 
 
@@ -173,10 +177,10 @@ class HLIPCommandTerm(CommandTerm):
         self.stance_idx = new_stance_idx
 
 
-        if tp < 0.5:
-            self.phase_var = 2*tp
+        if self.tp < 0.5:
+            self.phase_var = 2*self.tp
         else:
-            self.phase_var = 2*tp-1
+            self.phase_var = 2*self.tp-1
         self.cur_swing_time = self.phase_var*Tswing
 
 
@@ -229,20 +233,42 @@ class HLIPCommandTerm(CommandTerm):
 
 
         pelvis_euler = torch.zeros((N,3), device=self.device)
-        pelvis_euler[:,1] = self.cfg.pelv_pitch_ref
+        tp_tensor = torch.tensor(self.tp, device=self.device)
+        phase_tensor = torch.tensor(self.phase_var, device=self.device)
+        
+        roll_main_amp = 0.0  # main double bump amplitude
+        roll_asym_amp = 0.1  # adds asymmetry
+
+        pelvis_euler[:, 0] = (
+            roll_main_amp * torch.sin(4 * torch.pi * tp_tensor) +
+            roll_asym_amp * torch.sin(2 * torch.pi * tp_tensor)
+        )
+
+        pitch_amp = 0.0
+        pelvis_euler[:,1] = self.cfg.pelv_pitch_ref + torch.sin(2*torch.pi * tp_tensor) * pitch_amp
     
-        pelvis_euler[:,2] = self.stance_foot_ori_0[:,2] + base_velocity[:,2] * self.cur_swing_time
+        yaw_amp = 0.02
+        default_yaw = yaw_amp*torch.sin(2* torch.pi * tp_tensor)
+        pelvis_euler[:,2] = default_yaw + self.stance_foot_ori_0[:,2] + base_velocity[:,2] * self.cur_swing_time 
+
+        pelvis_eul_dot = torch.zeros((N,3), device=self.device)
+
+        dtp_dt = 1/(2*(self.T-self.T_ds))
+        dphase_dt = 1/(self.T-self.T_ds)
+        
+        pelvis_eul_dot[:, 0] = (
+            roll_main_amp * 4 * torch.pi * torch.cos(4 * torch.pi * tp_tensor) * dtp_dt +
+            roll_asym_amp * 2 * torch.pi * torch.cos(2 * torch.pi * tp_tensor) * dtp_dt
+        )
+
+        pelvis_eul_dot[:,1] = 2*torch.pi * torch.cos(2*torch.pi * tp_tensor) * pitch_amp * dtp_dt
+        pelvis_eul_dot[:,2] = base_velocity[:,2] + yaw_amp*2* torch.pi * torch.cos(2* torch.pi * tp_tensor) * dtp_dt
+
 
         foot_eul = torch.zeros((N,3), device=self.device)
         #TODO enable foot orientation control
-        foot_eul[:,2] = pelvis_euler[:,2]
-
-        
-        foot_vel = torch.zeros((N,3), device=self.device)
+        foot_eul[:,2] = pelvis_euler[:,2]     
         foot_eul_dot = torch.zeros((N,3), device=self.device)
-        pelvis_eul_dot = torch.zeros((N,3), device=self.device)
-
-        pelvis_eul_dot[:,2] = base_velocity[:,2]
         foot_eul_dot[:,2] = pelvis_eul_dot[:,2]
 
         z_sw_max = self.cfg.z_sw_max
@@ -275,19 +301,64 @@ class HLIPCommandTerm(CommandTerm):
 
         
         dbht = bezier_deg(1, phase_var_tensor, T_tensor, horizontal_control_points, four_tensor)
-
+        foot_vel = torch.zeros((N,3), device=self.device)
         foot_vel[:,0] = -dbht * -foot_target_yaw_adjusted[:,0]+ dbht * foot_target_yaw_adjusted[:,0]
         foot_vel[:,1] = -dbht * foot_target_yaw_adjusted[:,1] + dbht * foot_target_yaw_adjusted[:,1]
         foot_vel[:,2] = sw_z.squeeze(-1)  # Remove the last dimension to match foot_vel[:,2] shape
 
-        const_joint_pos = self.robot.data.default_joint_pos[:, self.const_joint_idx]
-        const_joint_vel = torch.zeros_like(const_joint_pos)
+        
+        upper_body_joint_pos, upper_body_joint_vel = self.generate_upper_body_ref()
+
+        # upper_body_joint_pos = upper_body_joint_pos.unsqueeze(0).expand(N, -1)
+        upper_body_joint_vel = upper_body_joint_vel.unsqueeze(0).expand(N, -1)
 
         omega_ref = euler_rates_to_omega(pelvis_euler, pelvis_eul_dot)
         omega_foot_ref = euler_rates_to_omega(foot_eul, foot_eul_dot)  # (N,3)
         #setup up reference trajectory, com pos, pelvis orientation, swing foot pos, ori
-        self.y_out = torch.cat([com_pos_des_yaw_adjusted, pelvis_euler, foot_pos, foot_eul,const_joint_pos], dim=-1)
-        self.dy_out = torch.cat([com_vel_des_yaw_adjusted, omega_ref, foot_vel, omega_foot_ref,const_joint_vel], dim=-1)
+        self.y_out = torch.cat([com_pos_des_yaw_adjusted, pelvis_euler, foot_pos, foot_eul,upper_body_joint_pos], dim=-1)
+        self.dy_out = torch.cat([com_vel_des_yaw_adjusted, omega_ref, foot_vel, omega_foot_ref,upper_body_joint_vel], dim=-1)
+
+    def generate_upper_body_ref(self):
+        phase = 2* torch.pi * self.tp
+        # Amplitudes for [L_pitch, R_pitch, L_roll, R_roll, L_yaw, R_yaw, L_elbow, R_elbow]
+        shoulder_pitch_amp, shoulder_roll_amp, shoulder_yaw_amp = self.cfg.shoulder_ref
+        elbow_amp = self.cfg.elbow_ref
+        waist_yaw_amp = self.cfg.waist_yaw_ref
+
+        amp = torch.tensor([
+            waist_yaw_amp,
+            shoulder_pitch_amp, shoulder_pitch_amp,
+            shoulder_roll_amp, shoulder_roll_amp,
+            shoulder_yaw_amp, shoulder_yaw_amp,
+            elbow_amp, elbow_amp,
+        ], device=self.device)
+        # Sign for out-of-phase motion (waist yaw is +)
+        sign = torch.tensor([
+            1,         # waist_yaw
+            1, -1,     # L/R shoulder_pitch
+            1, -1,     # L/R shoulder_roll
+            1, -1,     # L/R shoulder_yaw
+            1, -1,     # L/R elbow
+        ], device=self.device)
+        
+        offset = torch.tensor([
+            torch.pi,      # waist_yaw
+            torch.pi/2, torch.pi/2,          # shoulder_pitch
+            torch.pi/2, torch.pi/2,   # shoulder_roll
+            0, 0,          # shoulder_yaw
+            torch.pi, torch.pi,   # elbow
+        ], device=self.device)
+
+        # Reference position
+        joint_offset = self.robot.data.default_joint_pos[:, self.upper_body_joint_idx]
+        ref = amp * sign * torch.sin(phase + offset) + joint_offset
+        
+        # Reference velocity (derivative)
+        dphase_dt = 2 * torch.pi / (2*(self.T-self.T_ds))  # scalar or tensor
+        ref_dot = amp * sign * torch.cos(phase + offset) * dphase_dt
+
+        return ref, ref_dot
+
 
     def get_euler_from_quat(self, quat):
 
@@ -335,7 +406,7 @@ class HLIPCommandTerm(CommandTerm):
 
         # 2. Velocities (world frame)
         com_vel_w = data.root_com_vel_w[:,0:3]
-        pelvis_omega_w = data.root_ang_vel_w
+        # pelvis_omega_w = data.root_ang_vel_w
         foot_lin_vel_w = data.body_lin_vel_w[:, self.feet_bodies_idx, :]
         foot_ang_vel_w = data.body_ang_vel_w[:, self.feet_bodies_idx, :]
 
@@ -345,29 +416,31 @@ class HLIPCommandTerm(CommandTerm):
         # import pdb; pdb.set_trace()
         com_vel_local = _transfer_to_local_frame(com_vel_w, self.stance_foot_ori_quat_0)
       
-        pelvis_omega_local = _transfer_to_local_frame(pelvis_omega_w, self.stance_foot_ori_quat_0)
-        foot_lin_vel_local_stance = _transfer_to_local_frame(
-            foot_lin_vel_w[:,self.stance_idx,:], self.stance_foot_ori_quat_0
-        )
+        pelvis_omega_local = data.root_ang_vel_b
+        # foot_lin_vel_local_stance = _transfer_to_local_frame(
+        #     foot_lin_vel_w[:,self.stance_idx,:], self.stance_foot_ori_quat_0
+        # )
         foot_lin_vel_local_swing = _transfer_to_local_frame(
             foot_lin_vel_w[:,self.swing_idx,:], self.stance_foot_ori_quat_0
         )
 
-        foot_ang_vel_local_swing = _transfer_to_local_frame(
-            foot_ang_vel_w[:,self.swing_idx,:], self.stance_foot_ori_quat_0
-        )
+        foot_ang_vel_local_swing =quat_apply(quat_inv(foot_ori_w[:,self.swing_idx,:]), foot_ang_vel_w[:,self.swing_idx,:])
+        
+        # _transfer_to_local_frame(
+        #     foot_ang_vel_w[:,self.swing_idx,:], self.stance_foot_ori_quat_0
+        # )
 
         swing2stance_vel = foot_lin_vel_local_swing 
     
-        const_joint_pos = self.robot.data.joint_pos[:, self.const_joint_idx]
-        const_joint_vel = self.robot.data.joint_vel[:, self.const_joint_idx]
+        upper_body_joint_pos = self.robot.data.joint_pos[:, self.upper_body_joint_idx]
+        upper_body_joint_vel = self.robot.data.joint_vel[:, self.upper_body_joint_idx]
         # 4. Assemble state vectors
         self.y_act = torch.cat([
             com2stance_local,
             pelvis_ori,
             swing2stance_local,
             swing_foot_ori,
-            const_joint_pos
+            upper_body_joint_pos
         ], dim=-1)
 
         self.dy_act = torch.cat([
@@ -375,7 +448,7 @@ class HLIPCommandTerm(CommandTerm):
             pelvis_omega_local,
             swing2stance_vel,
             foot_ang_vel_local_swing,
-            const_joint_vel
+            upper_body_joint_vel
         ], dim=-1)
 
 

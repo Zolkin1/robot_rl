@@ -50,12 +50,20 @@ class G1RoughLipObservationsCfg(ObservationsCfg):
         sin_phase = ObsTerm(func=mdp.sin_phase, params={"period": PERIOD})
         cos_phase = ObsTerm(func=mdp.cos_phase, params={"period": PERIOD})
 
-        des_foot_pos = ObsTerm(func=mdp.generated_commands, params={"command_name": "hlip_ref"},history_length=1,scale=(1.0,1.0))
+        # des_foot_pos = ObsTerm(func=mdp.generated_commands, params={"command_name": "hlip_ref"},history_length=1,scale=(1.0,1.0))
 
     @configclass
     class CriticCfg(PolicyCfg):
         """Observations for critic group."""
-        base_lin_vel = ObsTerm(func=mdp.base_lin_vel, noise=Unoise(n_min=-0.1, n_max=0.1),history_length=1,scale=2.0)
+        base_lin_vel = ObsTerm(func=mdp.base_lin_vel, noise=Unoise(n_min=-0.1, n_max=0.1),history_length=1,scale=1.0)
+        foot_vel = ObsTerm(func=mdp.foot_vel, params={"command_name": "hlip_ref"},scale=1.0)
+        foot_ang_vel = ObsTerm(func=mdp.foot_ang_vel, params={"command_name": "hlip_ref"},scale=1.0)
+        ref_traj = ObsTerm(func=mdp.ref_traj, params={"command_name": "hlip_ref"},scale=1.0)
+        act_traj = ObsTerm(func=mdp.act_traj, params={"command_name": "hlip_ref"},scale=1.0)
+        ref_traj_vel = ObsTerm(func=mdp.ref_traj_vel, params={"command_name": "hlip_ref"},scale=0.1)
+        act_traj_vel = ObsTerm(func=mdp.act_traj_vel, params={"command_name": "hlip_ref"},scale=0.1)
+        # v_dot = ObsTerm(func=mdp.v_dot, params={"command_name": "hlip_ref"},clip=(-1000.0,1000.0),scale=0.001)
+        # v = ObsTerm(func=mdp.v, params={"command_name": "hlip_ref"},clip=(0.0,500.0),scale=0.01)
         height_scan = None      # Removed - not supported yet
 
 
@@ -132,6 +140,7 @@ class G1RoughLipRewards(HumanoidRewardCfg):
         weight=10.0,
         params={
             "command_name": "hlip_ref",
+            "max_clf": 50.0,
         }
     )
 
@@ -140,6 +149,7 @@ class G1RoughLipRewards(HumanoidRewardCfg):
         weight=-2.0,
         params={
             "command_name": "hlip_ref",
+            "max_clf_decreasing": 100.0,
         }
     )
 
@@ -208,9 +218,9 @@ class G1RoughLipEnvCfg(HumanoidEnvCfg):
         ##
         # Commands
         ##
-        self.commands.base_velocity.ranges.lin_vel_x = (1.0,1.0)
-        self.commands.base_velocity.ranges.lin_vel_y = (0.0, 0.0)
-        self.commands.base_velocity.ranges.ang_vel_z = (-0.5, 0.5)
+        self.commands.base_velocity.ranges.lin_vel_x = (-1.0,1.0)
+        self.commands.base_velocity.ranges.lin_vel_y = (0.0,1.0)
+        self.commands.base_velocity.ranges.ang_vel_z = (-0.5,0.5)
 
         ##
         # Terminations

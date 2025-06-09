@@ -9,23 +9,23 @@ import torch
 Q_weights = [
     25.0,   200.0,    # com_x pos, vel
     300.0,   50.0,   # com_y pos, vel
-    1000.0,  10.0,  # com_z pos, vel
-    450.0,    10.0,    # pelvis_roll pos, vel
-    60.0,    10.0,    # pelvis_pitch pos, vel
-    350.0,    10.0,    # pelvis_yaw pos, vel
+    600.0,  100.0,  # com_z pos, vel
+    420.0,    20.0,    # pelvis_roll pos, vel
+    200.0,    10.0,    # pelvis_pitch pos, vel
+    300.0,    10.0,    # pelvis_yaw pos, vel
     1500.0, 125.0,  # swing_x pos, vel
     1700.0,  125.0,  # swing_y pos, vel
-    2500.0, 25.0,   # swing_z pos, vel
-    20.0,    1.0,    # swing_ori_roll pos, vel
+    2500.0, 125.0,   # swing_z pos, vel
+    30.0,    1.0,    # swing_ori_roll pos, vel
     15.0,    1.0,    # swing_ori_pitch pos, vel
-    300.0,    10.0,    # swing_ori_yaw pos, vel
+    400.0,    10.0,    # swing_ori_yaw pos, vel
     500.0,    10.0,    # waist_yaw pos, vel
-    15.0,1.0, #left sholder pitch
-    15.0,1.0, #right sholder pitch
+    40.0,1.0, #left sholder pitch
+    40.0,1.0, #right sholder pitch
     100,1.0, #left sholder roll
     100,1.0, #right sholder roll
-    100,1.0, #left sholder yaw
-    100,1.0, #right sholder yaw
+    50,1.0, #left sholder yaw
+    50,1.0, #right sholder yaw
     30.0,1.0, #left elbow 
     30.0,1.0, #right elbow 
 ]
@@ -48,14 +48,17 @@ class HLIPCommandCfg(CommandTermCfg):
     class_type: type = HLIPCommandTerm
     asset_name: str = "robot"
     T_ds: float = 0.0          # double support duration (s)
-    z0: float = 0.65           # CoM height (m)
-    y_nom: float = 0.2        # nominal lateral foot offset (m)
+    z0: float = 0.6           # CoM height (m)
+    y_nom: float = 0.23        # nominal lateral foot offset (m)
     gait_period: float = 0.8   # gait cycle period (s)
     debug_vis: bool = False    # enable debug visualization
-    z_sw_max: float = 0.14    # max swing foot z height (m); this is ankle height so different from actual foot position
+    z_sw_max: float = 0.08    # max swing foot z height (m); this is ankle height so different from actual foot position
     z_sw_min: float = 0.0
     v_history_len: int = 5
-    pelv_pitch_ref: float = 0.1
+    pelv_pitch_ref: float = 0.2
+    waist_yaw_ref: float = 0.0
+    shoulder_ref: list[float] = [0.0, 0.0, 0.0]
+    elbow_ref: float = 0.0
     resampling_time_range: tuple[float, float] = (5.0, 15.0)  # Resampling time range in seconds
     # Command sampling ranges
     ranges: dict = {
@@ -78,7 +81,7 @@ class HLIPCommandCfg(CommandTermCfg):
     )
 
     foot_body_name: str = ".*_ankle_roll_link"
-    const_joint_name: list[str] = [
+    upper_body_joint_name: list[str] = [
                     "waist_yaw_joint",
                     ".*_shoulder_pitch_joint",
                     ".*_shoulder_roll_joint",
