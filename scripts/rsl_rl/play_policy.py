@@ -123,6 +123,13 @@ def parse_args():
     )
 
     parser.add_argument(
+        "--export_policy",
+        action="store_true",
+        default=False,
+        help="Export the policy to ONNX and JIT formats."
+    )
+
+    parser.add_argument(
         "--sim_speed",
         type=parse_sim_speed,
         default=None,
@@ -225,6 +232,7 @@ def main():
         from isaaclab.utils.dict import print_dict
         from isaaclab_rl.rsl_rl import RslRlOnPolicyRunnerCfg, RslRlVecEnvWrapper
         from isaaclab_tasks.utils import get_checkpoint_path, parse_env_cfg
+        from isaaclab_rl.rsl_rl import export_policy_as_jit, export_policy_as_onnx
         import robot_rl.tasks  # noqa: F401
         print("[DEBUG] Modules imported successfully")
 
@@ -312,6 +320,25 @@ def main():
         # obtain the trained policy for inference
         policy = ppo_runner.get_inference_policy(device=env.unwrapped.device)
         print("[DEBUG] Inference policy obtained")
+
+        # Export policy if requested
+        if args_cli.export_policy:
+            print("[DEBUG] Exporting policy to ONNX and JIT formats")
+            try:
+                # version 2.3 onwards
+                policy_nn = ppo_runner.alg.policy
+            except AttributeError:
+                # version 2.2 and below
+                policy_nn = ppo_runner.alg.actor_critic
+
+            # export policy to onnx/jit
+            export_model_dir = os.path.join(os.path.dirname(resume_path), "exported")
+            os.makedirs(export_model_dir, exist_ok=True)
+            export_policy_as_jit(policy_nn, ppo_runner.obs_normalizer, path=export_model_dir, filename="policy.pt")
+            export_policy_as_onnx(
+                policy_nn, normalizer=ppo_runner.obs_normalizer, path=export_model_dir, filename="policy.onnx"
+            )
+            print(f"[DEBUG] Policy exported to {export_model_dir}")
 
         dt = env.unwrapped.step_dt
 

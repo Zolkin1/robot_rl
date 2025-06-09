@@ -60,7 +60,7 @@ class HumanoidObservationsCfg(ObservationsCfg):
         height_scan = None      # Removed - not supported yet
 
         base_ang_vel = ObsTerm(func=mdp.base_ang_vel, noise=Unoise(n_min=-0.2, n_max=0.2),history_length=1,scale=0.25)
-        velocity_commands = ObsTerm(func=mdp.generated_commands, params={"command_name": "base_velocity"},history_length=1,scale=(2.0,2.0,0.25))
+        velocity_commands = ObsTerm(func=mdp.generated_commands, params={"command_name": "base_velocity"},history_length=1,scale=(2.0,2.0,2.0))
         joint_vel = ObsTerm(func=mdp.joint_vel_rel, noise=Unoise(n_min=-1.5, n_max=1.5),history_length=1,scale=0.05)
         joint_pos = ObsTerm(func=mdp.joint_pos_rel, noise=Unoise(n_min=-0.01, n_max=0.01),history_length=1)
 
