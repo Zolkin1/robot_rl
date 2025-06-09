@@ -58,8 +58,14 @@ def find_most_recent_timestamped_folder(base_path):
 
 def extract_data(filepath, config):
     data_structure = config.get('data_structure')
-    print(f"data_structure: {data_structure}")
+    print("\nData structure from config:")
+    for item in data_structure:
+        print(f"  {item['name']}: length {item['length']}")
+    
     extracted_data_lists = {item['name']: [] for item in data_structure if 'name' in item}
+    print("\nInitialized data lists:")
+    for name in extracted_data_lists:
+        print(f"  {name}")
 
     with open(filepath, "r") as f:
         csv_reader = csv.reader(f)
@@ -69,7 +75,6 @@ def extract_data(filepath, config):
             numeric_row = []
             for item in row:
                 numeric_row.append(float(item))
-            # numeric_row = [float(value) for value in row]
 
             current_index = 0
             for item in data_structure:
@@ -86,10 +91,13 @@ def extract_data(filepath, config):
         for name, data_list in extracted_data_lists.items():
             if data_list:  # Only create array if there is data
                 extracted_data_arrays[name] = np.array(data_list)
+                print(f"\nLoaded data for {name}:")
+                print(f"  Shape: {extracted_data_arrays[name].shape}")
             else:  # Create empty array if no data was collected for this component
                 # Determine the shape based on the config length
                 component_length = next((item['length'] for item in data_structure if item.get('name') == name), 0)
                 extracted_data_arrays[name] = np.empty((0, component_length))
+                print(f"\nNo data found for {name}, created empty array with shape (0, {component_length})")
 
         return extracted_data_arrays
 
@@ -166,6 +174,84 @@ def plot_ankles(data):
     axes[1, 2].set_xlabel("time")
     axes[1, 2].set_ylabel(f"right_ankle_pos z (m)")
 
+def plot_velocity_comparison(data):
+    """Plot comparison between commanded and actual velocities."""
+    time = data['time']
+    qvel = data['qvel']
+    commanded_vel = data['commanded_vel']
+    
+    # Extract base velocities (first 3 elements of qvel)
+    actual_vel = qvel[:, :3]
+    
+    # Create figure with 3 subplots for x, y, and angular velocities
+    fig, axes = plt.subplots(3, 1, figsize=(10, 12))
+    fig.suptitle('Commanded vs Actual Velocities')
+    
+    # Plot x velocity
+    axes[0].plot(time, commanded_vel[:, 0], 'r--', label='Commanded')
+    axes[0].plot(time, actual_vel[:, 0], 'b-', label='Actual')
+    axes[0].set_ylabel('X Velocity (m/s)')
+    axes[0].legend()
+    axes[0].grid(True)
+    
+    # Plot y velocity
+    axes[1].plot(time, commanded_vel[:, 1], 'r--', label='Commanded')
+    axes[1].plot(time, actual_vel[:, 1], 'b-', label='Actual')
+    axes[1].set_ylabel('Y Velocity (m/s)')
+    axes[1].legend()
+    axes[1].grid(True)
+    
+    # Plot angular velocity
+    axes[2].plot(time, commanded_vel[:, 2], 'r--', label='Commanded')
+    axes[2].plot(time, actual_vel[:, 2], 'b-', label='Actual')
+    axes[2].set_xlabel('Time (s)')
+    axes[2].set_ylabel('Angular Velocity (rad/s)')
+    axes[2].legend()
+    axes[2].grid(True)
+
+def plot_position_comparison(data):
+    """Plot comparison between desired and actual positions."""
+    time = data['time']
+    qpos = data['qpos']
+    commanded_vel = data['commanded_vel']
+    
+    # Extract base position (first 3 elements of qpos)
+    actual_pos = qpos[:, :3]
+    
+    # Calculate desired position by integrating commanded velocity
+    dt = time[1] - time[0]  # Assuming constant time step
+    desired_pos = np.zeros_like(actual_pos)
+    desired_pos[0] = actual_pos[0]  # Start from actual position
+    
+    for i in range(1, len(time)):
+        desired_pos[i] = desired_pos[i-1] + commanded_vel[i-1] * dt
+    
+    # Create figure with 3 subplots for x, y, and angular positions
+    fig, axes = plt.subplots(3, 1, figsize=(10, 12))
+    fig.suptitle('Desired vs Actual Positions')
+    
+    # Plot x position
+    axes[0].plot(time, desired_pos[:, 0], 'r--', label='Desired')
+    axes[0].plot(time, actual_pos[:, 0], 'b-', label='Actual')
+    axes[0].set_ylabel('X Position (m)')
+    axes[0].legend()
+    axes[0].grid(True)
+    
+    # Plot y position
+    axes[1].plot(time, desired_pos[:, 1], 'r--', label='Desired')
+    axes[1].plot(time, actual_pos[:, 1], 'b-', label='Actual')
+    axes[1].set_ylabel('Y Position (m)')
+    axes[1].legend()
+    axes[1].grid(True)
+    
+    # Plot angular position
+    axes[2].plot(time, desired_pos[:, 2], 'r--', label='Desired')
+    axes[2].plot(time, actual_pos[:, 2], 'b-', label='Actual')
+    axes[2].set_xlabel('Time (s)')
+    axes[2].set_ylabel('Angular Position (rad)')
+    axes[2].legend()
+    axes[2].grid(True)
+
 if __name__ == "__main__":
     # Load in the data from rerun
     log_dir = os.getcwd() + "/logs"
@@ -198,13 +284,18 @@ if __name__ == "__main__":
     print(f"action shape: {data['action'].shape}")
     print(f"left_ankle_pos shape: {data['left_ankle_pos'].shape}")
     print(f"right_ankle_pos shape: {data['right_ankle_pos'].shape}")
+    print(f"commanded_vel shape: {data['commanded_vel'].shape}")
 
     # Make a plot
     # plot_joints_and_actions(data)
     # plot_torques(data)
     # plot_vels(data)
-    # plot_base(data)
-    import pdb; pdb.set_trace()
-    plot_ankles(data)
+    plot_base(data)
+    # import pdb; pdb.set_trace()
+    # plot_ankles(data)
+
+    # Plot velocity and position comparisons
+    plot_velocity_comparison(data)
+    plot_position_comparison(data)
 
     plt.show()

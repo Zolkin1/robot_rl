@@ -214,8 +214,14 @@ class HLIPCommandTerm(CommandTerm):
         com_pos_des = torch.stack([com_x, com_y,torch.ones((N,), device=device) * self.com_z], dim=-1)  # Shape: (N,2)
         com_vel_des = torch.stack([com_xd, com_yd,torch.zeros((N), device=self.device)], dim=-1)  # Shape: (N,2)
 
-        
+        Uy = torch.clamp(torch.abs(Uy), min=self.cfg.foot_target_range_y[0], max=self.cfg.foot_target_range_y[1]) * torch.sign(Uy)
+
         foot_target = torch.stack([Ux,Uy,torch.zeros((N), device=self.device)], dim=-1)
+        #clip foot target based on kinematic range
+        # the absolute value of foot target y should be within foot_target_range_y
+        # so either Uy or -Uy should be within foot_target_range_y
+        # hmm clip then times sign of Uy?
+
 
         # based on yaw velocity, update com_pos_des, com_vel_des, foot_target,
         delta_psi = base_velocity[:,2] * self.cur_swing_time
@@ -229,6 +235,8 @@ class HLIPCommandTerm(CommandTerm):
         com_pos_des_yaw_adjusted = quat_apply(q_delta_yaw, com_pos_des)  # [B,3]
         com_vel_des_yaw_adjusted = quat_apply(q_delta_yaw, com_vel_des)  # [B,3]
         
+
+        # clip foot target based on kinematic range
         self.foot_target = foot_target_yaw_adjusted[:,0:2]
 
 
@@ -237,7 +245,7 @@ class HLIPCommandTerm(CommandTerm):
         phase_tensor = torch.tensor(self.phase_var, device=self.device)
         
         roll_main_amp = 0.0  # main double bump amplitude
-        roll_asym_amp = 0.1  # adds asymmetry
+        roll_asym_amp = 0.05  # adds asymmetry
 
         pelvis_euler[:, 0] = (
             roll_main_amp * torch.sin(4 * torch.pi * tp_tensor) +

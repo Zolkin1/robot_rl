@@ -9,15 +9,15 @@ import torch
 Q_weights = [
     25.0,   200.0,    # com_x pos, vel
     300.0,   50.0,   # com_y pos, vel
-    600.0,  100.0,  # com_z pos, vel
+    600.0,  20.0,  # com_z pos, vel
     420.0,    20.0,    # pelvis_roll pos, vel
     200.0,    10.0,    # pelvis_pitch pos, vel
     300.0,    10.0,    # pelvis_yaw pos, vel
     1500.0, 125.0,  # swing_x pos, vel
     1700.0,  125.0,  # swing_y pos, vel
-    2500.0, 125.0,   # swing_z pos, vel
+    3500.0, 100.0,   # swing_z pos, vel
     30.0,    1.0,    # swing_ori_roll pos, vel
-    15.0,    1.0,    # swing_ori_pitch pos, vel
+    10.0,    1.0,    # swing_ori_pitch pos, vel
     400.0,    10.0,    # swing_ori_yaw pos, vel
     500.0,    10.0,    # waist_yaw pos, vel
     40.0,1.0, #left sholder pitch
@@ -52,13 +52,14 @@ class HLIPCommandCfg(CommandTermCfg):
     y_nom: float = 0.23        # nominal lateral foot offset (m)
     gait_period: float = 0.8   # gait cycle period (s)
     debug_vis: bool = False    # enable debug visualization
-    z_sw_max: float = 0.08    # max swing foot z height (m); this is ankle height so different from actual foot position
+    z_sw_max: float = 0.1    # max swing foot z height (m); this is ankle height so different from actual foot position
     z_sw_min: float = 0.0
     v_history_len: int = 5
     pelv_pitch_ref: float = 0.2
     waist_yaw_ref: float = 0.0
     shoulder_ref: list[float] = [0.0, 0.0, 0.0]
     elbow_ref: float = 0.0
+    foot_target_range_y: list[float] = [0.1,0.5]
     resampling_time_range: tuple[float, float] = (5.0, 15.0)  # Resampling time range in seconds
     # Command sampling ranges
     ranges: dict = {

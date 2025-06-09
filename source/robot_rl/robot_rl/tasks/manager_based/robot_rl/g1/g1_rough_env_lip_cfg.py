@@ -219,8 +219,8 @@ class G1RoughLipEnvCfg(HumanoidEnvCfg):
         # Commands
         ##
         self.commands.base_velocity.ranges.lin_vel_x = (-1.0,1.0)
-        self.commands.base_velocity.ranges.lin_vel_y = (-1.0,1.0)
-        self.commands.base_velocity.ranges.ang_vel_z = (-0.5,0.5)
+        self.commands.base_velocity.ranges.lin_vel_y = (-0.4,0.4)
+        self.commands.base_velocity.ranges.ang_vel_z = (-0.3,0.3)
 
         ##
         # Terminations
@@ -248,7 +248,7 @@ class G1RoughLipEnvCfg(HumanoidEnvCfg):
  
         # torque, acc, vel, action rate regularization
         self.rewards.dof_torques_l2.weight = -1.0e-5
-        # self.rewards.dof_pos_limits.weight = -5.0
+        self.rewards.dof_pos_limits.weight = -1.0
         self.rewards.dof_acc_l2.weight = -2.5e-7
         self.rewards.dof_vel_l2.weight = -1.0e-5
         self.rewards.action_rate_l2.weight = -0.001
@@ -257,7 +257,7 @@ class G1RoughLipEnvCfg(HumanoidEnvCfg):
         
         self.rewards.joint_deviation_arms = None
         self.rewards.joint_deviation_torso = None
-        self.rewards.dof_pos_limits = None
+        # self.rewards.dof_pos_limits = None
         # self.rewards.dof_vel_l2 = None
         # self.rewards.dof_acc_l2 = None
         # self.rewards.dof_torques_l2 = None
