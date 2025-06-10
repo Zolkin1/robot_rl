@@ -5,7 +5,7 @@ class RLPolicy():
     """RL Policy Wrapper"""
     def __init__(self, dt: float, checkpoint_path: str, num_obs: int, num_action: int,
                  cmd_scale: list, period: float, action_scale: float, default_angles: np.array, qvel_scale: float,
-                 ang_vel_scale: float):
+                 ang_vel_scale: float, height_map_scale=None):
         """Initialize RL Policy Wrapper.
             freq: time between actions (s)
         """
@@ -19,6 +19,7 @@ class RLPolicy():
         self.default_angles = default_angles
         self.qvel_scale = qvel_scale
         self.ang_vel_scale = ang_vel_scale
+        self.height_map_scale = height_map_scale
 
         self.action_isaac = np.zeros(num_action)
 
@@ -60,7 +61,8 @@ class RLPolicy():
         if torch.cuda.is_available():
             self.policy = self.policy.cuda()
 
-    def create_obs(self, qjoints, body_ang_vel, qvel, time, projected_gravity, des_vel, convention="mj"):
+    def create_obs(self, qjoints, body_ang_vel, qvel, time, projected_gravity, des_vel,
+                   height_map=None, sensor_pos=None, convention="mj"):
         """Create the observation vector from the sensor data"""
         obs = np.zeros(self.num_obs, dtype=np.float32)
 
@@ -85,7 +87,13 @@ class RLPolicy():
 
         sin_phase = np.sin(2 * np.pi * time/self.period)
         cos_phase = np.cos(2 * np.pi * time/self.period)
-        obs[9 + 3*nj : 9 + 3*nj + 2] = np.array([sin_phase, cos_phase])     # Phases
+
+        if height_map is not None:
+            height_obs = self.convert_height_map_to_obs(height_map, sensor_pos)
+            obs[9 + 3 * nj:9 + 3 * nj + height_obs.shape[0]] = height_obs
+            obs[9 + 3 * nj + height_obs.shape[0] : 9 + 3 * nj + height_obs.shape[0] + 2] = np.array([sin_phase, cos_phase])     # Phases
+        else:
+            obs[9 + 3*nj : 9 + 3*nj + 2] = np.array([sin_phase, cos_phase])     # Phases
 
         obs_tensor = torch.from_numpy(obs).unsqueeze(0)
 
@@ -129,3 +137,18 @@ class RLPolicy():
     def get_action_isaac(self):
         default_isaac = self.convert_to_isaac(self.default_angles)
         return self.action_isaac * self.action_scale + default_isaac
+
+    def convert_height_map_to_obs(self, height_map, sensor_pos, offset=0.5):
+        """Converts the (N, M, 3) height map to an observation vector.
+            sensor_pos is the position of the position of the sensor
+            offset is the same as the height_scan issac lab function.
+        """
+        obs = np.zeros(height_map.shape[0] * height_map[1])
+        if self.height_map_scale != None:
+            # IsaacLab default is "xy" for the grid ordering
+            for x in range(height_map.shape[0]):
+                for y in range(height_map[1]):
+                    # TODO: Verify that it is clipped
+                    obs[x * height_map[1] + y] = np.clip(sensor_pos[2] - height_map[x, y, 2] - offset, -1, 1)
+        else:
+            raise ValueError("Height map scale is none but a height map was passed in!")

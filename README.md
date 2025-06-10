@@ -1,4 +1,5 @@
-# Template for Isaac Lab Projects
+# Robot RL
+
 
 ## Overview
 
@@ -89,6 +90,13 @@ To enable your extension, follow these steps:
     - Find your extension under the `Third Party` category.
     - Toggle it to enable your extension.
 
+## sim2sim Transfer
+This code base has a built in sim2sim transfer (i.e. the policy is trained in IsaacLab and can be run in Mujoco). Currently, we only support the G1 (as that is the only policy we have right now).
+To run the sim2sim transfer, go to the `transfer/sim/` directory. From this directory run
+```
+python g1_runner.py --config_file=/path/to/config/file
+```
+
 ## Code formatting
 
 We have a pre-commit template to automatically format your code.
@@ -140,3 +148,11 @@ Run
 python /robot_rl/scripts/rsl_rl/play.py --task=G1-flat-lip-vel --num_envs=2 --checkpoint=<log_dir_checkpoint>
 
 ```
+
+# Obelisk Transfer
+First, set the environment variable `ROBOT_RL_ROOT` to the repo path.
+
+
+## Other Deps
+pygame
+mujoco
