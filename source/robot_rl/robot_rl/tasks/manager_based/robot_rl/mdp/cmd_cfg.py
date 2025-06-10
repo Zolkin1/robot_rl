@@ -57,8 +57,8 @@ class HLIPCommandCfg(CommandTermCfg):
     v_history_len: int = 5
     pelv_pitch_ref: float = 0.2
     waist_yaw_ref: float = 0.0
-    shoulder_ref: list[float] = [0.0, 0.0, 0.0]
-    elbow_ref: float = 0.0
+    shoulder_ref: list[float] = [0.16, 0.0, 0.0]
+    elbow_ref: float = 0.1
     foot_target_range_y: list[float] = [0.1,0.5]
     resampling_time_range: tuple[float, float] = (5.0, 15.0)  # Resampling time range in seconds
     # Command sampling ranges

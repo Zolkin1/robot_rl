@@ -52,7 +52,7 @@ class Simulation:
         # Setup simulation parameters
         self.sim_steps_per_policy_update = int(policy.dt / robot.mj_model.opt.timestep)
         self.sim_loop_rate = self.sim_steps_per_policy_update * robot.mj_model.opt.timestep
-        self.viewer_rate = math.ceil((1 / 100) / robot.mj_model.opt.timestep)
+        self.viewer_rate = math.ceil((1 / 50) / robot.mj_model.opt.timestep)
         
         # Setup logging if enabled
         if self.log:
@@ -137,6 +137,6 @@ class Simulation:
                         viewer.sync()
 
                 # Try to run in roughly realtime
-                elapsed = time.time() - start_time
-                if elapsed < 1 * self.sim_loop_rate:
-                    time.sleep(1 * self.sim_loop_rate - elapsed) 
+                # elapsed = time.time() - start_time
+                # if elapsed < 1 * self.sim_loop_rate:
+                #     time.sleep(1 * self.sim_loop_rate - elapsed) 

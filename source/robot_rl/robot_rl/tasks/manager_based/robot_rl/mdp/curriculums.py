@@ -25,24 +25,30 @@ if TYPE_CHECKING:
 
 
 def clf_curriculum(
-    env: ManagerBasedRLEnv, env_ids: Sequence[int], num_steps: int
+    env: ManagerBasedRLEnv, env_ids: Sequence[int], num_steps: int, original_w: float = -2.0, update_interval: int = 1000
 ) -> None:
     """Curriculum based on clf value
     """
-    if env._sim_step_counter > num_steps:
-          # buf = env.observation_manager._group_obs_term_history_buffer["critic"]["v"].buffer
+    # if env._sim_step_counter > num_steps and env._sim_step_counter % update_interval == 0:
+            # buf = env.observation_manager._group_obs_term_history_buffer["critic"]["v"].buffer
 
-          # 2) Compute one global average (over envs *and* time), then clamp
-          #    Results in a 0-d tensor; .item() → Python float
-          # scale = env.observation_manager.cfg.critic.v.scale
-          # global_avg = buf.mean() * 1.0/scale
-          buf = env.command_manager.get_term("hlip_ref").v_buffer
-          global_avg = buf.mean()
-          global_avg = torch.clamp(global_avg, min=1.0, max=100.0)
-          term_cfg = env.reward_manager.get_term_cfg("clf_reward")
-          term_cfg.params["max_clf"] = global_avg.detach().cpu().item()
-          env.reward_manager.set_term_cfg("clf_reward", term_cfg)
+            # 2) Compute one global average (over envs *and* time), then clamp
+            #    Results in a 0-d tensor; .item() → Python float
+            # scale = env.observation_manager.cfg.critic.v.scale
+            # global_avg = buf.mean() * 1.0/scale
+    buf = env.command_manager.get_term("hlip_ref").v_buffer
+    global_avg = buf.mean()
+    global_avg = torch.clamp(global_avg, min=1.0, max=100.0)
+    term_cfg = env.reward_manager.get_term_cfg("clf_reward")
+    term_cfg.params["max_clf"] = global_avg.detach().cpu().item()
+    env.reward_manager.set_term_cfg("clf_reward", term_cfg)
 
+
+            # increase clf decreasing condition weight?
+            # term_cfg = env.reward_manager.get_term_cfg("clf_decreasing_condition")
+            # raw_w = global_avg.detach().cpu().item()/100.0 * original_w
+            # term_cfg.weight = max(-4.0, min(-2.0, raw_w))
+            # env.reward_manager.set_term_cfg("clf_decreasing_condition", term_cfg)
 
 def terrain_levels_vel(
     env: ManagerBasedRLEnv, env_ids: Sequence[int], asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")

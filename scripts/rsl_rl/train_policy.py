@@ -110,10 +110,8 @@ def main():
             agent_cfg.seed = seed
 
         # Create organized directory structure for logging
-        if args_cli.env_type == "exo_hzd" or args_cli.env_type == "exo_hlip":
-            base_log_path = os.path.join("logs", "exo_policies", args_cli.env_type)
-        else:
-            base_log_path = os.path.join("logs", "g1_policies", args_cli.env_type)
+
+        base_log_path = os.path.join("logs", "g1_policies", args_cli.env_type)
         log_root_path = os.path.join(base_log_path, agent_cfg.experiment_name)
         log_root_path = os.path.abspath(log_root_path)
         print(f"[INFO] Logging experiment in directory: {log_root_path}")
@@ -133,7 +131,11 @@ def main():
         if isinstance(env.unwrapped, DirectMARLEnv):
             env = multi_agent_to_single_agent(env)
 
+
         # Handle resume path
+        # agent_cfg.resume = True
+        # resume_path = "/home/amy/gitrepo/robot_rl/logs/g1_policies/clf/g1/2025-06-10_15-50-55/model_4400.pt"
+        # agent_cfg
         if agent_cfg.resume or agent_cfg.algorithm.class_name == "Distillation":
             resume_path = get_checkpoint_path(log_root_path, agent_cfg.load_run, agent_cfg.load_checkpoint)
 

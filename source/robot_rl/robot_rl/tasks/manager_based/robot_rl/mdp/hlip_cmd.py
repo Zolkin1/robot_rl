@@ -147,6 +147,7 @@ class HLIPCommandTerm(CommandTerm):
         self.metrics["error_pelvis_pitch"] = torch.abs(self.y_out[:,4] - self.y_act[:,4])
         self.metrics["error_pelvis_yaw"] = torch.abs(self.y_out[:,5] - self.y_act[:,5])
 
+
         self.metrics["v"] = self.v
         self.metrics["vdot"] = self.vdot
         self.metrics["avg_clf"] =torch.mean(self.v_buffer, dim=-1)
@@ -322,7 +323,7 @@ class HLIPCommandTerm(CommandTerm):
         upper_body_joint_pos, upper_body_joint_vel = self.generate_upper_body_ref()
 
         # upper_body_joint_pos = upper_body_joint_pos.unsqueeze(0).expand(N, -1)
-        upper_body_joint_vel = upper_body_joint_vel.unsqueeze(0).expand(N, -1)
+        # upper_body_joint_vel = upper_body_joint_vel.unsqueeze(0).expand(N, -1)
 
         omega_ref = euler_rates_to_omega(pelvis_euler, pelvis_eul_dot)
         omega_foot_ref = euler_rates_to_omega(foot_eul, foot_eul_dot)  # (N,3)
@@ -331,20 +332,37 @@ class HLIPCommandTerm(CommandTerm):
         self.dy_out = torch.cat([com_vel_des_yaw_adjusted, omega_ref, foot_vel, omega_foot_ref,upper_body_joint_vel], dim=-1)
 
     def generate_upper_body_ref(self):
-        phase = 2* torch.pi * self.tp
-        # Amplitudes for [L_pitch, R_pitch, L_roll, R_roll, L_yaw, R_yaw, L_elbow, R_elbow]
-        shoulder_pitch_amp, shoulder_roll_amp, shoulder_yaw_amp = self.cfg.shoulder_ref
-        elbow_amp = self.cfg.elbow_ref
-        waist_yaw_amp = self.cfg.waist_yaw_ref
+        # phase: [B]
+        forward_vel = self.env.command_manager.get_command("base_velocity")[:, 0]
+        N = forward_vel.shape[0]
+        phase = 2 * torch.pi * self.tp
+        # make it [B,1] so phase+offset broadcasts to [B,9]
+        # phase = torch.ones((N,1),device=self.device) * phase
 
-        amp = torch.tensor([
-            waist_yaw_amp,
-            shoulder_pitch_amp, shoulder_pitch_amp,
-            shoulder_roll_amp, shoulder_roll_amp,
-            shoulder_yaw_amp, shoulder_yaw_amp,
-            elbow_amp, elbow_amp,
-        ], device=self.device)
-        # Sign for out-of-phase motion (waist yaw is +)
+        # fetch forward_vel: [B]
+        
+        # unpack your cfg scalars
+        sh_pitch0, sh_roll0, sh_yaw0 = self.cfg.shoulder_ref
+        elb0 = self.cfg.elbow_ref
+        waist_yaw0 = self.cfg.waist_yaw_ref
+
+        # build every amp as a [B] tensor
+        sh_pitch_amp = sh_pitch0 * forward_vel          # [B]
+        sh_roll_amp  = sh_roll0  * torch.ones_like(forward_vel)
+        sh_yaw_amp   = sh_yaw0   * torch.ones_like(forward_vel)
+        elb_amp      = elb0      * forward_vel
+        waist_amp    = waist_yaw0 * torch.ones_like(forward_vel)
+
+        # stack into [B,9]
+        amp = torch.stack([
+            waist_amp,
+            sh_pitch_amp, sh_pitch_amp,
+            sh_roll_amp,  sh_roll_amp,
+            sh_yaw_amp,   sh_yaw_amp,
+            elb_amp,      elb_amp,
+        ], dim=1).to(self.device)
+
+        # your sign & offset stay [9] each
         sign = torch.tensor([
             1,         # waist_yaw
             1, -1,     # L/R shoulder_pitch
@@ -352,24 +370,32 @@ class HLIPCommandTerm(CommandTerm):
             1, -1,     # L/R shoulder_yaw
             1, -1,     # L/R elbow
         ], device=self.device)
-        
+
         offset = torch.tensor([
             torch.pi,      # waist_yaw
-            torch.pi/2, torch.pi/2,          # shoulder_pitch
-            torch.pi/2, torch.pi/2,   # shoulder_roll
-            0, 0,          # shoulder_yaw
-            torch.pi, torch.pi,   # elbow
+            torch.pi/2,    # L_sh_pitch
+            torch.pi/2,    # R_sh_pitch
+            torch.pi/2,    # L_sh_roll
+            torch.pi/2,    # R_sh_roll
+            0,             # L_sh_yaw
+            0,             # R_sh_yaw
+            torch.pi/2,    # L_elbow
+            torch.pi/2,    # R_elbow
         ], device=self.device)
 
-        # Reference position
+        # joint offsets: [B,9]
         joint_offset = self.robot.data.default_joint_pos[:, self.upper_body_joint_idx]
-        ref = amp * sign * torch.sin(phase + offset) + joint_offset
-        
-        # Reference velocity (derivative)
-        dphase_dt = 2 * torch.pi / (2*(self.T-self.T_ds))  # scalar or tensor
+
+        # refs: everything now broadcast to [B,9]
+        offset = offset.unsqueeze(0).expand(N, -1)
+        ref     = amp * sign * torch.sin(phase + offset) + joint_offset
+
+        # velocity
+        dphase_dt = 2 * torch.pi / (2*(self.T - self.T_ds))  # scalar
         ref_dot = amp * sign * torch.cos(phase + offset) * dphase_dt
 
         return ref, ref_dot
+
 
 
     def get_euler_from_quat(self, quat):

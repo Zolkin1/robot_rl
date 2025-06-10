@@ -149,6 +149,9 @@ python /robot_rl/scripts/rsl_rl/play.py --task=G1-flat-lip-vel --num_envs=2 --ch
 
 ```
 
+<!-- python batch_simulate.py --policy_dir /path/to/policies --log_dir /path/to/logs -->
+
+
 # Obelisk Transfer
 First, set the environment variable `ROBOT_RL_ROOT` to the repo path.
 
