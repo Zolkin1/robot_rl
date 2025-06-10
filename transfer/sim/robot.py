@@ -76,6 +76,8 @@ class Robot:
             des_vel[0] = vx
             des_vel[1] = vy
             des_vel[2] = vyaw
+        else:
+            des_vel = np.array([0.5,0.0,0.0])
         self.commanded_vel = des_vel  # Store the commanded velocity
         return des_vel
 
@@ -100,7 +102,7 @@ class Robot:
         left_ankle_pos = self.mj_data.sensor("left_ankle_pos").data
         right_ankle_pos = self.mj_data.sensor("right_ankle_pos").data
 
-        return [
+        log =  [
             self.mj_data.time,
             *self.mj_data.qpos.tolist(),
             *self.mj_data.qvel.tolist(),
@@ -111,6 +113,7 @@ class Robot:
             *right_ankle_pos.tolist(),
             *self.commanded_vel.tolist()  # Add commanded velocity to log data
         ]
+        return log
 
 
     def apply_action(self, action):

@@ -217,6 +217,11 @@ def plot_position_comparison(data):
     
     # Extract base position (first 3 elements of qpos)
     actual_pos = qpos[:, :3]
+    #need to extract the initial yaw 
+    quat = qpos[:,4:8]
+    yaw = 2 * np.arctan2(quat[:,2], quat[:,3])
+    actual_pos[:,2] = yaw
+    actual_yaw = yaw
     
     # Calculate desired position by integrating commanded velocity
     dt = time[1] - time[0]  # Assuming constant time step
@@ -226,6 +231,7 @@ def plot_position_comparison(data):
     for i in range(1, len(time)):
         desired_pos[i] = desired_pos[i-1] + commanded_vel[i-1] * dt
     
+
     # Create figure with 3 subplots for x, y, and angular positions
     fig, axes = plt.subplots(3, 1, figsize=(10, 12))
     fig.suptitle('Desired vs Actual Positions')
@@ -246,7 +252,7 @@ def plot_position_comparison(data):
     
     # Plot angular position
     axes[2].plot(time, desired_pos[:, 2], 'r--', label='Desired')
-    axes[2].plot(time, actual_pos[:, 2], 'b-', label='Actual')
+    axes[2].plot(time, actual_yaw, 'b-', label='Actual')
     axes[2].set_xlabel('Time (s)')
     axes[2].set_ylabel('Angular Position (rad)')
     axes[2].legend()
@@ -287,7 +293,7 @@ if __name__ == "__main__":
     print(f"commanded_vel shape: {data['commanded_vel'].shape}")
 
     # Make a plot
-    # plot_joints_and_actions(data)
+    plot_joints_and_actions(data)
     # plot_torques(data)
     # plot_vels(data)
     plot_base(data)

@@ -9,6 +9,7 @@ from isaaclab.managers import SceneEntityCfg
 from isaaclab.utils import configclass
 from isaaclab.utils.noise import AdditiveUniformNoiseCfg as Unoise
 from isaaclab.managers import RewardTermCfg as RewTerm
+from isaaclab.managers import CurriculumTermCfg as CurrTerm
 from isaaclab_tasks.manager_based.locomotion.velocity.velocity_env_cfg import ObservationsCfg
 
 from robot_rl.tasks.manager_based.robot_rl.humanoid_env_cfg import (HumanoidEnvCfg, HumanoidEventsCfg,
@@ -62,15 +63,21 @@ class G1RoughLipObservationsCfg(ObservationsCfg):
         act_traj = ObsTerm(func=mdp.act_traj, params={"command_name": "hlip_ref"},scale=1.0)
         ref_traj_vel = ObsTerm(func=mdp.ref_traj_vel, params={"command_name": "hlip_ref"},scale=0.1)
         act_traj_vel = ObsTerm(func=mdp.act_traj_vel, params={"command_name": "hlip_ref"},scale=0.1)
+        height_scan = None      # Removed - not supported yet
         # v_dot = ObsTerm(func=mdp.v_dot, params={"command_name": "hlip_ref"},clip=(-1000.0,1000.0),scale=0.001)
         # v = ObsTerm(func=mdp.v, params={"command_name": "hlip_ref"},clip=(0.0,500.0),scale=0.01)
-        height_scan = None      # Removed - not supported yet
 
 
     # observation groups
     policy: PolicyCfg = PolicyCfg()
     critic: CriticCfg = CriticCfg()
 
+
+@configclass
+class CurriculumCfg:
+    """Curriculum terms for the MDP."""
+
+    clf_curriculum = CurrTerm(func=mdp.clf_curriculum, params={"num_steps": 5000})
 
 # Lip specific rewards
 ##
@@ -140,7 +147,7 @@ class G1RoughLipRewards(HumanoidRewardCfg):
         weight=10.0,
         params={
             "command_name": "hlip_ref",
-            "max_clf": 50.0,
+            "max_clf": 100.0,
         }
     )
 
@@ -170,6 +177,7 @@ class G1RoughLipEnvCfg(HumanoidEnvCfg):
     # events: G1RoughLipEventsCfg = G1RoughLipEventsCfg()
     observations: G1RoughLipObservationsCfg = G1RoughLipObservationsCfg()
     commands: G1RoughLipCommandsCfg = G1RoughLipCommandsCfg()
+    curriculum: CurriculumCfg = CurriculumCfg()
     def __post_init__(self):
         # post init of parent
         super().__post_init__()

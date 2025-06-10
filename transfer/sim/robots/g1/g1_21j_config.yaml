@@ -1,7 +1,7 @@
 # G1_21j config
 robot_name: "g1_21j"
 #checkpoint_path: "/home/zolkin/AmberLab/Project-Isaac-RL/robot-rl/robot_rl/logs/rsl_rl/g1/2025-05-23_15-51-34/exported/policy.pt"  # Not LIP, all dir
-checkpoint_path: "/home/amy/gitrepo/robot_rl/logs/g1_policies/clf/g1/2025-06-09_13-27-49/exported/policy.pt"
+checkpoint_path: "/home/amy/gitrepo/robot_rl/logs/g1_policies/clf/g1/2025-06-09_15-42-55/exported/policy.pt"
 #checkpoint_path: "/home/zolkin/AmberLab/Project-Isaac-RL/robot-rl/robot_rl/logs/rsl_rl/g1/2025-05-20_12-23-37/exported/policy.pt"  # Not LIP
 #checkpoint_path: "/home/zolkin/AmberLab/Project-Isaac-RL/robot-rl/robot_rl/logs/rsl_rl/g1/2025-05-23_15-09-10/exported/policy.pt" # LIP
 num_obs: 74

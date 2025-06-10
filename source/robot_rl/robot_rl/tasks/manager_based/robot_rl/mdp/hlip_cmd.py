@@ -106,6 +106,8 @@ class HLIPCommandTerm(CommandTerm):
         
         self.v = torch.zeros((self.num_envs), device=self.device)
         self.vdot = torch.zeros((self.num_envs), device=self.device)
+        self.v_buffer = torch.zeros((self.num_envs, 100), device=self.device)
+        self.vdot_buffer = torch.zeros((self.num_envs, 100), device=self.device)
         self.stance_idx = None
 
 
@@ -147,7 +149,9 @@ class HLIPCommandTerm(CommandTerm):
 
         self.metrics["v"] = self.v
         self.metrics["vdot"] = self.vdot
-        
+        self.metrics["avg_clf"] =torch.mean(self.v_buffer, dim=-1)
+        max_clf = self.env.reward_manager.get_term_cfg("clf_reward").params["max_clf"]
+        self.metrics["max_clf"] = torch.ones((self.num_envs), device=self.device) * max_clf
         # return self.foot_target  # Return the foot target tensor for observation
 
 
@@ -471,7 +475,14 @@ class HLIPCommandTerm(CommandTerm):
         vdot,vcur = self.clf.compute_vdot(self.y_act,self.y_out,self.dy_act,self.dy_out)
         self.vdot = vdot
         self.v = vcur
+        if torch.sum(self.v_buffer) == 0:
+            # (E,) -> (E,1) -> broadcast to (E,100) on assignment
+            self.v_buffer[:]    = self.v.unsqueeze(1)
+            self.vdot_buffer[:] = self.vdot.unsqueeze(1)
 
+        else:
+            self.v_buffer = torch.cat([self.v_buffer[:,1:], self.v.unsqueeze(-1)], dim=-1)
+            self.vdot_buffer = torch.cat([self.vdot_buffer[:,1:], self.vdot.unsqueeze(-1)], dim=-1)
 
        
         if self.debug_vis:

@@ -79,7 +79,7 @@ class Simulation:
             {'name': 'qvel', 'length': self.robot.mj_data.qvel.shape[0]},
             {'name': 'obs', 'length': self.policy.get_num_obs()},
             {'name': 'action', 'length': self.policy.get_num_actions()},
-            {'name': 'torque', 'length': self.robot.mj_data.qpos.shape[0] - 7},
+            {'name': 'torque', 'length': self.robot.mj_model.nu},
             {'name': 'left_ankle_pos', 'length': 3},
             {'name': 'right_ankle_pos', 'length': 3},
             {'name': 'commanded_vel', 'length': 3},
