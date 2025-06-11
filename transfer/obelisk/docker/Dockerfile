@@ -34,6 +34,7 @@ RUN apt-get update && apt-get install -y \
     locales \
     iputils-ping \
     evtest \
+    net-tools \
     sudo && \
     rm -rf /var/lib/apt/lists/* && \
     locale-gen en_US.UTF-8
@@ -51,7 +52,7 @@ USER ${UID}
 
 RUN echo "Pulling Obelisk..."
 # clone Obelisk into this docker image at the $OBELISK_ROOT path
-RUN git clone -b v0.2.0-alpha https://github.com/Caltech-AMBER/obelisk.git /home/${USER}/obelisk
+RUN git clone -b v0.3.0-alpha https://github.com/Caltech-AMBER/obelisk.git /home/${USER}/obelisk
 ENV OBELISK_ROOT=/home/${USER}/obelisk
 
 # Install other dependencies here...
