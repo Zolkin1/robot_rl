@@ -175,7 +175,7 @@ def run_simulation(policy, robot: str, scene: str, log: bool, log_dir: str):
                 des_vel[2] = vyaw   # TODO: Why does this not seem to work?
 
 
-                # Extract relevant info
+            # Extract relevant info
             sim_time = mj_data.time
             qpos = mj_data.qpos
             qvel = mj_data.qvel
