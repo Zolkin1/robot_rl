@@ -26,11 +26,11 @@ G1_CFG = ArticulationCfg(
     init_state=ArticulationCfg.InitialStateCfg(
         pos=(0.0, 0.0, 0.79),   # TODO: Consider setting this higher if I init issues
         joint_pos={
-            ".*_hip_pitch_joint": -0.1,
+            ".*_hip_pitch_joint": -0.42,
             ".*_hip_roll_joint": 0.,
             ".*_hip_yaw_joint": 0.,
-            ".*_knee_joint": 0.3,
-            ".*_ankle_pitch_joint": -0.2,
+            ".*_knee_joint": 0.81,
+            ".*_ankle_pitch_joint": -0.4,
             ".*_ankle_roll_joint": 0.,
             "waist_yaw_joint": 0.,
             "left_shoulder_pitch_joint": 0.1,
