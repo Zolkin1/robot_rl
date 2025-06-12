@@ -58,7 +58,7 @@ def main():
     
     # Configure livestream properly
     # args_cli.livestream = 2
-    args_cli.headless = True 
+    # args_cli.headless = True 
     # clear out sys.argv for Hydra
     
 
@@ -138,10 +138,11 @@ def main():
 
         # Handle resume path
         # agent_cfg.resume = True
-        # resume_path = "/home/amy/gitrepo/robot_rl/logs/g1_policies/clf/g1/2025-06-10_15-50-55/model_4400.pt"
+        # resume_path = "/home/amy/gitrepo/robot_rl/logs/g1_policies/ref_tracking/g1/2025-06-11_23-28-20/model_7000.pt"
         # agent_cfg
         if agent_cfg.resume or agent_cfg.algorithm.class_name == "Distillation":
-            resume_path = get_checkpoint_path(log_root_path, agent_cfg.load_run, agent_cfg.load_checkpoint)
+            resume_path = args_cli.resume_path
+            # resume_path = get_checkpoint_path(log_root_path, agent_cfg.load_run, agent_cfg.load_checkpoint)
 
         # Setup video recording if enabled
         if args_cli.video:

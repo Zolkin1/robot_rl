@@ -62,7 +62,7 @@ class G1FlatRefTrackingEnvCfg(G1FlatLipEnvCfg):
         # post init of parent
         super().__post_init__()
         
-        self.rewards.clf_reward = None
+        # self.rewards.clf_reward = None
         self.rewards.clf_decreasing_condition = None
 
 

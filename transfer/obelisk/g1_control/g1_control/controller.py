@@ -310,6 +310,8 @@ class VelocityTrackingController(ObeliskController, ABC):
             pd_ff_msg.kp = self.kps
             pd_ff_msg.kd = self.kds
             self.obk_publishers["pub_ctrl"].publish(pd_ff_msg)
+
+            # log here
             assert is_in_bound(type(pd_ff_msg), ObeliskControlMsg)
             return pd_ff_msg
     

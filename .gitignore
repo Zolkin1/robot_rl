@@ -72,3 +72,5 @@ transfer/obelisk/build/
 *.pkl
 
 *.png
+
+transfer/obelisk/.vscode/

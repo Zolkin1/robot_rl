@@ -437,6 +437,13 @@ def main():
         timestep = 0
         print("[DEBUG] Starting simulation loop")
 
+        # viewer = env.unwrapped.scene.viewer
+
+        # Choose the robot's prim path
+        # robot_prim_path = "/World/robot"  # Or your robot's actual path
+
+        # Set the camera to follow the robot
+        # viewer.set_camera_follow(robot_prim_path)
         # simulate environment
         while simulation_app.is_running():
             start_time = time.time()

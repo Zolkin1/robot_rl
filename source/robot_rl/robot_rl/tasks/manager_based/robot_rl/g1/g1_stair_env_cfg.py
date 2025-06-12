@@ -42,6 +42,7 @@ class G1StairRewardsCfg(G1RoughLipRewards):
         weight=4.0,
     )
 
+
 @configclass
 class G1StairEnvCfg(G1RoughLipEnvCfg):
     """Configuration for the G1 Flat environment."""
@@ -63,11 +64,16 @@ class G1StairEnvCfg(G1RoughLipEnvCfg):
         # self.scene.height_scanner = None
         self.scene.terrain.terrain_type = "generator"
 
-        STAIR_CFG.sub_terrains["pyramid_stairs_inv"].step_height_range = (0.05,0.05)
+        STAIR_CFG.sub_terrains["pyramid_stairs_inv"].step_height_range = (0.0,0.02)
         # del STAIR_CFG.sub_terrains["pyramid_stairs"]
 
         self.scene.terrain.terrain_generator = STAIR_CFG
-        self.curriculum.terrain_levels = CurrTerm(func=mdp.terrain_levels_vel)
+
+        # self.scene.terrain.terrain_type = "plane"
+        # self.scene.terrain.terrain_generator = None
+  
+        self.curriculum.terrain_levels = None
+        # self.curriculum.terrain_levels = CurrTerm(func=mdp.terrain_levels_vel)
         self.scene.height_scanner = RayCasterCfg(
             prim_path="{ENV_REGEX_NS}/Robot/pelvis",
             offset=RayCasterCfg.OffsetCfg(pos=(0.0, 0.0, 20.0)),
@@ -84,23 +90,20 @@ class G1StairEnvCfg(G1RoughLipEnvCfg):
             func=mdp.height_scan,
             params={"sensor_cfg": SceneEntityCfg("height_scanner")},
             noise=Unoise(n_min=-0.1, n_max=0.1),
-            clip=(-1.0, 1.0),
-            history_length=1,
+            clip=(-1.0, 1.0)
         )
         self.observations.critic.height_scan = ObsTerm(
             func=mdp.height_scan,
             params={"sensor_cfg": SceneEntityCfg("height_scanner")},
-            noise=Unoise(n_min=-0.1, n_max=0.1),
-            clip=(-1.0, 1.0),
-            history_length=1,
+            clip=(-1.0, 1.0)
         )
 
         ##
         # Randomization
         ##
-        # self.events.push_robot = None
-        self.events.push_robot.params["velocity_range"] = {"x": (-1, 1), "y": (-1, 1), "roll": (-0.4, 0.4),
-                                                           "pitch": (-0.4, 0.4), "yaw": (-0.4, 0.4)}
+        self.events.push_robot = None
+        # self.events.push_robot.params["velocity_range"] = {"x": (-1, 1), "y": (-1, 1), "roll": (-0.4, 0.4),
+        #                                                    "pitch": (-0.4, 0.4), "yaw": (-0.4, 0.4)}
         # self.events.push_robot.params["velocity_range"] = {"x": (-0, 0), "y": (-0, 0), "roll": (-0.0, 0.0),
         #                                                    "pitch": (-0., 0.), "yaw": (-0.0, 0.0)}
         self.events.add_base_mass.params["asset_cfg"].body_names = ["pelvis_link"]
@@ -127,7 +130,7 @@ class G1StairEnvCfg(G1RoughLipEnvCfg):
         ##
         # Commands
         ##
-        self.commands.base_velocity.ranges.lin_vel_x = (0.5,0.5)
+        self.commands.base_velocity.ranges.lin_vel_x = (0.75,0.75)
         self.commands.base_velocity.ranges.lin_vel_y = (0.0,0.0)
         self.commands.base_velocity.ranges.ang_vel_z = (0.0,0.0)
 
@@ -153,6 +156,9 @@ class G1StairEnvCfg(G1RoughLipEnvCfg):
         # self.rewards.alive = None
         self.rewards.track_lin_vel_xy_exp = None
         self.rewards.track_ang_vel_z_exp = None
+
+        self.rewards.clf_reward.params["max_clf"] = 100.0
+        self.rewards.clf_decreasing_condition.params["max_clf_decreasing"] = 100.0
         # self.rewards.track_ang_vel_z_exp.weight = 1.0
  
         # torque, acc, vel, action rate regularization
@@ -187,3 +193,4 @@ class G1StairPlay_EnvCfg(G1StairEnvCfg):
         self.observations.policy.enable_corruption = False
         # remove random pushing
         self.events.base_external_force_torque = None
+        self.commands.hlip_ref.debug_vis = True

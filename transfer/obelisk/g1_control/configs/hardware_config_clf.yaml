@@ -1,4 +1,4 @@
-config: rl_policy
+config: clf_rl_policy
 onboard:
   # --------------------------------- #
   # ----------- Controller ---------- #
@@ -7,12 +7,12 @@ onboard:
   # ----- Low Level Controller ----- #
     - pkg: g1_control
       params:
-        policy_name: "policy.pt"
+        policy_name: "clf_policy.pt"
         num_obs: 74
         num_actions: 21
         period: 0.8                   # s
         ang_vel_scale: 0.25
-        cmd_scale: [2, 2, 0.25]
+        cmd_scale: [2., 2., 2.]
         qpos_scale: 1
         qvel_scale: 0.05 #0.1
         action_scale: 0.25
@@ -31,11 +31,11 @@ onboard:
               2,2,2,
               2,2,2,2,
               2,2,2]
-        default_angles: [-0.42, 0, 0, 0.81, -0.4, 0,
-                  -0.42, 0, 0, 0.81, -0.4, 0,
+        default_angles: [-0.1, 0, 0, 0.3, -0.2, 0,
+                  -0.1, 0, 0, 0.3, -0.2, 0,
                   0,
-                  0, 0.27, 0, 0.5,
-                  0, -0.27, 0, 0.5]
+                  0.1, 0.27, 0, 1.2,
+                  0.1, -0.27, 0, 1.2]
         default_angles_names: [
           "left_hip_pitch_joint",
           "left_hip_roll_joint",
@@ -86,7 +86,7 @@ onboard:
       params:
         v_x_max: 1.
         v_y_max: 0.4
-        w_z_max: 0.5
+        w_z_max: 0.3
       # callback_groups:
       publishers:
       # ----- Execution FSM ----- #
@@ -121,13 +121,11 @@ onboard:
           history_depth: 10
           callback_group: None
       subscribers:
-        # ----- Joints ----- #
         - ros_parameter: sub_joint_encoders
           topic: /obelisk/g1/joint_encoders
           msg_type: ObkJointEncoders
           history_depth: 10
           callback_group: None
-        # ----- IMU ----- #
         - ros_parameter: sub_pelvis_imu
           topic: /obelisk/g1/pelvis_imu
           msg_type: ObkIMU
@@ -146,6 +144,7 @@ onboard:
       pkg: obelisk_unitree_cpp
       executable: obelisk_unitree_g1_hardware
       params:
+        ic_keyframe: standing
         network_interface_name: enp4s0 # From ifconfig
         default_kp: [
           30., 30., 30.,    # L hip
@@ -174,18 +173,13 @@ onboard:
                      0, 0, 0,
                      0, 0.27, 0, 0.5, 0, 0, 0,
                      0, -0.27, 0, 0.5, 0, 0, 0 ]
-    # - is_simulated: True
-    #   pkg: robot_sim
-    #   executable: simulation
-    #   params:
-    #     ic_keyframe: standing
       # callback_groups:
       publishers:
-#        - ros_parameter: pub_true_sim_state_setting
-#          topic: /obelisk/g1/true_sim_state
-#          history_depth: 10
-#          callback_group: None
-        # ----- Joints ----- #
+        - ros_parameter: pub_true_sim_state_setting
+          topic: /obelisk/g1/true_sim_state
+          history_depth: 10
+          callback_group: None
+          # ----- Joints ----- #
         - ros_parameter: pub_sensor_setting
           topic: /obelisk/g1/joint_encoders
           history_depth: 10
@@ -200,7 +194,7 @@ onboard:
       timers:
         - ros_parameter: timer_true_sim_state_setting
           history_depth: 10
-          timer_period_sec: 100
+          timer_period_sec: 0.002
           callback_group: None
       subscribers:
         # ----- Control ----- #

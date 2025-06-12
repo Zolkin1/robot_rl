@@ -11,7 +11,8 @@ if TYPE_CHECKING:
 class StairCmd(HLIPCommandTerm):
     def __init__(self, cfg: "StairHLIPCommandCfg", env):
           super().__init__(cfg, env)
-        
+          self.z_height = torch.zeros((self.num_envs), device=self.device)
+          self.stance_foot_box_z = torch.zeros((self.num_envs), device=self.device)
         
     def find_grid_idx(self, stance_pos_world, terrain_origins):
           H, W, _ = terrain_origins.shape
@@ -209,7 +210,8 @@ class StairCmd(HLIPCommandTerm):
           self.stance_foot_box_z = stance_foot_box_center[:, 2]
           desired_world[:, 2] = box_center[:, 2]
 
-
+          print(f"z_height: {self.z_height}")
+          import pdb; pdb.set_trace()
 
           if self.cfg.debug_vis:
                self.footprint_visualizer.visualize(
