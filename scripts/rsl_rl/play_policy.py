@@ -27,8 +27,7 @@ EXPERIMENT_NAMES = {
     "custom": "g1",
     "clf": "g1",
     "ref_tracking": "g1",
-    "exo_hlip": "exo",
-    "exo_hzd": "exo",
+    "stair": "g1",
 }
 
 SIM_ENVIRONMENTS = {
@@ -36,8 +35,7 @@ SIM_ENVIRONMENTS = {
     "custom": "custom-Isaac-Velocity-Flat-G1-Play-v0",
     "clf": "G1-flat-ref-play",
     "ref_tracking": "G1-flat-ref-play",
-    "exo_hlip": "Exo-play-vel",
-    "exo_hzd": "Exo-hzd-play-vel",
+    "stair": "G1-stair-play",
 }
 
 class DataLogger:

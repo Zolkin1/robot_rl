@@ -107,7 +107,7 @@ class G1RoughLipRewards(HumanoidRewardCfg):
         weight=10.0,
         params={
             "command_name": "hlip_ref",
-            "max_clf": 50.0,
+            "max_clf": 100.0,
         }
     )
 
@@ -116,7 +116,7 @@ class G1RoughLipRewards(HumanoidRewardCfg):
         weight=-2.0,
         params={
             "command_name": "hlip_ref",
-            "max_clf_decreasing": 50.0,
+            "max_clf_decreasing": 100.0,
         }
     )
 
@@ -164,7 +164,7 @@ class G1RoughLipEnvCfg(HumanoidEnvCfg):
         # self.events.base_external_force_torque.params["asset_cfg"].body_names = ["pelvis_link"]
         self.events.reset_base.params = {
             
-            "pose_range": {"x": (-0.5, 0.5), "y": (-0.5, 0.5), "yaw": (0,0)}, #(-3.14, 3.14)},
+            "pose_range": {"x": (-0.5, 0.5), "y": (-0.5, 0.5), "yaw": (-3.14, 3.14)},
             "velocity_range": {
                 "x": (0.0, 0.0),
                 "y": (0.0, 0.0),

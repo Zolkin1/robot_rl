@@ -20,7 +20,7 @@ import cli_args  # isort: skip
 
 # add argparse arguments
 parser = argparse.ArgumentParser(description="Train an RL agent with RSL-RL.")
-parser.add_argument("--video", action="store_true", default=True, help="Record videos during training.")
+parser.add_argument("--video", action="store_true", default=False, help="Record videos during training.")
 parser.add_argument("--video_length", type=int, default=200, help="Length of the recorded video (in steps).")
 parser.add_argument(
     "--disable_fabric", action="store_true", default=False, help="Disable fabric and use USD I/O operations."
@@ -65,40 +65,6 @@ from isaaclab_tasks.utils import get_checkpoint_path, parse_env_cfg
 
 import robot_rl.tasks  # noqa: F401
 
-class DataLogger:
-    def __init__(self, enabled=True, log_dir=None, variables=None):
-        self.enabled = enabled
-        self.data = {}
-        self.log_dir = log_dir
-        self.variables = variables or []
-        
-        if enabled and log_dir:
-            os.makedirs(log_dir, exist_ok=True)
-            print(f"[INFO] Logging data to directory: {log_dir}")
-            # Initialize data storage for each variable
-            for var in self.variables:
-                self.data[var] = []
-    
-    def log_from_dict(self, data_dict):
-        """Log data from a dictionary, only logging variables that were specified in initialization"""
-        if not self.enabled:
-            return
-            
-        for var in self.variables:
-            if var in data_dict:
-                self.data[var].append(data_dict[var])
-    
-    def save(self):
-        """Save all logged data to pickle files"""
-        if not self.enabled or not self.log_dir:
-            return
-            
-        for var in self.variables:
-            if var in self.data:
-                filepath = os.path.join(self.log_dir, f"{var}.pkl")
-                with open(filepath, "wb") as f:
-                    pickle.dump(self.data[var], f)
-                print(f"[INFO] Saved {var} data to {filepath}")
 
 def main():
     """Play with RSL-RL agent."""
@@ -109,7 +75,7 @@ def main():
     agent_cfg: RslRlOnPolicyRunnerCfg = cli_args.parse_rsl_rl_cfg(args_cli.task, args_cli)
 
     # specify directory for logging experiments
-    log_root_path = os.path.join("logs", "rsl_rl", agent_cfg.experiment_name)
+    log_root_path = os.path.join("logs", "g1_policies", "stair", agent_cfg.experiment_name)
     log_root_path = os.path.abspath(log_root_path)
     print(f"[INFO] Loading experiment from directory: {log_root_path}")
     if args_cli.use_pretrained_checkpoint:
@@ -174,31 +140,13 @@ def main():
 
     dt = env.unwrapped.step_dt
 
-    # Define variables to log
-    log_vars = [
-        'y_out',
-        'dy_out',
-        'base_velocity',
-        'cur_swing_time',
-        "stance_foot_pos",
-        "stance_foot_ori",
-        'y_act',
-        'dy_act',
-        'v',
-        'vdot',
-        'stance_foot_pos_0',
-        'stance_foot_ori_0',
-    ]
 
     # Setup logging
     log_dir = os.path.join("logs", "play", datetime.now().strftime("%Y-%m-%d_%H-%M-%S"))
-    logger = DataLogger(enabled=True, log_dir=log_dir, variables=log_vars)
 
     # reset environment
     obs, _ = env.get_observations()
     timestep = 0
-
-    log_terms_list = []
 
     # simulate environment
     while simulation_app.is_running():
@@ -209,27 +157,8 @@ def main():
             actions = policy(obs)
             # env stepping
             obs, reward, _, extra = env.step(actions)
+        #    
            
-            data = extract_reference_trajectory(env, log_vars)
-            # Merge extra["log"] if it exists
-            # if "log" in extra and isinstance(extra["log"], dict):
-            #     # Convert any torch tensors to Python scalars for logging
-            #     for k, v in extra["log"].items():
-            #         if hasattr(v, "item"):
-            #             data[k] = v.item()
-            #         else:
-            #             data[k] = v
-            #         # print(f"logging {k} with value {data[k]}")
-            logger.log_from_dict(data)
-
-
-            # if "log" in extra and isinstance(extra["log"], dict):
-            #     # Convert tensors to scalars for logging
-            #     log_terms = {}
-            #     for k, v in extra["log"].items():
-            #         log_terms[k] = v.item() if hasattr(v, "item") else v
-            #     log_terms_list.append(log_terms)
-
         timestep += 1
         if args_cli.video:
             
@@ -237,8 +166,6 @@ def main():
             if timestep == args_cli.video_length:
                 break
         
-        if timestep > max(100, args_cli.video_length):
-            break
 
         # time delay for real-time evaluation
         sleep_time = dt - (time.time() - start_time)
@@ -248,33 +175,6 @@ def main():
     # close the simulator
     env.close()
     
-    # Save all logged data
-    logger.save()
-
-    # Save all log terms to a single pickle file
-    if log_terms_list:
-        log_terms_path = os.path.join(log_dir, "log_terms.pkl")
-        with open(log_terms_path, "wb") as f:
-            pickle.dump(log_terms_list, f)
-        print(f"[INFO] Saved all log terms to {log_terms_path}")
-
-def extract_reference_trajectory(env, log_vars):
-    # Get the underlying environment by unwrapping
-    unwrapped_env = env.unwrapped
-    # Get the HLIP reference term from the command manager
-    hlip_Ref = unwrapped_env.command_manager.get_term("hlip_ref")
-    results = {}
-
-    for var in log_vars:
-        if hasattr(hlip_Ref, var):
-            results[var] = getattr(hlip_Ref, var)
-        elif var == "base_velocity":
-            results[var] = unwrapped_env.command_manager.get_command("base_velocity")
-        else:
-            results[var] = None  # or raise an error/warning if you prefer
-
-    return results
-
 if __name__ == "__main__":
     # run the main function
     main()

@@ -12,8 +12,7 @@ ENVIRONMENTS = {
     "custom": "G1-flat-vel",
     "ref_tracking": "G1-flat-ref-tracking",
     "clf": "G1-flat-clf",
-    "exo_hlip": "Exo-flat-vel",
-    "exo_hzd": "Exo-hzd-vel",
+    "stair": "G1-stair",
 }
 
 def parse_args():
@@ -55,8 +54,13 @@ def main():
     if args_cli.video:
         args_cli.enable_cameras = True
 
-    # clear out sys.argv for Hydra
     sys.argv = [sys.argv[0]] + hydra_args
+    
+    # Configure livestream properly
+    # args_cli.livestream = 2
+    args_cli.headless = True 
+    # clear out sys.argv for Hydra
+    
 
     # launch omniverse app
     app_launcher = AppLauncher(args_cli)

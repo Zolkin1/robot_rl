@@ -228,6 +228,36 @@ def holonomic_constraint(
     # unified Gaussian‐like reward
     return torch.exp(- (e_pose**2).sum(dim=-1) / sigma_pose**2)
 
+def holonomic_constraint_stair(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    sigma_pose: float = (5 * 0.01) ** 0.5,
+
+) -> torch.Tensor:  
+    cmd = env.command_manager.get_term(command_name)
+
+    # planar position error [B,2]
+    p0_xy = cmd.stance_foot_pos_0[:, :2]
+    p_xy  = cmd.stance_foot_pos[:, :2]
+    delta_xy = p_xy - p0_xy
+
+    # vertical error to the floor plane [B,1]
+    z_cur    = cmd.stance_foot_pos[:, 2].unsqueeze(-1)
+    delta_z  = z_cur - (cmd.stance_foot_box_z + 0.036)
+
+    # roll error [B,1]
+    roll = cmd.stance_foot_ori[:, 0].unsqueeze(-1)
+
+    # yaw error wrapped to [–π, π] [B,1]
+    psi0 = cmd.stance_foot_ori_0[:, 2]
+    psi  = cmd.stance_foot_ori[:, 2]
+    delta_psi = ((psi - psi0 + torch.pi) % (2 * torch.pi) - torch.pi).unsqueeze(-1)
+
+    # stack into [B,5] error vector
+    e_pose = torch.cat([delta_xy, delta_z, roll, delta_psi], dim=-1)
+
+    # unified Gaussian‐like reward
+    return torch.exp(- (e_pose**2).sum(dim=-1) / sigma_pose**2)
 
 def lip_gait_tracking(env: ManagerBasedRLEnv, sensor_cfg: SceneEntityCfg, period: float, std: float,
                       nom_height: float, Tswing: float, command_name: str, wdes: float,

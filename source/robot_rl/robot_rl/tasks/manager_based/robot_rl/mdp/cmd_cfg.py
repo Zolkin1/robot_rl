@@ -72,7 +72,7 @@ class HLIPCommandCfg(CommandTermCfg):
 
     # Visualization configurations
     footprint_cfg: VisualizationMarkersCfg = VisualizationMarkersCfg(
-        prim_path="/Visuals/footprint",
+        prim_path="/World/Visuals/footprint",
         markers={
             "foot": sim_utils.CuboidCfg(
                 size=(0.1, 0.065, 0.018),
@@ -90,31 +90,10 @@ class HLIPCommandCfg(CommandTermCfg):
                     ".*_elbow_joint",
                 ]
 
-    goal_pose_visualizer_cfg: VisualizationMarkersCfg = VisualizationMarkersCfg(
-        prim_path="/Visuals/goal_pose",
-        markers={
-            "goal": sim_utils.CuboidCfg(
-                size=(0.05, 0.05, 0.05),
-                visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.0, 1.0, 0.0))
-            )
-        }
-    )
-    # scale marker
-    goal_pose_visualizer_cfg.markers["goal"].scale = (0.1, 0.1, 0.1)
-
-    current_pose_visualizer_cfg: VisualizationMarkersCfg = VisualizationMarkersCfg(
-        prim_path="/Visuals/current_pose",
-        markers={
-            "current": sim_utils.CuboidCfg(
-                size=(0.05, 0.05, 0.05),
-                visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.0, 0.0, 1.0))
-            )
-        }
-    )
-    current_pose_visualizer_cfg.markers["current"].scale = (0.1, 0.1, 0.1)
-
     Q_weights = Q_weights
     R_weights = R_weights
+
+
 
 
 

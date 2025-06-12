@@ -70,8 +70,6 @@ class HLIPCommandTerm(CommandTerm):
         self.debug_vis = cfg.debug_vis
         if self.debug_vis:
             self.footprint_visualizer = VisualizationMarkers(cfg.footprint_cfg)
-            self.goal_pose_visualizer = VisualizationMarkers(cfg.goal_pose_visualizer_cfg)
-            self.current_pose_visualizer = VisualizationMarkers(cfg.current_pose_visualizer_cfg)
        
         self.env = env
         self.robot = env.scene[cfg.asset_name]
@@ -189,68 +187,14 @@ class HLIPCommandTerm(CommandTerm):
         self.cur_swing_time = self.phase_var*Tswing
 
 
-    def generate_reference_trajectory(self):
-        
-        base_velocity = self.env.command_manager.get_command("base_velocity")  # (N,3)
-        N = base_velocity.shape[0]
-        device = base_velocity.device
 
-
-        
-        T = torch.full((N,), self.T, dtype=torch.float32, device=base_velocity.device)
-
-        Xdes, Ux, Ydes, Uy = self.hlip_controller.compute_orbit(
-            T=T,cmd=base_velocity)
-        
-        #select init and Xdes, Ux, Ydes, Uy
-        x0 = self.hlip_controller.x_init
-        y0 = self.hlip_controller.y_init[:,self.stance_idx]
-        Uy = Uy[:,self.stance_idx]
-    
-        com_x, com_xd = self.hlip_controller._compute_desire_com_trajectory(
-            cur_time=self.cur_swing_time,
-            Xdesire=x0,
-        )
-        com_y, com_yd = self.hlip_controller._compute_desire_com_trajectory(
-            cur_time=self.cur_swing_time,
-            Xdesire=y0,
-        )
-        # Concatenate x and y components
-        com_pos_des = torch.stack([com_x, com_y,torch.ones((N,), device=device) * self.com_z], dim=-1)  # Shape: (N,2)
-        com_vel_des = torch.stack([com_xd, com_yd,torch.zeros((N), device=self.device)], dim=-1)  # Shape: (N,2)
-
-        Uy = torch.clamp(torch.abs(Uy), min=self.cfg.foot_target_range_y[0], max=self.cfg.foot_target_range_y[1]) * torch.sign(Uy)
-
-        foot_target = torch.stack([Ux,Uy,torch.zeros((N), device=self.device)], dim=-1)
-        #clip foot target based on kinematic range
-        # the absolute value of foot target y should be within foot_target_range_y
-        # so either Uy or -Uy should be within foot_target_range_y
-        # hmm clip then times sign of Uy?
-
-
-        # based on yaw velocity, update com_pos_des, com_vel_des, foot_target,
-        delta_psi = base_velocity[:,2] * self.cur_swing_time
-        q_delta_yaw = quat_from_euler_xyz(
-            torch.zeros_like(delta_psi),               # roll=0
-            torch.zeros_like(delta_psi),               # pitch=0
-            delta_psi                                  # yaw=Δψ
-        ) 
-
-        foot_target_yaw_adjusted = quat_apply(q_delta_yaw, foot_target)  # [B,3]
-        com_pos_des_yaw_adjusted = quat_apply(q_delta_yaw, com_pos_des)  # [B,3]
-        com_vel_des_yaw_adjusted = quat_apply(q_delta_yaw, com_vel_des)  # [B,3]
-        
-
-        # clip foot target based on kinematic range
-        self.foot_target = foot_target_yaw_adjusted[:,0:2]
-
-
+    def generate_orientation_ref(self, base_velocity,N):
         pelvis_euler = torch.zeros((N,3), device=self.device)
         tp_tensor = torch.tensor(self.tp, device=self.device)
         phase_tensor = torch.tensor(self.phase_var, device=self.device)
         
         roll_main_amp = 0.0  # main double bump amplitude
-        roll_asym_amp = 0.05  # adds asymmetry
+        roll_asym_amp = -0.05  # adds asymmetry
 
         pelvis_euler[:, 0] = (
             roll_main_amp * torch.sin(4 * torch.pi * tp_tensor) +
@@ -284,6 +228,55 @@ class HLIPCommandTerm(CommandTerm):
         foot_eul_dot = torch.zeros((N,3), device=self.device)
         foot_eul_dot[:,2] = pelvis_eul_dot[:,2]
 
+        return pelvis_euler, pelvis_eul_dot, foot_eul, foot_eul_dot
+
+
+
+    def generate_reference_trajectory(self):
+        base_velocity = self.env.command_manager.get_command("base_velocity")  # (N,3)
+        N = base_velocity.shape[0]
+
+        T = torch.full((N,), self.T, dtype=torch.float32, device=self.device)
+
+        Xdes, Ux, Ydes, Uy = self.hlip_controller.compute_orbit(
+            T=T,cmd=base_velocity)
+        
+        #select init and Xdes, Ux, Ydes, Uy
+        x0 = self.hlip_controller.x_init
+        y0 = self.hlip_controller.y_init[:,self.stance_idx]
+        Uy = Uy[:,self.stance_idx]
+    
+        com_x, com_xd = self.hlip_controller._compute_desire_com_trajectory(
+            cur_time=self.cur_swing_time,
+            Xdesire=x0,
+        )
+        com_y, com_yd = self.hlip_controller._compute_desire_com_trajectory(
+            cur_time=self.cur_swing_time,
+            Xdesire=y0,
+        )
+        # Concatenate x and y components
+        com_pos_des = torch.stack([com_x, com_y,torch.ones((N,), device=self.device) * self.com_z], dim=-1)  # Shape: (N,2)
+        com_vel_des = torch.stack([com_xd, com_yd,torch.zeros((N), device=self.device)], dim=-1)  # Shape: (N,2)
+
+        Uy = torch.clamp(torch.abs(Uy), min=self.cfg.foot_target_range_y[0], max=self.cfg.foot_target_range_y[1]) * torch.sign(Uy)
+
+        foot_target = torch.stack([Ux,Uy,torch.zeros((N), device=self.device)], dim=-1)
+  
+        # based on yaw velocity, update com_pos_des, com_vel_des, foot_target,
+        delta_psi = base_velocity[:,2] * self.cur_swing_time
+        q_delta_yaw = quat_from_euler_xyz(
+            torch.zeros_like(delta_psi),               # roll=0
+            torch.zeros_like(delta_psi),               # pitch=0
+            delta_psi                                  # yaw=Δψ
+        ) 
+
+        foot_target_yaw_adjusted = quat_apply(q_delta_yaw, foot_target)  # [B,3]
+        com_pos_des_yaw_adjusted = quat_apply(q_delta_yaw, com_pos_des)  # [B,3]
+        com_vel_des_yaw_adjusted = quat_apply(q_delta_yaw, com_vel_des)  # [B,3]
+        
+        # clip foot target based on kinematic range
+        self.foot_target = foot_target_yaw_adjusted[:,0:2]
+       
         z_sw_max = self.cfg.z_sw_max
         z_sw_neg = self.cfg.z_sw_min
 
@@ -312,19 +305,15 @@ class HLIPCommandTerm(CommandTerm):
             foot_target_yaw_adjusted[:, 0], foot_target_yaw_adjusted[:, 1]
         )
 
-        
         dbht = bezier_deg(1, phase_var_tensor, T_tensor, horizontal_control_points, four_tensor)
         foot_vel = torch.zeros((N,3), device=self.device)
         foot_vel[:,0] = -dbht * -foot_target_yaw_adjusted[:,0]+ dbht * foot_target_yaw_adjusted[:,0]
         foot_vel[:,1] = -dbht * foot_target_yaw_adjusted[:,1] + dbht * foot_target_yaw_adjusted[:,1]
         foot_vel[:,2] = sw_z.squeeze(-1)  # Remove the last dimension to match foot_vel[:,2] shape
 
-        
         upper_body_joint_pos, upper_body_joint_vel = self.generate_upper_body_ref()
 
-        # upper_body_joint_pos = upper_body_joint_pos.unsqueeze(0).expand(N, -1)
-        # upper_body_joint_vel = upper_body_joint_vel.unsqueeze(0).expand(N, -1)
-
+        pelvis_euler, pelvis_eul_dot, foot_eul, foot_eul_dot = self.generate_orientation_ref(base_velocity,N)
         omega_ref = euler_rates_to_omega(pelvis_euler, pelvis_eul_dot)
         omega_foot_ref = euler_rates_to_omega(foot_eul, foot_eul_dot)  # (N,3)
         #setup up reference trajectory, com pos, pelvis orientation, swing foot pos, ori

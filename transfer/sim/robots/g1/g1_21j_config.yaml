@@ -1,7 +1,10 @@
 # G1_21j config
 robot_name: "g1_21j"
 #checkpoint_path: "/home/zolkin/AmberLab/Project-Isaac-RL/robot-rl/robot_rl/logs/rsl_rl/g1/2025-05-23_15-51-34/exported/policy.pt"  # Not LIP, all dir
-checkpoint_path: "/home/amy/gitrepo/robot_rl/logs/g1_policies/clf/g1/2025-06-10_14-20-56/exported/policy.pt"
+# checkpoint_path: "/home/amy/gitrepo/robot_rl/logs/g1_policies/clf/g1/2025-06-10_14-20-56/exported/policy.pt"
+# checkpoint_path: "/home/amy/gitrepo/robot_rl/logs/g1_policies/clf/g1/2025-06-10_15-59-40/exported/policy.pt" #previous_good version
+# checkpoint_path: "/home/amy/gitrepo/robot_rl/logs/g1_policies/clf/g1/2025-06-10_17-33-32/exported/policy.pt" #good
+checkpoint_path: "/home/amy/gitrepo/robot_rl/logs/g1_policies/clf/g1/2025-06-10_19-23-16/exported/policy.pt"
 #checkpoint_path: "/home/zolkin/AmberLab/Project-Isaac-RL/robot-rl/robot_rl/logs/rsl_rl/g1/2025-05-20_12-23-37/exported/policy.pt"  # Not LIP
 #checkpoint_path: "/home/zolkin/AmberLab/Project-Isaac-RL/robot-rl/robot_rl/logs/rsl_rl/g1/2025-05-23_15-09-10/exported/policy.pt" # LIP
 num_obs: 74

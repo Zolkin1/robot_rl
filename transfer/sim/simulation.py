@@ -127,13 +127,13 @@ class Simulation:
                     self.robot.get_joystick_command()
                     self.robot.step()
                     
-                    if self.log:
-                        log_data = self.robot.get_log_data(self.policy, obs, action)
-                        if i == 0 and any(abs(v) > 1e-6 for v in log_data[-3:]):  # Only print if commanded velocity is non-zero
-                            print(f"Commanded velocity: {log_data[-3:]}")
-                        log_row_to_csv(self.log_file, log_data)
-                    
+                    # Only log and sync viewer at viewer_rate intervals
                     if i % self.viewer_rate == 0:
+                        if self.log:
+                            log_data = self.robot.get_log_data(self.policy, obs, action)
+                            if any(abs(v) > 1e-6 for v in log_data[-3:]):  # Only print if commanded velocity is non-zero
+                                print(f"Commanded velocity: {log_data[-3:]}")
+                            log_row_to_csv(self.log_file, log_data)
                         viewer.sync()
 
                 # Try to run in roughly realtime
