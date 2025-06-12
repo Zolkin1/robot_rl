@@ -64,7 +64,8 @@ class G1StairEnvCfg(G1RoughLipEnvCfg):
         # self.scene.height_scanner = None
         self.scene.terrain.terrain_type = "generator"
 
-        STAIR_CFG.sub_terrains["pyramid_stairs_inv"].step_height_range = (0.0,0.02)
+        STAIR_CFG.sub_terrains["pyramid_stairs_inv"].step_height_range = (0.0,0.2)
+        self.scene.terrain.terrain_generator.max_init_terrain_level = 5
         # del STAIR_CFG.sub_terrains["pyramid_stairs"]
 
         self.scene.terrain.terrain_generator = STAIR_CFG
@@ -72,8 +73,8 @@ class G1StairEnvCfg(G1RoughLipEnvCfg):
         # self.scene.terrain.terrain_type = "plane"
         # self.scene.terrain.terrain_generator = None
   
-        self.curriculum.terrain_levels = None
-        # self.curriculum.terrain_levels = CurrTerm(func=mdp.terrain_levels_vel)
+        # self.curriculum.terrain_levels = None
+        self.curriculum.terrain_levels = CurrTerm(func=mdp.terrain_levels_vel)
         self.scene.height_scanner = RayCasterCfg(
             prim_path="{ENV_REGEX_NS}/Robot/pelvis",
             offset=RayCasterCfg.OffsetCfg(pos=(0.0, 0.0, 20.0)),
@@ -115,7 +116,7 @@ class G1StairEnvCfg(G1RoughLipEnvCfg):
         # self.events.base_external_force_torque.params["asset_cfg"].body_names = ["pelvis_link"]
         self.events.reset_base.params = {
             
-            "pose_range": {"x": (-0.5, 0.5), "y": (-0.5, 0.5), "yaw": (0,0)}, #(-3.14, 3.14)},
+            "pose_range": {"x": (-0.5, 0.5), "y": (-0.5, 0.5), "yaw": (-3.14,3.14)}, #(-3.14, 3.14)},
             "velocity_range": {
                 "x": (0.0, 0.0),
                 "y": (0.0, 0.0),
@@ -188,9 +189,17 @@ class G1StairPlay_EnvCfg(G1StairEnvCfg):
 
         self.scene.num_envs = 2
         self.scene.env_spacing = 2.5
-        self.events.reset_base.params["pose_range"] = {"x": (1,1), "y": (1,1), "yaw": (0,0)} #(-3.14, 3.14)},
+        self.events.reset_base.params["pose_range"] = {"x": (-1,-1), "y": (-1,-1), "yaw": (0,0)} #(-3.14, 3.14)},
         # disable randomization for play
         self.observations.policy.enable_corruption = False
         # remove random pushing
         self.events.base_external_force_torque = None
         self.commands.hlip_ref.debug_vis = True
+
+
+        self.scene.terrain.terrain_generator = STAIR_CFG
+        self.scene.terrain.terrain_generator.num_rows = 3
+        self.scene.terrain.terrain_generator.num_cols = 2
+        self.scene.terrain.terrain_generator.max_init_terrain_level = 0
+        self.scene.terrain.terrain_generator.sub_terrains["pyramid_stairs_inv"].step_height_range = (0.05,0.05)
+        

@@ -301,7 +301,7 @@ class HLIPCommandTerm(CommandTerm):
         
         sign = torch.sign(foot_target_yaw_adjusted[:, 1])
         foot_pos, sw_z = calculate_cur_swing_foot_pos(
-            bht_tensor, z_init, z_sw_max_tensor, phase_var_tensor, sign*self.cfg.y_nom,T_tensor, z_sw_neg_tensor,
+            bht_tensor, z_init, z_sw_max_tensor, phase_var_tensor,-foot_target_yaw_adjusted[:, 0], sign*self.cfg.y_nom,T_tensor, z_sw_neg_tensor,
             foot_target_yaw_adjusted[:, 0], foot_target_yaw_adjusted[:, 1]
         )
 

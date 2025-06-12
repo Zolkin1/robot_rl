@@ -83,8 +83,11 @@ class StairCmd(HLIPCommandTerm):
           step_w = torch.tensor(cfg.step_width, dtype=delta.dtype, device=delta.device)
           raw_k  = torch.floor(delta / step_w).long()
 
+          #check if it's basically at the center, then return num_steps
+          # center_idx = torch.where(delta_x < 0.01, torch.ones_like(raw_k), torch.zeros_like(raw_k))
+         
           # 7) clamp into [-1, num_steps]
-          return raw_k.clamp(min=-1, max=num_steps)
+          return raw_k.clamp(min=0, max=num_steps)
 
 
     def box_center(
@@ -210,15 +213,17 @@ class StairCmd(HLIPCommandTerm):
           self.stance_foot_box_z = stance_foot_box_center[:, 2]
           desired_world[:, 2] = box_center[:, 2]
 
-          print(f"z_height: {self.z_height}")
-          import pdb; pdb.set_trace()
+          
+          if torch.any(torch.isnan(self.z_height)):
+               import pdb; pdb.set_trace()
 
           if self.cfg.debug_vis:
                self.footprint_visualizer.visualize(
                     translations=desired_world.detach().cpu().numpy(),
                     orientations=yaw_quat(self.robot.data.root_quat_w).detach().cpu().numpy(),
                )
-   
+               print(f"z_height: {self.z_height}, stance_foot_box_center: {self.stance_foot_box_z}, box_center: {box_center[:, 2]}")
+
 
 
     def generate_reference_trajectory(self):
@@ -234,6 +239,9 @@ class StairCmd(HLIPCommandTerm):
 
           # based on the nominal step size, check the stair height
           self.update_z_height(Ux,Uy)
+
+          #adjust the foot target if it's not completely on the step
+
 
           #select init and Xdes, Ux, Ydes, Uy
           x0 = self.hlip_controller.x_init
@@ -297,7 +305,7 @@ class StairCmd(HLIPCommandTerm):
 
           sign = torch.sign(foot_target_yaw_adjusted[:, 1])
           foot_pos, sw_z = calculate_cur_swing_foot_pos(
-               bht_tensor, z_init, z_sw_max_tensor, phase_var_tensor, sign*self.cfg.y_nom,T_tensor, z_sw_neg_tensor,
+               bht_tensor, z_init, z_sw_max_tensor, phase_var_tensor,self.swing2stance_foot_pos_0[:,0], sign*self.cfg.y_nom,T_tensor, z_sw_neg_tensor,
                foot_target_yaw_adjusted[:, 0], foot_target_yaw_adjusted[:, 1]
           )
 
