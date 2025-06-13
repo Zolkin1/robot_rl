@@ -212,7 +212,7 @@ def holonomic_constraint(
 
     # vertical error to the floor plane [B,1]
     z_cur    = cmd.stance_foot_pos[:, 2].unsqueeze(-1)
-    delta_z  = z_cur - z_offset
+    delta_z  = z_cur - cmd.stance_foot_pos_0[:,2].unsqueeze(-1)
 
     # roll error [B,1]
     roll = cmd.stance_foot_ori[:, 0].unsqueeze(-1)

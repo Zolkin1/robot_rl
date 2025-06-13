@@ -12,7 +12,7 @@ Q_weights = [
     600.0,  20.0,  # com_z pos, vel
     420.0,    20.0,    # pelvis_roll pos, vel
     200.0,    10.0,    # pelvis_pitch pos, vel
-    300.0,    10.0,    # pelvis_yaw pos, vel
+    500.0,    30.0,    # pelvis_yaw pos, vel
     1500.0, 125.0,  # swing_x pos, vel
     1700.0,  125.0,  # swing_y pos, vel
     3500.0, 100.0,   # swing_z pos, vel
@@ -48,14 +48,14 @@ class HLIPCommandCfg(CommandTermCfg):
     class_type: type = HLIPCommandTerm
     asset_name: str = "robot"
     T_ds: float = 0.0          # double support duration (s)
-    z0: float = 0.6           # CoM height (m)
-    y_nom: float = 0.23        # nominal lateral foot offset (m)
+    z0: float = 0.65           # CoM height (m)
+    y_nom: float = 0.25        # nominal lateral foot offset (m)
     gait_period: float = 0.8   # gait cycle period (s)
     debug_vis: bool = False    # enable debug visualization
     z_sw_max: float = 0.1    # max swing foot z height (m); this is ankle height so different from actual foot position
     z_sw_min: float = 0.0
     v_history_len: int = 5
-    pelv_pitch_ref: float = 0.2
+    pelv_pitch_ref: float = 0.0
     waist_yaw_ref: float = 0.0
     shoulder_ref: list[float] = [0.16, 0.0, 0.0]
     elbow_ref: float = 0.1

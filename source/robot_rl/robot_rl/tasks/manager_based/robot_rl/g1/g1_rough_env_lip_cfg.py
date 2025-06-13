@@ -77,7 +77,7 @@ class G1RoughLipObservationsCfg(ObservationsCfg):
 class CurriculumCfg:
     """Curriculum terms for the MDP."""
 
-    clf_curriculum = CurrTerm(func=mdp.clf_curriculum, params={"num_steps": 5000})
+    clf_curriculum = CurrTerm(func=mdp.clf_curriculum, params={"update_interval": 1000})
 
 # Lip specific rewards
 ##
@@ -116,7 +116,7 @@ class G1RoughLipRewards(HumanoidRewardCfg):
         weight=-2.0,
         params={
             "command_name": "hlip_ref",
-            "max_clf_decreasing": 100.0,
+            "max_clf_decreasing": 200.0,
         }
     )
 
@@ -130,7 +130,7 @@ class G1RoughLipEnvCfg(HumanoidEnvCfg):
     # events: G1RoughLipEventsCfg = G1RoughLipEventsCfg()
     observations: G1RoughLipObservationsCfg = G1RoughLipObservationsCfg()
     commands: G1RoughLipCommandsCfg = G1RoughLipCommandsCfg()
-    # curriculum: CurriculumCfg = CurriculumCfg()
+    curriculum: CurriculumCfg = CurriculumCfg()
     def __post_init__(self):
         # post init of parent
         super().__post_init__()

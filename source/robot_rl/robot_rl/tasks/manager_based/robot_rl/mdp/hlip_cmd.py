@@ -196,15 +196,25 @@ class HLIPCommandTerm(CommandTerm):
         roll_main_amp = 0.0  # main double bump amplitude
         roll_asym_amp = -0.05  # adds asymmetry
 
+        
         pelvis_euler[:, 0] = (
             roll_main_amp * torch.sin(4 * torch.pi * tp_tensor) +
             roll_asym_amp * torch.sin(2 * torch.pi * tp_tensor)
         )
 
-        pitch_amp = 0.0
+        #add bias based on lateral velocity
+        # lateral bias
+        bias_lat = torch.clamp(torch.atan(base_velocity[:,1] / 9.81),-0.15,0.15)
+
+        # turning bias
+        bias_yaw = torch.clamp(torch.atan((base_velocity[:,0]*base_velocity[:,2]) / 9.81),-0.2,0.2)
+
+        pelvis_euler[:,0] = pelvis_euler[:,0] + bias_lat + bias_yaw
+
+        pitch_amp = 0.02
         pelvis_euler[:,1] = self.cfg.pelv_pitch_ref + torch.sin(2*torch.pi * tp_tensor) * pitch_amp
     
-        yaw_amp = 0.02
+        yaw_amp = 0.0
         default_yaw = yaw_amp*torch.sin(2* torch.pi * tp_tensor)
         pelvis_euler[:,2] = default_yaw + self.stance_foot_ori_0[:,2] + base_velocity[:,2] * self.cur_swing_time 
 
@@ -258,7 +268,7 @@ class HLIPCommandTerm(CommandTerm):
         com_pos_des = torch.stack([com_x, com_y,torch.ones((N,), device=self.device) * self.com_z], dim=-1)  # Shape: (N,2)
         com_vel_des = torch.stack([com_xd, com_yd,torch.zeros((N), device=self.device)], dim=-1)  # Shape: (N,2)
 
-        Uy = torch.clamp(torch.abs(Uy), min=self.cfg.foot_target_range_y[0], max=self.cfg.foot_target_range_y[1]) * torch.sign(Uy)
+        
 
         foot_target = torch.stack([Ux,Uy,torch.zeros((N), device=self.device)], dim=-1)
   
@@ -274,8 +284,10 @@ class HLIPCommandTerm(CommandTerm):
         com_pos_des_yaw_adjusted = quat_apply(q_delta_yaw, com_pos_des)  # [B,3]
         com_vel_des_yaw_adjusted = quat_apply(q_delta_yaw, com_vel_des)  # [B,3]
         
+        foot_target_yaw_adjusted_clipped = foot_target_yaw_adjusted.clone()
+        foot_target_yaw_adjusted_clipped[:,1] = torch.clamp(torch.abs(foot_target_yaw_adjusted[:,1]), min=self.cfg.foot_target_range_y[0], max=self.cfg.foot_target_range_y[1]) * torch.sign(Uy)
         # clip foot target based on kinematic range
-        self.foot_target = foot_target_yaw_adjusted[:,0:2]
+        self.foot_target = foot_target_yaw_adjusted_clipped[:,0:2]
        
         z_sw_max = self.cfg.z_sw_max
         z_sw_neg = self.cfg.z_sw_min

@@ -82,13 +82,14 @@ def calculate_cur_swing_foot_pos(
         p_swing: [batch,3]
     """
     # Vertical Bezier control points (degree 5)
-    degree_v = 5
+    degree_v = 6
     control_v = torch.stack([
         z_init,                      # Start
         z_init + 0.2 * (z_sw_max - z_init),
         z_init + 0.6 * (z_sw_max - z_init),
         z_sw_max,                    # Peak at mid-swing
-        z_init + 0.5 * (z_sw_max - z_init),
+        zsw_neg + 0.5 * (z_sw_max - zsw_neg),
+        zsw_neg + 0.05 * (z_sw_max - zsw_neg),
         zsw_neg                      # End
     ], dim=1)
 

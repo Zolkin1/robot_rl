@@ -64,6 +64,7 @@ class G1FlatRefTrackingEnvCfg(G1FlatLipEnvCfg):
         
         # self.rewards.clf_reward = None
         self.rewards.clf_decreasing_condition = None
+        self.curriculum.clf_curriculum = None
 
 
 class G1FlatLipEnvCfg_PLAY(G1FlatLipEnvCfg):
@@ -81,6 +82,6 @@ class G1FlatLipEnvCfg_PLAY(G1FlatLipEnvCfg):
         # self.events.push_robot = None
         self.events.push_robot.interval_range_s = (5.0,5.0)
         self.events.reset_base.params["pose_range"] = {"x": (-0.5, 0.5), "y": (-0.5, 0.5), "yaw": (0,0)} #(-3.14, 3.14)},
-        self.commands.base_velocity.ranges.lin_vel_x = (1.0, 1.0)
-        self.commands.base_velocity.ranges.lin_vel_y = (0.0, 0.0)
-        self.commands.base_velocity.ranges.ang_vel_z = (0.0, 0.0)
+        # self.commands.base_velocity.ranges.lin_vel_x = (1.0, 1.0)
+        # self.commands.base_velocity.ranges.lin_vel_y = (0.0, 0.0)
+        # self.commands.base_velocity.ranges.ang_vel_z = (0.0, 0.0)
