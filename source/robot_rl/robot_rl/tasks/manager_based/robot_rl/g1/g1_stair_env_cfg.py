@@ -36,7 +36,8 @@ class G1StairCommandsCfg(CommandsCfg):
 @configclass
 class G1StairRewardsCfg(G1RoughLipRewards):
     """Rewards for the G1 Flat environment."""
-    holonomic_constraint: RewTerm = RewTerm(
+    holonomic_constraint = None
+    holonomic_constraint_stair: RewTerm = RewTerm(
         func=mdp.holonomic_constraint_stair,
         params={"command_name": "hlip_ref"},
         weight=4.0,
@@ -64,8 +65,8 @@ class G1StairEnvCfg(G1RoughLipEnvCfg):
         # self.scene.height_scanner = None
         self.scene.terrain.terrain_type = "generator"
 
-        STAIR_CFG.sub_terrains["pyramid_stairs_inv"].step_height_range = (0.0,0.2)
-        self.scene.terrain.terrain_generator.max_init_terrain_level = 5
+        STAIR_CFG.sub_terrains["pyramid_stairs_inv"].step_height_range = (0.0,0.3)
+        self.scene.terrain.terrain_generator.max_init_terrain_level = 3
         # del STAIR_CFG.sub_terrains["pyramid_stairs"]
 
         self.scene.terrain.terrain_generator = STAIR_CFG
@@ -102,9 +103,9 @@ class G1StairEnvCfg(G1RoughLipEnvCfg):
         ##
         # Randomization
         ##
-        self.events.push_robot = None
-        # self.events.push_robot.params["velocity_range"] = {"x": (-1, 1), "y": (-1, 1), "roll": (-0.4, 0.4),
-        #                                                    "pitch": (-0.4, 0.4), "yaw": (-0.4, 0.4)}
+        # self.events.push_robot = None
+        self.events.push_robot.params["velocity_range"] = {"x": (-1, 1), "y": (-1, 1), "roll": (-0.4, 0.4),
+                                                           "pitch": (-0.4, 0.4), "yaw": (-0.4, 0.4)}
         # self.events.push_robot.params["velocity_range"] = {"x": (-0, 0), "y": (-0, 0), "roll": (-0.0, 0.0),
         #                                                    "pitch": (-0., 0.), "yaw": (-0.0, 0.0)}
         self.events.add_base_mass.params["asset_cfg"].body_names = ["pelvis_link"]
@@ -116,7 +117,7 @@ class G1StairEnvCfg(G1RoughLipEnvCfg):
         # self.events.base_external_force_torque.params["asset_cfg"].body_names = ["pelvis_link"]
         self.events.reset_base.params = {
             
-            "pose_range": {"x": (-0.5, 0.5), "y": (-0.5, 0.5), "yaw": (-3.14,3.14)}, #(-3.14, 3.14)},
+            "pose_range": {"x": (-0.2, 0.2), "y": (-0.2, 0.2), "yaw": (-3.14,3.14)}, #(-3.14, 3.14)},
             "velocity_range": {
                 "x": (0.0, 0.0),
                 "y": (0.0, 0.0),
@@ -189,7 +190,7 @@ class G1StairPlay_EnvCfg(G1StairEnvCfg):
 
         self.scene.num_envs = 2
         self.scene.env_spacing = 2.5
-        self.events.reset_base.params["pose_range"] = {"x": (-1,-1), "y": (-1,-1), "yaw": (0,0)} #(-3.14, 3.14)},
+        # self.events.reset_base.params["pose_range"] = {"x": (0,0), "y": (0,0), "yaw": (0,0)} #(-3.14, 3.14)},
         # disable randomization for play
         self.observations.policy.enable_corruption = False
         # remove random pushing
@@ -201,5 +202,5 @@ class G1StairPlay_EnvCfg(G1StairEnvCfg):
         self.scene.terrain.terrain_generator.num_rows = 3
         self.scene.terrain.terrain_generator.num_cols = 2
         self.scene.terrain.terrain_generator.max_init_terrain_level = 0
-        self.scene.terrain.terrain_generator.sub_terrains["pyramid_stairs_inv"].step_height_range = (0.05,0.05)
+        self.scene.terrain.terrain_generator.sub_terrains["pyramid_stairs_inv"].step_height_range = (0.025,0.05)
         

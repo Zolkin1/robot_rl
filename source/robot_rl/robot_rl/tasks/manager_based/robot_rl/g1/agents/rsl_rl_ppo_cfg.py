@@ -40,5 +40,6 @@ class PPORunnerCfg(RslRlOnPolicyRunnerCfg):
 
 @configclass
 class StairPPOCfg(PPORunnerCfg):
-    resume = True
-    resume_path = "/home/amy/gitrepo/robot_rl/logs/g1_policies/stair/g1/2025-06-12_15-42-08/model_3200.pt"
+    resume = False
+    resume_path = None
+    # resume_path = "/home/amy/gitrepo/robot_rl/logs/g1_policies/stair/g1/2025-06-12_19-56-19/model_6200.pt"

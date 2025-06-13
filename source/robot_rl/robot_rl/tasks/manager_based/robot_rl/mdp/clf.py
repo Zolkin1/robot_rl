@@ -83,6 +83,7 @@ class CLF:
         y_nom: torch.Tensor,
         dy_act: torch.Tensor,
         dy_nom: torch.Tensor,
+        yaw_idx: list[int],
     ) -> torch.Tensor:
         """
         Evaluate V = (y_act - y_nom)^T P (y_act - y_nom).
@@ -93,6 +94,12 @@ class CLF:
         eta = torch.zeros(batch_size,2*self.n_outputs, device=y_act.device)
         eta[:,0::2] = y_err      # even indices: positions
         eta[:,1::2] = dy_err     # odd indices: velocities
+
+        #need to wrap around yaw error, 
+        yaw_err = y_err[:,yaw_idx]
+        two_pi = 2.0 * torch.pi
+        wrapped_yaw_err = (yaw_err + torch.pi) % two_pi - torch.pi
+        eta[:,yaw_idx] = wrapped_yaw_err
 
         V = torch.einsum('bi,ij,bj->b', eta, self.P, eta)
 
@@ -110,11 +117,12 @@ class CLF:
         y_nom: torch.Tensor,
         dy_act: torch.Tensor,
         dy_nom: torch.Tensor,
+        yaw_idx: list[int],
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Compute V_dot = (V_curr - V_prev) / sim_dt, returns (vdot, V_curr).
         """
-        v_curr = self.compute_v(y_act, y_nom,dy_act,dy_nom)
+        v_curr = self.compute_v(y_act, y_nom,dy_act,dy_nom, yaw_idx)
        
         dt = self.sim_dt
         B = v_curr.shape[0]

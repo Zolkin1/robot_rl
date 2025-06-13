@@ -242,8 +242,9 @@ def holonomic_constraint_stair(
     delta_xy = p_xy - p0_xy
 
     # vertical error to the floor plane [B,1]
-    z_cur    = cmd.stance_foot_pos[:, 2].unsqueeze(-1)
-    delta_z  = z_cur - (cmd.stance_foot_box_z + 0.036)
+    delta_z = torch.zeros_like(delta_xy)
+    # z_cur    = cmd.stance_foot_pos[:, 2].unsqueeze(-1)
+    # delta_z  = z_cur - (cmd.stance_foot_box_z + 0.036)
 
     # roll error [B,1]
     roll = cmd.stance_foot_ori[:, 0].unsqueeze(-1)

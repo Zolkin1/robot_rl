@@ -499,7 +499,7 @@ class HLIPCommandTerm(CommandTerm):
         
         #how to handle for the first step?
         #i.e. v is not defined
-        vdot,vcur = self.clf.compute_vdot(self.y_act,self.y_out,self.dy_act,self.dy_out)
+        vdot,vcur = self.clf.compute_vdot(self.y_act,self.y_out,self.dy_act,self.dy_out, self.cfg.yaw_idx)
         self.vdot = vdot
         self.v = vcur
         if torch.sum(self.v_buffer) == 0:

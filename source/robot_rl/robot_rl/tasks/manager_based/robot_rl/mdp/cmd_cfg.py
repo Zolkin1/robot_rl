@@ -47,6 +47,7 @@ class HLIPCommandCfg(CommandTermCfg):
     """
     class_type: type = HLIPCommandTerm
     asset_name: str = "robot"
+    yaw_idx: list[int] = [5,11]
     T_ds: float = 0.0          # double support duration (s)
     z0: float = 0.65           # CoM height (m)
     y_nom: float = 0.25        # nominal lateral foot offset (m)
