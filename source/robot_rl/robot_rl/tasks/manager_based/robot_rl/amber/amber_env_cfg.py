@@ -10,7 +10,8 @@ from isaaclab.utils import configclass
 from isaaclab.utils.noise import AdditiveUniformNoiseCfg as Unoise
 from isaaclab.managers import ObservationTermCfg as ObsTerm
 from isaaclab.managers import RewardTermCfg as RewTerm
-from isaaclab.managers import SceneEntityCfg
+from isaaclab.managers import TerminationTermCfg, SceneEntityCfg
+
 from isaaclab_tasks.manager_based.locomotion.velocity.velocity_env_cfg import (
     LocomotionVelocityRoughEnvCfg,
     ObservationsCfg,
@@ -148,20 +149,29 @@ class AmberEnvCfg(LocomotionVelocityRoughEnvCfg):
 
         self.scene.robot = AMBER_CFG.replace(prim_path="{ENV_REGEX_NS}/Amber")
 
+
+        # self.terminations.base_contact.params["sensor_cfg"] = SceneEntityCfg(
+        #         "contact_forces",       # the name of the contact‐force sensor manager
+        #         body_names=["torso"]     # your link name
+        #     )
         # CONTACT FORCES/RESET
-        self.scene.contact_forces = SceneEntityCfg(
-            "contact_forces", body_names=["torso"]
-        )
-        self.scene.contact_sensors = SceneEntityCfg(
-            "contact_sensors", body_names=["torso"]
-        )
+        #Scene entity not accepted
+        # self.scene.contact_forces = SceneEntityCfg(
+        #     "contact_forces", body_names=["torso"]
+        # )
+        # self.scene.contact_sensors = SceneEntityCfg(
+        #     "contact_sensors", body_names=["torso"]
+        # )
 
-        # self.scene.contact_forces = None
+        # self.terminations.base_contact = TerminationTermCfg(
+        # sensor_cfg=SceneEntityCfg("contact_forces", body_names=["torso"])
+        # )
+        self.scene.contact_forces = None
 
-        # self.scene.contact_sensors = None
+        self.scene.contact_sensors = None
 
         # 2) Disable any reward/termination terms that refer to those sensors
-        # self.terminations.base_contact        = None
+        self.terminations.base_contact        = None
         self.rewards.feet_air_time            = None
         self.rewards.undesired_contacts       = None
         # swap in the Amber robot (must match the prim_path used in your scene)
@@ -175,6 +185,10 @@ class AmberEnvCfg(LocomotionVelocityRoughEnvCfg):
 
         # likewise, if you use the default “base_contact” termination:
         # self.terminations.base_contact.params["sensor_cfg"].body_names = ["torso"]
+
+
+
+
     # def define_markers(self) -> VisualizationMarkers:
     # """Define markers with various different shapes."""
     # self.footprint_cfg = VisualizationMarkersCfg(
