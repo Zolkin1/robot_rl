@@ -50,6 +50,7 @@ def main():
         default_angles=config["default_angles"],
         qvel_scale=config["qvel_scale"],
         ang_vel_scale=config["ang_vel_scale"],
+        height_map_scale=config.get("height_map_scale", None)
     )
 
     # Run the simulator with default values for optional fields
@@ -58,7 +59,8 @@ def main():
         robot=config["robot_name"],
         scene=config.get("scene", "basic_scene"),  # Default to basic_scene if not specified
         log=config.get("log", False),
-        log_dir=config.get("log_dir", os.path.join(os.getcwd(), "logs"))
+        log_dir=config.get("log_dir", os.path.join(os.getcwd(), "logs")),
+        use_height_sensor=config.get("height_map_scale") is not None  # Enable height sensor if height_map_scale is present
     )
 
 

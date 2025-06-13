@@ -77,12 +77,12 @@ class Robot:
             des_vel[1] = vy
             des_vel[2] = vyaw
         else:
-            des_vel = np.array([0.5,0.0,0.0])
+            des_vel = np.array([0.75,0.0,0.0])
         self.commanded_vel = des_vel  # Store the commanded velocity
         return des_vel
 
 
-    def create_observation(self, policy):
+    def create_observation(self, policy, height_map=None, sensor_pos=None):
         """Create observation for the policy."""
         qpos = self.mj_data.qpos
         qvel = self.mj_data.qvel
@@ -90,7 +90,8 @@ class Robot:
         pg = self.get_projected_gravity(qpos[3:7])
         des_vel = self.get_joystick_command()
         
-        return policy.create_obs(qpos[7:], qvel[3:6], qvel[6:], sim_time, pg, des_vel)
+        return policy.create_obs(qpos[7:], qvel[3:6], qvel[6:], sim_time, pg, des_vel,
+                               height_map=height_map, sensor_pos=sensor_pos)
 
 
     def get_log_data(self, policy, obs, action):

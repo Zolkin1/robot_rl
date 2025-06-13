@@ -9,10 +9,9 @@ import mujoco
 import mujoco.viewer
 from datetime import datetime
 import pygame
-from scipy.optimize import direct
+
 from transfer.sim.robot import Robot
 from transfer.sim.simulation import Simulation
-
 
 def get_model_data(robot: str, scene: str):
     """Create the mj model and data from the given robot."""
@@ -60,13 +59,22 @@ def log_row_to_csv(filename, data):
     except Exception as e:
         print(f"Error appending row to {filename}: {e}")
 
-def run_simulation(policy, robot: str, scene: str, log: bool, log_dir: str):
-    """Run the simulation."""
+def run_simulation(policy, robot: str, scene: str, log: bool, log_dir: str, use_height_sensor: bool = False):
+    """Run the simulation.
+    
+    Args:
+        policy: The policy to use for control
+        robot: Robot name
+        scene: Scene name
+        log: Whether to log data
+        log_dir: Directory to save logs
+        use_height_sensor: Whether to use height sensor (default: False)
+    """
     # Create robot instance
     robot_instance = Robot(robot, scene)
     
     # Create and run simulation
-    sim = Simulation(policy, robot_instance, log, log_dir)
+    sim = Simulation(policy, robot_instance, log, log_dir, use_height_sensor=use_height_sensor)
     sim.run()
 
 def ray_cast_sensor(model, data, site_name, size: Tuple[float, float], x_y_num_rays: Tuple[int, int], sen_offset: float = 0) -> np.array:

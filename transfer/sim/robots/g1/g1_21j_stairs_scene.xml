@@ -18,6 +18,11 @@
         <material name="box_material" shininess="0.1" specular="0.5" roughness="0.3"/>
     </asset>
 
+    <sensor>
+        <framepos objtype="site" objname="left_ankle_site" name="left_ankle_pos"/>
+        <framepos objtype="site" objname="right_ankle_site" name="right_ankle_pos"/>
+    </sensor>
+
     <worldbody>
         <light pos="1 0 3.5" dir="0 0 -1" directional="true"/>
         <geom name="floor" size="0 0 0.05" type="plane" material="groundplane" group="2"/>

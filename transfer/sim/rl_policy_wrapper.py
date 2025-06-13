@@ -90,6 +90,8 @@ class RLPolicy():
 
         if height_map is not None:
             height_obs = self.convert_height_map_to_obs(height_map, sensor_pos)
+            # print(height_obs)
+            # height_obs = np.ones(256)*0.25
             obs[9 + 3 * nj:9 + 3 * nj + height_obs.shape[0]] = height_obs
             obs[9 + 3 * nj + height_obs.shape[0] : 9 + 3 * nj + height_obs.shape[0] + 2] = np.array([sin_phase, cos_phase])     # Phases
         else:
@@ -143,12 +145,13 @@ class RLPolicy():
             sensor_pos is the position of the position of the sensor
             offset is the same as the height_scan issac lab function.
         """
-        obs = np.zeros(height_map.shape[0] * height_map[1])
-        if self.height_map_scale != None:
+        obs = np.zeros(height_map.shape[0] * height_map.shape[1])
+        if self.height_map_scale is not None:
             # IsaacLab default is "xy" for the grid ordering
             for x in range(height_map.shape[0]):
-                for y in range(height_map[1]):
+                for y in range(height_map.shape[1]):
                     # TODO: Verify that it is clipped
-                    obs[x * height_map[1] + y] = np.clip(sensor_pos[2] - height_map[x, y, 2] - offset, -1, 1)
+                    obs[x * height_map.shape[1] + y] = np.clip(sensor_pos[2] - height_map[x, y, 2] - offset, -1, 1)
         else:
             raise ValueError("Height map scale is none but a height map was passed in!")
+        return obs
