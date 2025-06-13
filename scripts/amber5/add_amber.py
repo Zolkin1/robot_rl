@@ -32,6 +32,7 @@ from isaaclab.actuators import ImplicitActuatorCfg
 from isaaclab.assets import AssetBaseCfg
 from isaaclab.assets.articulation import ArticulationCfg
 from isaaclab.scene import InteractiveScene, InteractiveSceneCfg
+from isaaclab.sensors import ContactSensorCfg
 
 STIFFNESS = 1000
 DAMPING = 50
@@ -40,10 +41,9 @@ ROBOT_ASSETS_AMBER = "/home/s-ritwik/src/robot_rl/robot_assets/amber5/amber"
 
 AMBER_CONFIG = ArticulationCfg(
     spawn=sim_utils.UsdFileCfg(
-        usd_path=f"{ROBOT_ASSETS_AMBER}/amber2.usd",
-        activate_contact_sensors=False,
+        usd_path=f"{ROBOT_ASSETS_AMBER}/amber4.usd",
+        activate_contact_sensors=True,
         # path_in_usd="/Amber",
-
         rigid_props=sim_utils.RigidBodyPropertiesCfg(   
             disable_gravity=False,
             linear_damping=0.0,
@@ -131,7 +131,12 @@ class NewRobotsSceneCfg(InteractiveSceneCfg):
     dome_light = AssetBaseCfg(
         prim_path="/World/Light", spawn=sim_utils.DomeLightCfg(intensity=3000.0, color=(0.75, 0.75, 0.75))
     )
-
+    contact_forces = ContactSensorCfg(
+        prim_path="{ENV_REGEX_NS}/Amber/torso",
+        update_period=0.0,       # every sim step
+        history_length=1,        # only current step
+        debug_vis=False,
+    )
     # robot
     # Jetbot = JETBOT_CONFIG.replace(prim_path="{ENV_REGEX_NS}/Jetbot")
     # Dofbot = DOFBOT_CONFIG.replace(prim_path="{ENV_REGEX_NS}/Dofbot")
@@ -198,9 +203,27 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
 
         scene.write_data_to_sim()
         sim.step()
+        scene.update(sim_dt)
         sim_time += sim_dt
         count += 1
-        scene.update(sim_dt)
+        # ---- check for torso–ground contact ----
+        amber = scene["Amber"]
+        # contact_forces is (n_envs, n_sensors), ours has one sensor
+        forces = scene["contact_forces"].data.net_forces_w          # if any env has non-zero contact force:
+        if (forces.abs() > 0.0).any():
+                print("[INFO] Torso hit the ground—resetting robot…")
+                # reset exactly as you do on your 300-step timer:
+                root = scene["Amber"].data.default_root_state.clone()
+                root[:, :3] += scene.env_origins
+                scene["Amber"].write_root_pose_to_sim(root[:, :7])
+                scene["Amber"].write_root_velocity_to_sim(root[:, 7:])
+                scene["Amber"].write_joint_state_to_sim(
+                scene["Amber"].data.default_joint_pos.clone(),
+                    scene["Amber"].data.default_joint_vel.clone(),
+                )
+                scene.reset()
+                count = 0
+                continue
         
 from pxr import UsdPhysics, Gf, Sdf
 import omni.usd

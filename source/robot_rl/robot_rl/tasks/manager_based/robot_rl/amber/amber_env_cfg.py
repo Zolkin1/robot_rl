@@ -11,6 +11,10 @@ from isaaclab.utils.noise import AdditiveUniformNoiseCfg as Unoise
 from isaaclab.managers import ObservationTermCfg as ObsTerm
 from isaaclab.managers import RewardTermCfg as RewTerm
 from isaaclab.managers import TerminationTermCfg, SceneEntityCfg
+from isaaclab.assets import AssetBaseCfg
+from isaaclab.sensors import ContactSensorCfg
+import robot_rl.tasks.manager_based.robot_rl.amber.mdp as mdp
+
 
 from isaaclab_tasks.manager_based.locomotion.velocity.velocity_env_cfg import (
     LocomotionVelocityRoughEnvCfg,
@@ -18,7 +22,7 @@ from isaaclab_tasks.manager_based.locomotion.velocity.velocity_env_cfg import (
     RewardsCfg,
     EventCfg,
 )
-from .amber5 import AMBER_CFG
+from .amber5 import AMBER_MINIMAL_CFG
 from . import mdp
 ##
 # Pre-defined configs
@@ -122,9 +126,9 @@ class AmberRewardCfg(RewardsCfg):
 
     # no need to track angular yaw (z) or sideways velocity
     track_ang_vel_z = None
-
     # small alive bonus
     alive = RewTerm(func=mdp.is_alive, weight=0.1)
+
 
 
 @configclass
@@ -145,46 +149,36 @@ class AmberEnvCfg(LocomotionVelocityRoughEnvCfg):
     events: AmberEventsCfg = AmberEventsCfg()
 
     def __post_init__(self):
+        # — swap in our Amber robot articulation —
+        self.scene.robot = AMBER_MINIMAL_CFG.replace(prim_path="{ENV_REGEX_NS}/Amber")
+
+        # — add a scene‐level contact sensor on the torso link —
+        self.scene.contact_forces = ContactSensorCfg(
+                prim_path="{ENV_REGEX_NS}/Amber/torso",
+                update_period=0.0,     # every physics step
+                history_length=1,      # only current reading
+                debug_vis=False,
+            )
+
+        # now let the base class wire up buffers, spaces, etc.
         super().__post_init__()
 
-        self.scene.robot = AMBER_CFG.replace(prim_path="{ENV_REGEX_NS}/Amber")
+        # — re‐enable collision termination on torso hits —
+        self.terminations.base_contact = TerminationTermCfg(
+            func=mdp.torso_contact_termination,
+            params={
+                "sensor_cfg": SceneEntityCfg(name="contact_forces"),
+                "asset_cfg":  SceneEntityCfg(name="robot"),
+            },
+        )
 
+        # keep your other terms disabled
+        self.rewards.feet_air_time      = None
+        self.rewards.undesired_contacts = None
+        self.events.add_base_mass       = None
 
-        # self.terminations.base_contact.params["sensor_cfg"] = SceneEntityCfg(
-        #         "contact_forces",       # the name of the contact‐force sensor manager
-        #         body_names=["torso"]     # your link name
-        #     )
-        # CONTACT FORCES/RESET
-        #Scene entity not accepted
-        # self.scene.contact_forces = SceneEntityCfg(
-        #     "contact_forces", body_names=["torso"]
-        # )
-        # self.scene.contact_sensors = SceneEntityCfg(
-        #     "contact_sensors", body_names=["torso"]
-        # )
-
-        # self.terminations.base_contact = TerminationTermCfg(
-        # sensor_cfg=SceneEntityCfg("contact_forces", body_names=["torso"])
-        # )
-        self.scene.contact_forces = None
-
-        self.scene.contact_sensors = None
-
-        # 2) Disable any reward/termination terms that refer to those sensors
-        self.terminations.base_contact        = None
-        self.rewards.feet_air_time            = None
-        self.rewards.undesired_contacts       = None
-        # swap in the Amber robot (must match the prim_path used in your scene)
-        self.events.add_base_mass = None
-        # self.terminations.base_contact.params["sensor_cfg"] = SceneEntityCfg(
-        #     "contact_forces",
-        #     body_names=["torso"],            # Amber actually has “torso” not “pelvis”
-        # )
-
+        # preserve whatever you did with external forces
         self.events.base_external_force_torque.params["asset_cfg"].body_names = ["torso"]
-
-        # likewise, if you use the default “base_contact” termination:
-        # self.terminations.base_contact.params["sensor_cfg"].body_names = ["torso"]
 
 
 
