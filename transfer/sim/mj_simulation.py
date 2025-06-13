@@ -224,7 +224,7 @@ def ray_cast_sensor(model, data, site_name, size: Tuple[float, float], x_y_num_r
 
     # Get the site location
     site_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_SITE, site_name)
-    site_pos = data.site_xpos[site_id]
+    site_pos = data.site_xpos[site_id].copy()
 
     # Add to the global z
     site_pos[2] = site_pos[2] + 10
