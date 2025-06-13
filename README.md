@@ -142,13 +142,17 @@ Some examples of packages that can likely be excluded are:
 ...
 ```
 
-## Run From A Checkpoint
+## Run G1 From A Checkpoint
 Run
 ```
 python /robot_rl/scripts/rsl_rl/play.py --task=G1-flat-vel --num_envs=10 --checkpoint=<log_dir_checkpoint>
 
 ```
-
+## Run AMBER From A Checkpoint
+Run
+```
+python scripts/rsl_rl/play.py --task="G1-flat-vel"  --num_envs=10
+```
 ## Other Deps
 pygame
 mujoco
