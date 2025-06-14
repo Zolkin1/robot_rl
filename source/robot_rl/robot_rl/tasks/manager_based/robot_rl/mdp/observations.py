@@ -61,6 +61,26 @@ def v(env: ManagerBasedRLEnv, command_name:str) -> torch.Tensor:
     v = cmd.v.unsqueeze(-1)
     return v
         
+
+def stair_sin_phase(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
+    cmd = env.command_manager.get_term(command_name)
+    phase = 2*torch.pi * cmd.tp
+    sphase = torch.sin(phase)
+    if sphase.ndim == 1:
+        # [B] → [B, 1]
+        sphase = sphase.unsqueeze(-1)
+
+    return sphase
+
+def stair_cos_phase(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
+    cmd = env.command_manager.get_term(command_name)
+    phase = 2*torch.pi * cmd.tp
+    cphase = torch.cos(phase)
+    if cphase.ndim == 1:
+        # [B] → [B, 1]
+        cphase = cphase.unsqueeze(-1)
+    return cphase
+
 def sin_phase(env: ManagerBasedRLEnv, period: float) -> torch.Tensor:
     phase = torch.tensor(2*torch.pi * (env.sim.current_time / period))
     sphase = torch.sin(phase)

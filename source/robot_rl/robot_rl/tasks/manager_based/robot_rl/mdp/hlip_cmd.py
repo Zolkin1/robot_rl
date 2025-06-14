@@ -510,7 +510,6 @@ class HLIPCommandTerm(CommandTerm):
         else:
             self.v_buffer = torch.cat([self.v_buffer[:,1:], self.v.unsqueeze(-1)], dim=-1)
             self.vdot_buffer = torch.cat([self.vdot_buffer[:,1:], self.vdot.unsqueeze(-1)], dim=-1)
-
        
         if self.debug_vis:
             # Visualize foot target in global frame

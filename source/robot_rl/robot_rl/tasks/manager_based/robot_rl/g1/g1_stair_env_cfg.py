@@ -102,6 +102,25 @@ class G1StairEnvCfg(G1RoughLipEnvCfg):
             clip=(-1.0, 1.0)
         )
 
+        self.observations.policy.sin_phase = ObsTerm(
+            func=mdp.stair_sin_phase,
+            params={"command_name": "hlip_ref"},
+        )
+        self.observations.policy.cos_phase = ObsTerm(
+            func=mdp.stair_cos_phase,
+            params={"command_name": "hlip_ref"},
+        )
+        
+
+        self.observations.critic.sin_phase = ObsTerm(
+            func=mdp.stair_sin_phase,
+            params={"command_name": "hlip_ref"},
+        )
+        self.observations.critic.cos_phase = ObsTerm(
+            func=mdp.stair_cos_phase,
+            params={"command_name": "hlip_ref"},
+        )
+
         ##
         # Randomization
         ##
@@ -134,7 +153,7 @@ class G1StairEnvCfg(G1RoughLipEnvCfg):
         ##
         # Commands
         ##
-        self.commands.base_velocity.ranges.lin_vel_x = (0.8,0.8)
+        self.commands.base_velocity.ranges.lin_vel_x = (0.1,0.8)
         self.commands.base_velocity.ranges.lin_vel_y = (0.0,0.0)
         self.commands.base_velocity.ranges.ang_vel_z = (0.0,0.0)
 
