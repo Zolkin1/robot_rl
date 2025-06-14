@@ -42,4 +42,11 @@ class PPORunnerCfg(RslRlOnPolicyRunnerCfg):
 class StairPPOCfg(PPORunnerCfg):
     resume = False
     resume_path = None
-    # resume_path = "/home/amy/gitrepo/robot_rl/logs/g1_policies/stair/g1/2025-06-12_19-56-19/model_6200.pt"
+    policy = RslRlPpoActorCriticCfg(
+        init_noise_std=1.0,
+        actor_hidden_dims=[1024, 256, 128],
+        critic_hidden_dims=[1024, 256, 128],
+        activation="elu",
+    )
+    # resume = True
+    # resume_path = "/home/amy/gitrepo/robot_rl/logs/g1_policies/stair/g1/2025-06-13_14-51-33/model_6200.pt"

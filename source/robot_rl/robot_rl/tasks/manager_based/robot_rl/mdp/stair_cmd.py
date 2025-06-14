@@ -349,17 +349,17 @@ class StairCmd(HLIPCommandTerm):
           ) 
 
           foot_target_yaw_adjusted = quat_apply(q_delta_yaw, foot_target)  # [B,3]
-
+          self.update_z_height(foot_target_yaw_adjusted[:,0], foot_target_yaw_adjusted[:,1])
           
           #transform it into the global frame
-          foot_target_global_yaw_frame = _transfer_to_global_frame(foot_target_yaw_adjusted, self.stance_foot_ori_quat_0)
+          # foot_target_global_yaw_frame = _transfer_to_global_frame(foot_target_yaw_adjusted, self.stance_foot_ori_quat_0)
 
           
           # based on the nominal step size, check the stair height
-          self.update_z_height(foot_target_global_yaw_frame[:,0], foot_target_global_yaw_frame[:,1])
+          # self.update_z_height(foot_target_global_yaw_frame[:,0], foot_target_global_yaw_frame[:,1])
 
          
-          foot_target_yaw_adjusted = self.adjust_foot_target(foot_target_global_yaw_frame)
+          # foot_target_yaw_adjusted = self.adjust_foot_target(foot_target_global_yaw_frame)
 
 
           #clip based on the kinematics range
@@ -402,30 +402,31 @@ class StairCmd(HLIPCommandTerm):
           z_sw_neg_tensor = self.cfg.z_sw_min + self.z_height
 
           # Create horizontal control points with batch dimension
-          horizontal_control_points = torch.tensor([0.0, 0.0, 1.0, 1.0, 1.0], device=self.device).repeat(N, 1)  # Shape: (N, 5)
+          horizontal_control_points = torch.tensor([0.0, 0.0, 0.0, 1.0, 1.0, 1.0], device=self.device).repeat(N, 1)  # Shape: (N, 5)
 
           # Create tensors with batch dimension N
           phase_var_tensor = torch.full((N,), self.phase_var, device=self.device)
           T_tensor = torch.full((N,), self.T, device=self.device)
-          four_tensor = torch.tensor(4, device=self.device)
+          five_tensor = torch.tensor(5, device=self.device)
 
           bht = bezier_deg(
-               0, phase_var_tensor, T_tensor, horizontal_control_points, four_tensor
+               0,phase_var_tensor, T_tensor, horizontal_control_points, five_tensor
           )
 
           # Convert scalar parameters to tensors with batch dimension N
-          z_init = torch.full((N,), 0.0, device=self.device)
+
+          z_init = self.swing2stance_foot_pos_0[:,2]
           # Convert bht to tensor if it's not already
           bht_tensor = torch.tensor(bht, device=self.device) if not isinstance(bht, torch.Tensor) else bht
 
           sign = torch.sign(foot_target_yaw_adjusted[:, 1])
           foot_pos, sw_z = calculate_cur_swing_foot_pos(
-               bht_tensor, z_init, z_sw_max_tensor, phase_var_tensor,self.swing2stance_foot_pos_0[:,0], sign*self.cfg.y_nom,T_tensor, z_sw_neg_tensor,
+               bht_tensor, z_init, z_sw_max_tensor, phase_var_tensor,-foot_target_yaw_adjusted[:, 0], sign*self.cfg.y_nom,T_tensor, z_sw_neg_tensor,
                foot_target_yaw_adjusted[:, 0], foot_target_yaw_adjusted[:, 1]
           )
 
 
-          dbht = bezier_deg(1, phase_var_tensor, T_tensor, horizontal_control_points, four_tensor)
+          dbht = bezier_deg(1, phase_var_tensor, T_tensor, horizontal_control_points, five_tensor)
           foot_vel = torch.zeros((N,3), device=self.device)
           foot_vel[:,0] = -dbht * -foot_target_yaw_adjusted[:,0]+ dbht * foot_target_yaw_adjusted[:,0]
           foot_vel[:,1] = -dbht * foot_target_yaw_adjusted[:,1] + dbht * foot_target_yaw_adjusted[:,1]

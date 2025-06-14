@@ -55,7 +55,7 @@ class G1StairEnvCfg(G1RoughLipEnvCfg):
         super().__post_init__()
 
 
-        
+        self.curriculum.clf_curriculum = None
         ##
         # Scene
         ##
@@ -65,8 +65,8 @@ class G1StairEnvCfg(G1RoughLipEnvCfg):
         # self.scene.height_scanner = None
         self.scene.terrain.terrain_type = "generator"
 
-        STAIR_CFG.sub_terrains["pyramid_stairs_inv"].step_height_range = (0.0,0.3)
-        self.scene.terrain.terrain_generator.max_init_terrain_level = 3
+        # STAIR_CFG.sub_terrains["pyramid_stairs_inv"].step_height_range = (0.05,0.25)
+        # self.scene.terrain.terrain_generator.max_init_terrain_level = 3
         # del STAIR_CFG.sub_terrains["pyramid_stairs"]
 
         self.scene.terrain.terrain_generator = STAIR_CFG
@@ -75,7 +75,7 @@ class G1StairEnvCfg(G1RoughLipEnvCfg):
         # self.scene.terrain.terrain_generator = None
   
         # self.curriculum.terrain_levels = None
-        self.curriculum.terrain_levels = CurrTerm(func=mdp.terrain_levels_vel)
+        self.curriculum.terrain_levels = CurrTerm(func=mdp.terrain_levels)
         self.scene.height_scanner = RayCasterCfg(
             prim_path="{ENV_REGEX_NS}/Robot/pelvis",
             offset=RayCasterCfg.OffsetCfg(pos=(0.0, 0.0, 20.0)),
@@ -92,20 +92,22 @@ class G1StairEnvCfg(G1RoughLipEnvCfg):
             func=mdp.height_scan,
             params={"sensor_cfg": SceneEntityCfg("height_scanner")},
             noise=Unoise(n_min=-0.1, n_max=0.1),
+            scale=0.1,
             clip=(-1.0, 1.0)
         )
         self.observations.critic.height_scan = ObsTerm(
             func=mdp.height_scan,
             params={"sensor_cfg": SceneEntityCfg("height_scanner")},
+            scale=0.1,
             clip=(-1.0, 1.0)
         )
 
         ##
         # Randomization
         ##
-        # self.events.push_robot = None
-        self.events.push_robot.params["velocity_range"] = {"x": (-1, 1), "y": (-1, 1), "roll": (-0.4, 0.4),
-                                                           "pitch": (-0.4, 0.4), "yaw": (-0.4, 0.4)}
+        self.events.push_robot = None
+        # self.events.push_robot.params["velocity_range"] = {"x": (-0.5, 0.5), "y": (-0.5, 0.5), "roll": (-0.4, 0.4),
+        #                                                    "pitch": (-0.4, 0.4), "yaw": (-0.4, 0.4)}
         # self.events.push_robot.params["velocity_range"] = {"x": (-0, 0), "y": (-0, 0), "roll": (-0.0, 0.0),
         #                                                    "pitch": (-0., 0.), "yaw": (-0.0, 0.0)}
         self.events.add_base_mass.params["asset_cfg"].body_names = ["pelvis_link"]
@@ -117,7 +119,7 @@ class G1StairEnvCfg(G1RoughLipEnvCfg):
         # self.events.base_external_force_torque.params["asset_cfg"].body_names = ["pelvis_link"]
         self.events.reset_base.params = {
             
-            "pose_range": {"x": (-0.2, 0.2), "y": (-0.2, 0.2), "yaw": (-3.14,3.14)}, #(-3.14, 3.14)},
+            "pose_range": {"x": (-0.5, 0.5), "y": (-0.5, 0.5), "yaw": (-3.14,3.14)}, #(-3.14, 3.14)},
             "velocity_range": {
                 "x": (0.0, 0.0),
                 "y": (0.0, 0.0),
@@ -132,7 +134,7 @@ class G1StairEnvCfg(G1RoughLipEnvCfg):
         ##
         # Commands
         ##
-        self.commands.base_velocity.ranges.lin_vel_x = (0.75,0.75)
+        self.commands.base_velocity.ranges.lin_vel_x = (0.8,0.8)
         self.commands.base_velocity.ranges.lin_vel_y = (0.0,0.0)
         self.commands.base_velocity.ranges.ang_vel_z = (0.0,0.0)
 
@@ -201,6 +203,7 @@ class G1StairPlay_EnvCfg(G1StairEnvCfg):
         self.scene.terrain.terrain_generator = STAIR_CFG
         self.scene.terrain.terrain_generator.num_rows = 3
         self.scene.terrain.terrain_generator.num_cols = 2
-        self.scene.terrain.terrain_generator.max_init_terrain_level = 0
-        self.scene.terrain.terrain_generator.sub_terrains["pyramid_stairs_inv"].step_height_range = (0.025,0.05)
+        self.scene.terrain.terrain_generator.max_init_terrain_level = (0.1,0.2)
+
+        self.commands.base_velocity.ranges.lin_vel_x = (0.8,0.8)
         

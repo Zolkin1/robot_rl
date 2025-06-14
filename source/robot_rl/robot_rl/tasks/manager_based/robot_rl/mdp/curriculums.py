@@ -51,7 +51,7 @@ def clf_curriculum(
             env.reward_manager.set_term_cfg("clf_decreasing_condition", term_cfg)
     return new_clf
 
-def terrain_levels_vel(
+def terrain_levels(
     env: ManagerBasedRLEnv, env_ids: Sequence[int], asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")
 ) -> torch.Tensor:
     """Curriculum based on the distance the robot walked when commanded to move at a desired velocity.
