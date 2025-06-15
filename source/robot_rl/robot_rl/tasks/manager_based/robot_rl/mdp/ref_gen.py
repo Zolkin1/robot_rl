@@ -109,6 +109,61 @@ def calculate_cur_swing_foot_pos(
     return torch.cat([p_swing_x, p_swing_y, p_swing_z], dim=1), v_swing_z  # [batch,3]
 
 
+def calculate_cur_swing_foot_pos_stair(
+    bht: torch.Tensor,
+    z_init: torch.Tensor,
+    z_sw_max: torch.Tensor,
+    tau: torch.Tensor,
+    step_x_init: torch.Tensor,
+    step_y_init: torch.Tensor,
+    T_gait: torch.Tensor,
+    zsw_neg: torch.Tensor,
+    clipped_step_x: torch.Tensor,
+    clipped_step_y: torch.Tensor,
+) -> torch.Tensor:
+    """
+    Batch-friendly swing foot position calculation.
+    Args:
+        bht: [batch]
+        p_sw0: [batch,3]
+        z_sw_max: [batch]
+        tau: [batch]
+        T_gait: [batch]
+        zsw_neg: [batch]
+        clipped_step_x: [batch]
+        clipped_step_y: [batch]
+    Returns:
+        p_swing: [batch,3]
+    """
+    # Vertical Bezier control points (degree 5)
+    degree_v = 6
+    control_v = torch.stack([
+        z_init,                      # Start
+        z_init + 0.6 * (z_sw_max - z_init),
+        z_sw_max,
+        z_sw_max,                    # Peak at mid-swing
+        zsw_neg + 0.5 * (z_sw_max - zsw_neg),
+        zsw_neg + 0.05 * (z_sw_max - zsw_neg),
+        zsw_neg                      # End
+    ], dim=1)
+
+    # Horizontal X and Y (linear interpolation)
+    p_swing_x = ((1 - bht) * step_x_init + bht * clipped_step_x).unsqueeze(1)
+    p_swing_y = ((1 - bht) * step_y_init + bht * clipped_step_y).unsqueeze(1)
+
+    # Z via 5th-degree Bezier
+    p_swing_z = bezier_deg(
+        0, tau, T_gait, control_v, degree_v
+    ).unsqueeze(1)
+
+    v_swing_z = bezier_deg(
+        1, tau, T_gait, control_v, degree_v
+    ).unsqueeze(1)
+
+    return torch.cat([p_swing_x, p_swing_y, p_swing_z], dim=1), v_swing_z  # [batch,3]
+
+
+
 def coth(x: torch.Tensor) -> torch.Tensor:
     return 1.0 / torch.tanh(x)
 

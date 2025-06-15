@@ -1,7 +1,7 @@
 import torch,math
 from isaaclab.utils.math import euler_xyz_from_quat, wrap_to_pi, quat_from_euler_xyz,quat_rotate_inverse, yaw_quat, quat_rotate, quat_inv, quat_apply
 from .hlip_cmd import HLIPCommandTerm, euler_rates_to_omega, _transfer_to_global_frame, _transfer_to_local_frame
-from .ref_gen import bezier_deg, calculate_cur_swing_foot_pos, HLIP
+from .ref_gen import bezier_deg, calculate_cur_swing_foot_pos_stair, HLIP
 from .clf import CLF
 from typing import TYPE_CHECKING
 
@@ -11,6 +11,7 @@ if TYPE_CHECKING:
 class StairCmd(HLIPCommandTerm):
     def __init__(self, cfg: "StairHLIPCommandCfg", env):
           super().__init__(cfg, env)
+          self.T = torch.zeros((self.num_envs), device=self.device)
           self.tp = torch.zeros((self.num_envs), device=self.device)
           self.z_height = torch.zeros((self.num_envs), device=self.device)
           self.stance_foot_box_z = torch.zeros((self.num_envs), device=self.device)
@@ -338,7 +339,14 @@ class StairCmd(HLIPCommandTerm):
           cfg = self.env.cfg.scene.terrain.terrain_generator.sub_terrains['pyramid_stairs_inv']
           stair_width = cfg.step_width
 
-          Tswing = stair_width / (base_velocity[:,0] + 0.001)
+          # Calculate Tswing only if velocity is high enough, else use default
+          default_Tswing = 0.4
+          Tswing = torch.where(
+          base_velocity[:,0] < 0.3,
+               torch.full_like(base_velocity[:,0], default_Tswing),
+               stair_width / base_velocity[:,0]  # add epsilon to avoid div by zero
+               )
+          Tswing = torch.clamp(Tswing, min=0.3, max=1.2)
           self.T = Tswing
           #    Tswing = self.T - self.T_ds
           self.tp = (self.env.sim.current_time % (2*Tswing)) / (2*Tswing)  
@@ -680,8 +688,8 @@ class StairCmd(HLIPCommandTerm):
           bht_tensor = torch.tensor(bht, device=self.device) if not isinstance(bht, torch.Tensor) else bht
 
           sign = torch.sign(foot_target_yaw_adjusted[:, 1])
-          foot_pos, sw_z = calculate_cur_swing_foot_pos(
-               bht_tensor, z_init, z_sw_max_tensor, phase_var_tensor,-foot_target_yaw_adjusted[:, 0], sign*self.cfg.y_nom,T_tensor, z_sw_neg_tensor,
+          foot_pos, sw_z = calculate_cur_swing_foot_pos_stair(
+               bht_tensor, z_init, z_sw_max_tensor, phase_var_tensor,self.swing2stance_foot_pos_0[:,0], sign*self.cfg.y_nom,T_tensor, z_sw_neg_tensor,
                foot_target_yaw_adjusted[:, 0], foot_target_yaw_adjusted[:, 1]
           )
 

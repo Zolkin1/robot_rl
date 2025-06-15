@@ -6,7 +6,22 @@ from typing import TYPE_CHECKING
 from isaaclab.managers import SceneEntityCfg
 from isaaclab.envs import ManagerBasedRLEnv
 
+def contact_state(env: ManagerBasedRLEnv, sensor_cfg, threshold: float = 5.0) -> torch.Tensor:
+    contact_sensor = env.scene.sensors[sensor_cfg.name]
+    net_forces = contact_sensor.data.net_forces_w_history[:,-1,sensor_cfg.body_ids,:]
+    contact_flag = (torch.abs(net_forces) > threshold).float()
+    #reshape from num_env, num_bodies, 3 to num_env, num_bodies*3
+    return contact_flag.reshape(env.num_envs, -1)
 
+def step_duration(env: ManagerBasedRLEnv, command_name) -> torch.Tensor:
+    cmd = env.command_manager.get_term(command_name)
+    step_duration = cmd.T
+    return step_duration.unsqueeze(-1)
+
+def step_location(env: ManagerBasedRLEnv, command_name) -> torch.Tensor:
+    cmd = env.command_manager.get_term(command_name)
+    step_location = cmd.foot_target[:,0:2]
+    return step_location
 def foot_vel(env: ManagerBasedRLEnv, command_name:str = "hlip_ref") -> torch.Tensor:
     cmd = env.command_manager.get_term(command_name)
     left_foot_vel = cmd.robot.data.body_lin_vel_w[:,cmd.feet_bodies_idx[0],:]

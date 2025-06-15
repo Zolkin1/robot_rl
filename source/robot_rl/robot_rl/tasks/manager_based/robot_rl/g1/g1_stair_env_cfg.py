@@ -43,6 +43,13 @@ class G1StairRewardsCfg(G1RoughLipRewards):
         weight=4.0,
     )
 
+    swing_foot_contact = RewTerm(
+        func=mdp.swing_foot_contact_penalty,
+        params={"command_name": "hlip_ref",
+                "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*_ankle_roll_link")},
+        weight=-0.5,
+    )
+
 
 @configclass
 class G1StairEnvCfg(G1RoughLipEnvCfg):
@@ -121,6 +128,20 @@ class G1StairEnvCfg(G1RoughLipEnvCfg):
             params={"command_name": "hlip_ref"},
         )
 
+        self.observations.policy.step_duration = ObsTerm(
+            func=mdp.step_duration,
+            params={"command_name": "hlip_ref"},
+        )
+        self.observations.critic.step_duration = ObsTerm(
+            func=mdp.step_duration,
+            params={"command_name": "hlip_ref"},
+        )
+
+
+        self.observations.critic.contact_state = ObsTerm(
+            func=mdp.contact_state,
+            params={"sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*_ankle_roll_link")},
+        )
         ##
         # Randomization
         ##
@@ -138,7 +159,7 @@ class G1StairEnvCfg(G1RoughLipEnvCfg):
         # self.events.base_external_force_torque.params["asset_cfg"].body_names = ["pelvis_link"]
         self.events.reset_base.params = {
             
-            "pose_range": {"x": (-0.5, 0.5), "y": (-0.5, 0.5), "yaw": (-3.14,3.14)}, #(-3.14, 3.14)},
+            "pose_range": {"x": (0.0,0.0), "y": (0.0,0.0), "yaw": (0,0)},
             "velocity_range": {
                 "x": (0.0, 0.0),
                 "y": (0.0, 0.0),
@@ -153,7 +174,7 @@ class G1StairEnvCfg(G1RoughLipEnvCfg):
         ##
         # Commands
         ##
-        self.commands.base_velocity.ranges.lin_vel_x = (0.1,0.8)
+        self.commands.base_velocity.ranges.lin_vel_x = (0.75,0.75)
         self.commands.base_velocity.ranges.lin_vel_y = (0.0,0.0)
         self.commands.base_velocity.ranges.ang_vel_z = (0.0,0.0)
 
@@ -185,21 +206,21 @@ class G1StairEnvCfg(G1RoughLipEnvCfg):
         # self.rewards.track_ang_vel_z_exp.weight = 1.0
  
         # torque, acc, vel, action rate regularization
-        self.rewards.dof_torques_l2.weight = -1.0e-5
-        self.rewards.dof_pos_limits.weight = -1.0
-        self.rewards.dof_acc_l2.weight = -2.5e-7
-        self.rewards.dof_vel_l2.weight = -1.0e-5
-        self.rewards.action_rate_l2.weight = -0.001
+        # self.rewards.dof_torques_l2.weight = -1.0e-5
+        # self.rewards.dof_pos_limits.weight = -1.0
+        # self.rewards.dof_acc_l2.weight = -2.5e-7
+        # self.rewards.dof_vel_l2.weight = -1.0e-5
+        # self.rewards.action_rate_l2.weight = -0.001
         # self.rewards.joint_deviation_arms.weight = -1.0             # Arms regularization
         # self.rewards.joint_deviation_torso.weight = -1.0
         
         self.rewards.joint_deviation_arms = None
         self.rewards.joint_deviation_torso = None
-        # self.rewards.dof_pos_limits = None
-        # self.rewards.dof_vel_l2 = None
-        # self.rewards.dof_acc_l2 = None
-        # self.rewards.dof_torques_l2 = None
-        # self.rewards.action_rate_l2 = None  
+        self.rewards.dof_pos_limits = None
+        self.rewards.dof_vel_l2 = None
+        self.rewards.dof_acc_l2 = None
+        self.rewards.dof_torques_l2 = None
+        self.rewards.action_rate_l2 = None  
         self.rewards.height_torso = None
         
 
@@ -211,18 +232,18 @@ class G1StairPlay_EnvCfg(G1StairEnvCfg):
 
         self.scene.num_envs = 2
         self.scene.env_spacing = 2.5
-        # self.events.reset_base.params["pose_range"] = {"x": (0,0), "y": (0,0), "yaw": (0,0)} #(-3.14, 3.14)},
+        self.events.reset_base.params["pose_range"] = {"x": (0,0), "y": (0,0), "yaw": (0,0)} #(-3.14, 3.14)},
         # disable randomization for play
         self.observations.policy.enable_corruption = False
         # remove random pushing
         self.events.base_external_force_torque = None
-        self.commands.hlip_ref.debug_vis = True
+        self.commands.hlip_ref.debug_vis = False
 
-
+        STAIR_CFG.sub_terrains["pyramid_stairs_inv"].step_height_range = (0.1,0.1)
         self.scene.terrain.terrain_generator = STAIR_CFG
-        self.scene.terrain.terrain_generator.num_rows = 3
+        self.scene.terrain.terrain_generator.num_rows = 1
         self.scene.terrain.terrain_generator.num_cols = 2
-        self.scene.terrain.terrain_generator.max_init_terrain_level = (0.1,0.2)
+        # self.scene.terrain.terrain_generator.max_init_terrain_level = (.,3.)
 
-        self.commands.base_velocity.ranges.lin_vel_x = (0.8,0.8)
+        self.commands.base_velocity.ranges.lin_vel_x = (0.75,0.75)
         

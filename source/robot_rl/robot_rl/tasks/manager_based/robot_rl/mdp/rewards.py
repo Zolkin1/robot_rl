@@ -19,6 +19,28 @@ from isaaclab.utils.math import euler_xyz_from_quat, wrap_to_pi, quat_rotate_inv
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedRLEnv
 
+
+def swing_foot_contact_penalty(
+    env: ManagerBasedRLEnv,
+    sensor_cfg: SceneEntityCfg,
+    command_name: str,
+    penalty_cap: float = 5.0,
+) -> torch.Tensor:
+    cmd = env.command_manager.get_term(command_name)
+    swing_foot_indices = cmd.swing_idx.squeeze(-1)  # [num_envs]
+    batch_idx = torch.arange(env.num_envs, device=env.device)
+    contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
+    
+    net_forces = contact_sensor.data.net_forces_w_history  # [N, T, B, 3]
+    latest_forces = net_forces[:, -1, sensor_cfg.body_ids, :]  # [num_envs,2, 3]
+    # get the correct forces
+    latest_forces = latest_forces[batch_idx, swing_foot_indices,:]  # [num_envs, 3]
+    force_mags = torch.norm(latest_forces, dim=-1)  # [num_envs]
+    capped_penalty = torch.clamp(force_mags, max=penalty_cap)  # [num_envs]
+    return capped_penalty  # Standard is to return per-env reward/penalty
+
+
+
 def track_lin_vel_x_exp(
     env: ManagerBasedRLEnv, std: float, command_name: str, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")
 ) -> torch.Tensor:
@@ -242,12 +264,13 @@ def holonomic_constraint_stair(
     delta_xy = p_xy - p0_xy
 
     # vertical error to the floor plane [B,1]
-    delta_z = torch.zeros_like(delta_xy)
+    # delta_z = torch.zeros_like(delta_xy)
     # z_cur    = cmd.stance_foot_pos[:, 2].unsqueeze(-1)
     # delta_z  = z_cur - (cmd.stance_foot_box_z + 0.036)
 
     # roll error [B,1]
     roll = cmd.stance_foot_ori[:, 0].unsqueeze(-1)
+    pitch = cmd.stance_foot_ori[:, 1].unsqueeze(-1)
 
     # yaw error wrapped to [–π, π] [B,1]
     psi0 = cmd.stance_foot_ori_0[:, 2]
@@ -255,7 +278,7 @@ def holonomic_constraint_stair(
     delta_psi = ((psi - psi0 + torch.pi) % (2 * torch.pi) - torch.pi).unsqueeze(-1)
 
     # stack into [B,5] error vector
-    e_pose = torch.cat([delta_xy, delta_z, roll, delta_psi], dim=-1)
+    e_pose = torch.cat([delta_xy, pitch, roll, delta_psi], dim=-1)
 
     # unified Gaussian‐like reward
     return torch.exp(- (e_pose**2).sum(dim=-1) / sigma_pose**2)
