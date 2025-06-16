@@ -17,6 +17,7 @@ import glob
 
 from isaaclab.app import AppLauncher
 import cli_args
+import torch
 
 # Import plot_trajectories functions
 from plot_trajectories import plot_trajectories, plot_hzd_trajectories
@@ -135,6 +136,13 @@ def parse_args():
         default=None,
         help="Simulation speed as comma-separated values for x,y,z velocities (e.g. '1.0,0.0,0.0')."
     )
+
+    parser.add_argument(
+        "--play_log_dir",
+        type=str,
+        default = None,
+        help="export directory "
+    )
     # append RSL-RL cli arguments
     cli_args.add_rsl_rl_args(parser)
     # append AppLauncher cli args
@@ -147,15 +155,14 @@ def extract_reference_trajectory(env, log_vars):
     unwrapped_env = env.unwrapped
 
     cfg_name = type(env.cfg).__name__
-    if "hzd" in cfg_name.lower():
-        ref = unwrapped_env.command_manager.get_term("hzd_ref")
-    else:
-        ref = unwrapped_env.command_manager.get_term("hlip_ref")
+
+    ref = unwrapped_env.command_manager.get_term("hlip_ref")
     results = {}
 
     for var in log_vars:
         if hasattr(ref, var):
-            results[var] = getattr(ref, var).clone()
+            val = getattr(ref, var)
+            results[var] = val.clone() if isinstance(val, torch.Tensor) else val
         elif var in ref.metrics:
             results[var] = ref.metrics[var]
         elif var == "base_velocity":
@@ -281,15 +288,17 @@ def main():
         print(f"[DEBUG] Checkpoint path: {resume_path}")
         
         # Use the checkpoint directory for saving results
-        play_log_dir = os.path.dirname(resume_path)
+        if not args_cli.play_log_dir:
+            play_log_dir = os.path.dirname(resume_path)
+        else:
+            play_log_dir = args_cli.play_log_dir
+        
         print(f"[DEBUG] Play log directory: {play_log_dir}")
 
-        print("[DEBUG] Creating environment")
         # create isaac environment
         if hasattr(env_cfg, "__prepare_tensors__") and callable(getattr(env_cfg, "__prepare_tensors__")):
             env_cfg.__prepare_tensors__()
         env = gym.make(args_cli.task, cfg=env_cfg, render_mode="rgb_array" if args_cli.video else None)
-        print("[DEBUG] Environment created")
 
         # convert to single-agent instance if required
         if isinstance(env.unwrapped, DirectMARLEnv):
@@ -307,7 +316,6 @@ def main():
             print_dict(video_kwargs, nesting=4)
             env = gym.wrappers.RecordVideo(env, **video_kwargs)
 
-        print("[DEBUG] Wrapping environment for rsl-rl")
         # wrap around environment for rsl-rl
         env = RslRlVecEnvWrapper(env, clip_actions=agent_cfg.clip_actions)
 
@@ -315,12 +323,10 @@ def main():
         # load previously trained model
         ppo_runner = OnPolicyRunner(env, agent_cfg.to_dict(), log_dir=None, device=agent_cfg.device)
         ppo_runner.load(resume_path)
-        print("[DEBUG] Model loaded")
 
         # obtain the trained policy for inference
         policy = ppo_runner.get_inference_policy(device=env.unwrapped.device)
-        print("[DEBUG] Inference policy obtained")
-
+  
         # Export policy if requested
         if args_cli.export_policy:
             print("[DEBUG] Exporting policy to ONNX and JIT formats")
@@ -342,61 +348,8 @@ def main():
 
         dt = env.unwrapped.step_dt
 
-        # Define variables to log for different environments
-        hzd_log_vars = [
-            # Base velocity and state
-            'base_velocity',
-            'error_vel_xy',
-            'error_vel_yaw',
-            
-            # HZD reference tracking
-            'v',
-            'vdot',
-            'err_left_sagittal_knee',
-            'err_right_sagittal_knee',
-            'err_left_sagittal_ankle',
-            'err_right_sagittal_ankle',
-            'err_left_henke_ankle',
-            'err_right_henke_ankle',
-            'err_left_frontal_hip',
-            'err_right_frontal_hip',
-            'err_left_transverse_hip',
-            'err_right_transverse_hip',
-            'err_left_sagittal_hip',
-            'err_right_sagittal_hip',
-            
-            # Foot state
-            'stance_foot_pos',
-            'stance_foot_ori',
-            'stance_foot_pos_0',
-            'stance_foot_ori_0',
-            
-            # Swing foot errors
-            'error_sw_x',
-            'error_sw_y',
-            'error_sw_z',
-            'error_sw_roll',
-            'error_sw_pitch',
-            'error_sw_yaw',
-            
-            # COM and pelvis errors
-            'error_com_x',
-            'error_com_y',
-            'error_com_z',
-            'error_pelvis_roll',
-            'error_pelvis_pitch',
-            'error_pelvis_yaw',
-            
-            # Timing
-            'cur_swing_time',
 
-            'y_out',
-            'dy_out',
-             'y_act',
-            'dy_act',
-        ]
-
-        standard_log_vars = [
+        log_vars = [
             'y_out',
             'dy_out',
             'base_velocity',
@@ -422,19 +375,11 @@ def main():
             "error_pelvis_pitch",
             "error_pelvis_yaw" 
         ]
-
-        # Select appropriate logging variables based on environment type
-        if args_cli.env_type == "exo_hzd":
-            log_vars = hzd_log_vars
-        else:
-            log_vars = standard_log_vars
-
+        
         # Setup logging
         logger = DataLogger(enabled=True, log_dir=play_log_dir, variables=log_vars)
-        print("[DEBUG] Logger setup complete")
 
         # reset environment
-        print("[DEBUG] Resetting environment")
         obs, _ = env.get_observations()
         timestep = 0
         print("[DEBUG] Starting simulation loop")
@@ -486,10 +431,8 @@ def main():
         os.makedirs(plot_dir, exist_ok=True)
         print(f"[DEBUG] Generating plots in directory: {plot_dir}")
         
-        if args_cli.env_type == "exo_hzd":
-            plot_hzd_trajectories(logger.data, save_dir=plot_dir)
-        else:
-            plot_trajectories(logger.data, save_dir=plot_dir)
+        
+        plot_trajectories(logger.data, save_dir=plot_dir)
 
     except Exception as e:
         print(f"[ERROR] An error occurred: {str(e)}")
