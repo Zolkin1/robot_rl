@@ -11,6 +11,7 @@ ENVIRONMENTS = {
     "vanilla": "custom-Isaac-Velocity-Flat-G1-v0",
     "custom": "G1-flat-vel",
     "ref_tracking": "G1-flat-ref-tracking",
+    "clf_vdot": "G1-flat-clf-vdot",
     "clf": "G1-flat-clf",
     "stair": "G1-stair",
 }

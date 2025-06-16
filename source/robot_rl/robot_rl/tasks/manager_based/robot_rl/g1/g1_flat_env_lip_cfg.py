@@ -9,7 +9,7 @@ from isaaclab.managers import SceneEntityCfg
 from isaaclab.utils import configclass
 from isaaclab.utils.noise import AdditiveUniformNoiseCfg as Unoise
 from isaaclab.managers import RewardTermCfg as RewTerm
-
+from robot_rl.tasks.manager_based.robot_rl import mdp
 from .g1_rough_env_lip_cfg import G1RoughLipEnvCfg
 
 ##
@@ -66,6 +66,21 @@ class G1FlatRefTrackingEnvCfg(G1FlatLipEnvCfg):
         self.rewards.clf_decreasing_condition = None
         self.curriculum.clf_curriculum = None
 
+class G1FlatLipVdotEnvCfg(G1FlatLipEnvCfg):
+    """Configuration for the G1 Flat environment."""
+    def __post_init__(self):
+        # post init of parent
+        super().__post_init__()
+
+        self.rewards.clf_decreasing_condition = None
+        self.curriculum.clf_curriculum = None
+        self.rewards.clf_vdot_tanh = RewTerm(
+            func=mdp.clf_decreasing_condition,
+            weight=2.0,
+            params={
+                "command_name": "hlip_ref",
+            }
+        )
 
 class G1FlatLipEnvCfg_PLAY(G1FlatLipEnvCfg):
     def __post_init__(self) -> None:

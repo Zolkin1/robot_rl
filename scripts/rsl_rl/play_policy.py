@@ -28,6 +28,7 @@ EXPERIMENT_NAMES = {
     "clf": "g1",
     "ref_tracking": "g1",
     "stair": "g1",
+    "clf_vdot": "g1"
 }
 
 SIM_ENVIRONMENTS = {
@@ -35,6 +36,7 @@ SIM_ENVIRONMENTS = {
     "custom": "custom-Isaac-Velocity-Flat-G1-Play-v0",
     "clf": "G1-flat-ref-play",
     "ref_tracking": "G1-flat-ref-play",
+    "clf_vdot": "G1-flat-ref-play",
     "stair": "G1-stair-play",
 }
 

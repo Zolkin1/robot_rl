@@ -19,7 +19,13 @@ from isaaclab.utils.math import euler_xyz_from_quat, wrap_to_pi, quat_rotate_inv
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedRLEnv
 
+def vdot_tanh(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
+    ref_term = env.command_manager.get_term(command_name)                    # [B]
+    vdot = ref_term.vdot # [B]
 
+    vdot_reward = torch.tanh(-vdot)  # [B]
+    return vdot_reward
+    
 def swing_foot_contact_penalty(
     env: ManagerBasedRLEnv,
     sensor_cfg: SceneEntityCfg,
