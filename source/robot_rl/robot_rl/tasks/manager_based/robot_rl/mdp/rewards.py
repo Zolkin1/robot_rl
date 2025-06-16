@@ -20,6 +20,72 @@ if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedRLEnv
 
 
+def swing_foot_contact_penalty(
+    env: ManagerBasedRLEnv,
+    sensor_cfg: SceneEntityCfg,
+    command_name: str,
+    penalty_cap: float = 5.0,
+) -> torch.Tensor:
+    cmd = env.command_manager.get_term(command_name)
+    swing_foot_indices = cmd.swing_idx.squeeze(-1)  # [num_envs]
+    batch_idx = torch.arange(env.num_envs, device=env.device)
+    contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
+    
+    net_forces = contact_sensor.data.net_forces_w_history  # [N, T, B, 3]
+    latest_forces = net_forces[:, -1, sensor_cfg.body_ids, :]  # [num_envs,2, 3]
+    # get the correct forces
+    latest_forces = latest_forces[batch_idx, swing_foot_indices,:]  # [num_envs, 3]
+    force_mags = torch.norm(latest_forces, dim=-1)  # [num_envs]
+    capped_penalty = torch.clamp(force_mags, max=penalty_cap)  # [num_envs]
+    return capped_penalty  # Standard is to return per-env reward/penalty
+
+
+
+def track_lin_vel_x_exp(
+    env: ManagerBasedRLEnv, std: float, command_name: str, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")
+) -> torch.Tensor:
+    """Reward tracking of linear velocity commands (xy axes) using exponential kernel."""
+    # extract the used quantities (to enable type-hinting)
+    asset = env.scene[asset_cfg.name]
+    # compute the error
+    lin_vel_error = torch.square(env.command_manager.get_command(command_name)[:, :1] - asset.data.root_lin_vel_b[:, :1])
+    return torch.exp(-torch.squeeze(lin_vel_error) / std**2)
+
+def clf_reward(env: ManagerBasedRLEnv, command_name: str, max_clf: float = 200.0) -> torch.Tensor:
+    """Negative CLF value as a reward (i.e., -V(η)), clipped to [-1, 0]."""
+    ref_term = env.command_manager.get_term(command_name)
+    v = ref_term.v  # [B] scalar CLF value per env
+
+    # reward = torch.clamp(v, min=0.0, max=max_clf)/max_clf
+    reward = torch.exp(-v/max_clf)
+    
+    return reward
+
+
+def clf_decreasing_condition(env: ManagerBasedRLEnv, command_name: str, alpha: float = 1.0, max_clf_decreasing: float = 200.0) -> torch.Tensor:
+    """Penalty for violating the CLF decrease condition, clipped to [-1, 0]."""
+    ref_term = env.command_manager.get_term(command_name)
+    v = ref_term.v                     # [B]
+    vdot = ref_term.vdot # [B]
+
+    # Compute violation: ΔV + αV
+    clf_violation = vdot + alpha * v   # [B]
+
+    #also normalize by max_clf violation
+    clf_violation = clf_violation/max_clf_decreasing
+    penalty = torch.clamp(clf_violation, min=0.0)  # only penalize violations
+  
+    reward = torch.clamp(penalty, max=1.0) 
+    return reward
+
+def v_dot_penalty(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
+    ref_term = env.command_manager.get_term(command_name)                    # [B]
+    vdot = ref_term.vdot # [B]
+
+    v_dot_penalty = torch.clamp(vdot,min=0.0)
+    return v_dot_penalty
+
+
 def joint_pos_target(
         env, asset_cfg: SceneEntityCfg, joint_des: torch.Tensor, std: float, joint_weight: torch.Tensor
     ) -> torch.Tensor:
@@ -103,26 +169,118 @@ def feet_slide(env, sensor_cfg: SceneEntityCfg, asset_cfg: SceneEntityCfg = Scen
     asset = env.scene[asset_cfg.name]
 
     body_vel = asset.data.body_lin_vel_w[:, asset_cfg.body_ids, :2]
+    
     reward = torch.sum(torch.sum(body_vel**2, dim=-1) * contacts, dim=1)
     return reward
 
-#def phase_feet_contacts(env: ManagerBasedRLEnv, sensor_cfg: SceneEntityCfg, period: float) -> torch.Tensor:
-#     """Reward feet in contact with the ground in the correct phase."""
-#     # If the feet are in contact at the right time then positive reward, else 0 reward
-#
-#     # Contact sensor
-#     contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
-#
-#     # Get the current contacts
-#     in_contact = not contact_sensor.compute_first_air(period/200.)    # Checks if the foot recently broke contact - which tells us we are not in contact. Does not reward jitter but use the dt.
-#
-#     # Check if the foot should be in contact by comparing to the phase.
-#     ground_phase = is_ground_phase(env, period)
-#
-#     # Compute reward
-#     reward = torch.where(in_contact & ground_phase, 1.0, 0.0)
-#
-#     return reward
+def contact_no_vel(env, sensor_cfg: SceneEntityCfg, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")) -> torch.Tensor:
+    """Reward feet contact with zero velocity."""
+    # extract the used quantities (to enable type-hinting)
+    contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
+    contacts = contact_sensor.data.net_forces_w_history[:, :, sensor_cfg.body_ids, :].norm(dim=-1).max(dim=1)[0] > 1.0
+    asset = env.scene[asset_cfg.name]
+    body_vel = asset.data.body_lin_vel_w[:, asset_cfg.body_ids] * contacts.unsqueeze(-1)
+    # shape [B, num_feet, 3]
+    penalize = torch.square(body_vel[:,:,:3])
+    return torch.sum(penalize, dim=(1,2))
+
+
+
+def holonomic_constraint_vel(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    sigma_vel: float = (0.1)**0.5
+) -> torch.Tensor:
+    """
+    Unified holonomic‐velocity constraint reward:
+      r = exp( – ‖[v, ω_z]‖² / σ_vel² )
+    where v∈R³ is the foot’s linear velocity and ω_z its yaw rate.
+    Using σ_vel=√0.1 matches the original bandwidth (denominator=0.1).
+    """
+    cmd = env.command_manager.get_term(command_name)
+
+    # linear velocity [B,3] and yaw rate [B,1]
+    v   = cmd.stance_foot_vel                        # [vx, vy, vz]
+    wz  = cmd.stance_foot_ang_vel[:, 2].unsqueeze(-1) # [ω_z]
+
+    # stack into [B,4] error vector
+    e_vel = torch.cat([v, wz], dim=-1)
+
+    # unified exponential‐norm reward
+    return torch.exp(- (e_vel**2).sum(dim=-1) / sigma_vel**2)
+
+def holonomic_constraint(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    sigma_pose: float = (5 * 0.01) ** 0.5,
+    z_offset: float = 0.036
+) -> torch.Tensor:
+    """
+    Unified holonomic‐pose constraint reward:
+        r = exp( – ‖e_pose‖² / σ_pose² )
+    where e_pose = [Δx, Δy, Δz, φ, Δψ] and
+      • Δx, Δy are planar errors from the recorded foot position,
+      • Δz = p_z_cur – z_offset (encourages foot to stay on the floor),
+      • φ is roll,
+      • Δψ is yaw error wrapped to [–π, π].
+    """
+
+    cmd = env.command_manager.get_term(command_name)
+
+    # planar position error [B,2]
+    p0_xy = cmd.stance_foot_pos_0[:, :2]
+    p_xy  = cmd.stance_foot_pos[:, :2]
+    delta_xy = p_xy - p0_xy
+
+    # vertical error to the floor plane [B,1]
+    z_cur    = cmd.stance_foot_pos[:, 2].unsqueeze(-1)
+    delta_z  = z_cur - cmd.stance_foot_pos_0[:,2].unsqueeze(-1)
+
+    # roll error [B,1]
+    roll = cmd.stance_foot_ori[:, 0].unsqueeze(-1)
+
+    # yaw error wrapped to [–π, π] [B,1]
+    psi0 = cmd.stance_foot_ori_0[:, 2]
+    psi  = cmd.stance_foot_ori[:, 2]
+    delta_psi = ((psi - psi0 + torch.pi) % (2 * torch.pi) - torch.pi).unsqueeze(-1)
+
+    # stack into [B,5] error vector
+    e_pose = torch.cat([delta_xy, delta_z, roll, delta_psi], dim=-1)
+
+    # unified Gaussian‐like reward
+    return torch.exp(- (e_pose**2).sum(dim=-1) / sigma_pose**2)
+
+def holonomic_constraint_stair(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    sigma_pose: float = (6 * 0.01) ** 0.5,
+
+) -> torch.Tensor:  
+    cmd = env.command_manager.get_term(command_name)
+
+    # planar position error [B,2]
+    p0_xy = cmd.stance_foot_pos_0[:, :2]
+    p_xy  = cmd.stance_foot_pos[:, :2]
+    delta_xy = p_xy - p0_xy
+
+    # vertical error to the floor plane [B,1]
+    z_cur    = cmd.stance_foot_pos[:, 2].unsqueeze(-1)
+    delta_z  = z_cur - cmd.stance_foot_pos_0[:,2].unsqueeze(-1)
+
+    # roll error [B,1]
+    roll = cmd.stance_foot_ori[:, 0].unsqueeze(-1)
+    pitch = cmd.stance_foot_ori[:, 1].unsqueeze(-1)
+
+    # yaw error wrapped to [–π, π] [B,1]
+    psi0 = cmd.stance_foot_ori_0[:, 2]
+    psi  = cmd.stance_foot_ori[:, 2]
+    delta_psi = ((psi - psi0 + torch.pi) % (2 * torch.pi) - torch.pi).unsqueeze(-1)
+
+    # stack into [B,5] error vector
+    e_pose = torch.cat([delta_xy, delta_z,pitch, roll, delta_psi], dim=-1)
+
+    # unified Gaussian‐like reward
+    return torch.exp(- (e_pose**2).sum(dim=-1) / sigma_pose**2)
 
 def lip_gait_tracking(env: ManagerBasedRLEnv, sensor_cfg: SceneEntityCfg, period: float, std: float,
                       nom_height: float, Tswing: float, command_name: str, wdes: float,
@@ -131,15 +289,12 @@ def lip_gait_tracking(env: ManagerBasedRLEnv, sensor_cfg: SceneEntityCfg, period
     # If the feet are in contact at the right time then positive reward, else 0 reward
 
     # Get the robot asset
-    robot = env.scene[asset_cfg.name]
-
     # Contact sensor
     contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
 
     # Get the current contacts
     # in_contact = ~contact_sensor.compute_first_air()[:, sensor_cfg.body_ids]  # Checks if the foot recently broke contact - which tells us we are not in contact. Does not reward jitter but use the dt.
     in_contact = contact_sensor.data.net_forces_w_history[:, :, sensor_cfg.body_ids, :].norm(dim=-1).max(dim=1)[0] > 1.0
-
     in_contact = in_contact.float()
 
     # Contact schedule function
@@ -149,46 +304,54 @@ def lip_gait_tracking(env: ManagerBasedRLEnv, sensor_cfg: SceneEntityCfg, period
     # Compute reward
     reward = (in_contact[:, 0] - in_contact[:, 1])*phi_c # TODO: Does it help to remove the schedule here? - seemed to get some instability
 
-    # Add in the foot tracking
-    foot_pos = robot.data.body_pos_w[:, asset_cfg.body_ids, :2]
-    swing_foot_pos = foot_pos[:, int(0.5 + 0.5*torch.sign(phi_c))]
-    # swing_foot_pos = foot_pos[:, ((env.cfg.control_count + 1) % 2), :]
+    return reward
 
-    # print(f"swing foot index: {((env.cfg.control_count + 1) % 2)}, in contact 0: {in_contact[:, 0]}")
-    # print(f"foot index: {int(0.5 + 0.5*torch.sign(phi_c))}")
-    # print(f"stance foot pos: {stance_foot_pos}, des pos: {env.cfg.current_des_step[:, :2]}")
+def reference_tracking(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    term_std: Sequence[float],
+    term_weight: Sequence[float],
+) -> torch.Tensor:
+    """
+    Exponential reward per dimension, scaled by weight — ignores zero-weight terms.
+    """
+    command = env.command_manager.get_term(command_name)
+    err = command.y_act - command.y_out  # [B, D]
 
-    # TODO: Debug and put back!
-    # reward = reward * torch.exp(-torch.norm(env.cfg.current_des_step[:, :2] - swing_foot_pos, dim=1) / std)
+    weight_vec = torch.as_tensor(term_weight, dtype=err.dtype, device=err.device)  # [D]
+    std_vec = torch.as_tensor(term_std, dtype=err.dtype, device=err.device)        # [D]
+
+    # [B, D] scaled squared error per dimension
+    err_sq_scaled = (err ** 2) / (std_vec ** 2)
+
+    # Apply element-wise exp(-error²/std²) and weight
+    reward_per_dim = weight_vec * torch.exp(-err_sq_scaled)  # [B, D]
+    reward = reward_per_dim.sum(dim=1)/torch.sum(weight_vec)  # [B]
 
     return reward
 
-def lip_feet_tracking(env: ManagerBasedRLEnv, period: float, std: float,
-                      Tswing: float,
-                      feet_bodies: SceneEntityCfg,
-                      asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"), ) -> torch.Tensor:
-    """Reward the lip foot step tracking."""
-    # Get the robot asset
-    robot = env.scene[asset_cfg.name]
 
-    # Contact schedule function
-    tp = (env.sim.current_time % period) / period     # Scaled between 0-1
-    phi_c = torch.tensor(math.sin(2*torch.pi*tp)/math.sqrt(math.sin(2*torch.pi*tp)**2 + Tswing), device=env.device)
+def reference_vel_tracking(    env: ManagerBasedRLEnv,
+    command_name: str,
+    term_std: Sequence[float],
+    term_weight: Sequence[float],
+) -> torch.Tensor:
+    """Reference tracking with element-wise term weights."""
+    # 1. fetch the command and compute error [B, D]
+    command = env.command_manager.get_term(command_name)
+    err = command.dy_act - command.dy_out
 
-    # Foot tracking
-    foot_pos = robot.data.body_pos_w[:, feet_bodies.body_ids, :2]
-    swing_foot_pos = foot_pos[:, int(0.5 + 0.5*torch.sign(phi_c))]
-    reward = torch.exp(-torch.norm(env.cfg.current_des_step[:, :2] - swing_foot_pos, dim=1) / std)
+    weight_vec = torch.as_tensor(term_weight, dtype=err.dtype, device=err.device)  # [D]
+    std_vec = torch.as_tensor(term_std, dtype=err.dtype, device=err.device)        # [D]
 
-    # print(f"swing_foot_norm: {torch.norm(swing_foot_pos, dim=1)}")
-    # print(f"distance: {torch.norm(env.cfg.current_des_step[:, :2] - swing_foot_pos, dim=1)}")
-    # print(f"reward: {reward}")
+    # [B, D] scaled squared error per dimension
+    err_sq_scaled = (err ** 2) / (std_vec ** 2)
 
-    # Update the com linear velocity running average
-    alpha = 0.25
-    env.cfg.com_lin_vel_avg = (1-alpha)*env.cfg.com_lin_vel_avg + alpha*robot.data.root_com_lin_vel_w
-
+    # Apply element-wise exp(-error²/std²) and weight
+    reward_per_dim = weight_vec * torch.exp(-err_sq_scaled)  # [B, D]
+    reward = reward_per_dim.sum(dim=1)/torch.sum(weight_vec)  # [B]
     return reward
+
 
 def track_heading(env: ManagerBasedRLEnv, command_name: str,
                   std: float,
@@ -302,181 +465,20 @@ def compute_step_location_local(env: ManagerBasedRLEnv, env_ids: torch.Tensor,
 
     if visualize:
         sw_st_feet = torch.cat((p, foot_pos[:, int(0.5 - 0.5 * torch.sign(phi_c)), :]), dim=0)
-        env.footprint_visualizer.visualize(
-            # TODO: Visualize both the current stance foot and the desired foot
-            # translations=foot_pos[:, int(0.5 - 0.5*torch.sign(phi_c)), :], #p,
-            # translations=foot_pos[:, (env.cfg.control_count % 2), :],
-            translations=sw_st_feet,
-            orientations=yaw_quat(asset.data.root_quat_w).repeat_interleave(2, dim=0),
-            # repeat 0,1 for num_env
-            # marker_indices=torch.tensor([0,1], device=env.device).repeat(env.num_envs),
-        )
+        # env.footprint_visualizer.visualize(
+        #     # TODO: Visualize both the current stance foot and the desired foot
+        #     # translations=foot_pos[:, int(0.5 - 0.5*torch.sign(phi_c)), :], #p,
+        #     # translations=foot_pos[:, (env.cfg.control_count % 2), :],
+        #     translations=sw_st_feet,
+        #     orientations=yaw_quat(asset.data.root_quat_w).repeat_interleave(2, dim=0),
+        #     # repeat 0,1 for num_env
+        #     # marker_indices=torch.tensor([0,1], device=env.device).repeat(env.num_envs),
+        # )
 
     env.cfg.current_des_step[env_ids, :] = p[env_ids,:]  # This only works if I compute the new location once per step/on a timer
 
     return p
 
-def compute_step_location(env: ManagerBasedRLEnv, env_ids: torch.Tensor,
-                          nom_height: float, Tswing: float, command_name: str, wdes: float,
-                          feet_bodies: SceneEntityCfg,
-                          sensor_cfg: SceneEntityCfg = SceneEntityCfg("contact_forces"),
-                          asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
-                          visualize: bool = True) -> torch.Tensor:
-    """Compute the step location using the LIP model."""
-    asset = env.scene[asset_cfg.name]
-    feet = env.scene[feet_bodies.name]
-    contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
-
-    # Desired velocity in the world frame
-    vwdes = quat_rotate(asset.data.root_quat_w, env.command_manager.get_command(command_name))
-
-    # Extract the relevant quantities
-    # Base position
-    r = asset.data.root_pos_w #asset.data.root_com_pos_w
-
-    # print(f"r: {r}")
-
-    # Base linear velocity
-    # TODO: Try filtering this to make it less sensitive
-    # rdot = 0.2 * torch.ones((r.shape[0], 3), device=r.device) #env.cfg.com_lin_vel_avg #asset.data.root_com_lin_vel_w    # TODO: Is this supposed to be world or body?
-    # rdot = env.cfg.com_lin_vel_avg #asset.data.root_com_lin_vel_w    # TODO: Is this supposed to be world or body?
-    # rdot = asset.data.root_com_lin_vel_w
-    rdot = vwdes
-    # print(f"rdot: {rdot}")
-
-    # rdot[:, 1] *= 0
-
-    # Compute the natural frequency
-    g = 9.81
-    # tnom_height = r[:, 2] #nom_height * torch.ones(r.shape[0], device=env.device)
-    tnom_height = nom_height * torch.ones(r.shape[0], device=env.device)
-    omega = math.sqrt(g / nom_height) #torch.sqrt(g / tnom_height) #nom_height)
-    omega_dup = omega #omega.unsqueeze(1).repeat(1, 2)
-    # Compute initial ICP
-    icp_0 = r[:, :2] + rdot[:, :2]/omega_dup
-
-    # Get current foot position
-    foot_pos = feet.data.body_pos_w[:, feet_bodies.body_ids]
-    # Determine what is in contact
-    # contacts = contact_sensor.data.net_forces_w_history[:, :, sensor_cfg.body_ids, :].norm(dim=-1).max(dim=1)[0] > 1.0
-    # stance_foot_pos = torch.sum(foot_pos * contacts, dim=2)
-    # TODO: I think using this way to compute the stance foot is prone to error. I should do it based on contact.
-    #   If both feet are in contact then average their position to get the stance location
-    #   If neither foot is in contact then make it directly under the COM.
-    # stance_foot_pos = foot_pos[:, (env.cfg.control_count % 2), :2]
-
-    # TODO: Try using the schedule function
-    # Contact schedule function
-    tp = (env.sim.current_time % (2*Tswing)) / (2*Tswing)     # Scaled between 0-1
-    phi_c = torch.tensor(math.sin(2*torch.pi*tp)/math.sqrt(math.sin(2*torch.pi*tp)**2 + Tswing), device=env.device)
-
-    # print(f"foot idx: {int(0.5 - 0.5*torch.sign(phi_c))}, phi: {phi_c}, tp: {tp}, time: {env.sim.current_time}")
-    stance_foot_pos = foot_pos[:, int(0.5 - 0.5*torch.sign(phi_c)), :2]
-
-
-    # in_contact = contact_sensor.data.net_forces_w_history[:, :, sensor_cfg.body_ids, :].norm(dim=-1).max(dim=1)[0] > 1.0
-
-    # in_contact = in_contact.float()
-    # stance_foot_pos = foot_pos * in_contact
-
-    # Average position
-    # TODO: Deal with in_contact all 0's
-    # stance_foot_pos = torch.sum(stance_foot_pos, dim=1) / torch.sum(in_contact, dim=1)
-
-    # Compute final ICP
-    icp_f = math.exp(omega_dup * Tswing)*icp_0 + (1 - math.exp(omega_dup * Tswing)) * stance_foot_pos #env.cfg.current_des_step[:, :2]
-
-    # print(f"icp0 diff: {icp_0 - r[:, :2]}. icpf diff: {icp_f - r[:, :2]}")
-
-    # print(f"icp 0: {icp_0}, icp_f: {icp_f}")
-
-    # Compute desired step length and width
-    command = env.command_manager.get_command(command_name)[:, :2]
-    # Convert the local velocity command to world frame
-    # vdes = torch.norm(command[:, :2], dim=1)
-    sd = torch.abs(command[:, 0]) * Tswing #vdes * Tswing
-    wd = torch.abs(command[:, 1]) * Tswing #wdes * torch.ones((foot_pos.shape[0]), device=env.device)
-
-    # Compute ICP offsets
-    bx = sd / (math.exp(omega * Tswing) - 1)
-    by = wd / (math.exp(omega * Tswing) - 1) #(math.exp(omega * Tswing) + 1)
-
-    # Compute desired foot positions
-    heading = euler_xyz_from_quat(asset.data.root_quat_w)[2]
-    # print(f"heading: {heading}")
-    cos_head = torch.cos(heading)
-    sin_head = torch.sin(heading)
-    row1 = torch.stack([cos_head, -sin_head], dim=1)
-    row2 = torch.stack([sin_head, cos_head], dim=1)
-    R = torch.stack([row1, row2], dim=1)  # Shape (N, 2, 2)
-
-    # print(f"R shape: {R.shape}")
-    # print(f"icp shape: {icp_f.shape}")
-
-    # b = torch.stack([bx, torch.pow(torch.tensor(-1., device=command.device), env.cfg.control_count)*by])
-    b = torch.zeros((r.shape[0], 3), device=env.device)
-    b[:, :2] = torch.stack((-bx, -by), dim=1) #torch.stack((bx, torch.sign(phi_c)*by), dim=1)
-
-    # Convert offset to the global frame
-    b = quat_rotate(asset.data.root_quat_w, b)
-
-
-    print(f"r: {r}\n"
-          f"rdot: {rdot},\n"
-          f"omega: {omega},\n"
-          f"icp_0: {icp_0},\n"
-          f"icp_f: {icp_f},\n"
-          f"stance_foot_pos: {stance_foot_pos},\n"
-          f"Tswing: {Tswing},\n"
-          f"vwdes: {vwdes},\n"
-          f"offset: {b}")
-
-    # b = b.repeat(icp_f.shape[0], 1)
-    # print(f"b shape: {b.shape}")
-
-    # ph = r[:, :2] + torch.stack((sd, wd), dim=1)
-    # The subtraction is weird, I need to get the frames correct
-    ph = icp_0 #- b[:, :2] #torch.bmm(R, b.unsqueeze(-1)).squeeze(-1)
-
-    # print(f"sd: {sd}, wd: {wd}, vwdes: {vwdes}")
-
-    # print(f"ph: {ph}")
-
-    # print(f"ph shape: {ph.shape}")
-
-    # print(f"p shape: {p.shape}")    # Need to compute for all the envs
-    p = torch.zeros((ph.shape[0], 3), device=command.device)    # For setting the height
-    p[:, :2] = ph
-
-    # TODO Remove
-    # p[:, 0] *= 0
-    # p[:, :2] = r[:, :2]
-
-    # TODO: Clip to be within the kinematic limits (I'm not sure this should really be needed)
-
-    # print(f"des pos: {p}")
-
-    # print(f"r: {r}, by: {torch.pow(torch.tensor(-1., device=command.device), env.cfg.control_count)*by}")
-    # print(f"sim time: {env.sim.current_time}, p: {p}")
-    # print(f"env.cfg.control_count {env.cfg.control_count}")
-
-    if visualize:
-        sw_st_feet = torch.cat((p, foot_pos[:, int(0.5 - 0.5*torch.sign(phi_c)), :]), dim=0)
-        env.footprint_visualizer.visualize(
-            # TODO: Visualize both the current stance foot and the desired foot
-            # translations=foot_pos[:, int(0.5 - 0.5*torch.sign(phi_c)), :], #p,
-            # translations=foot_pos[:, (env.cfg.control_count % 2), :],
-            translations=sw_st_feet,
-            orientations=yaw_quat(asset.data.root_quat_w).repeat_interleave(2, dim=0),
-            # repeat 0,1 for num_env
-            # marker_indices=torch.tensor([0,1], device=env.device).repeat(env.num_envs),
-        )
-
-    # env.cfg.current_des_step = p    # This only works if I compute the new location once per step/on a timer
-    env.cfg.current_des_step[env_ids, :] = p[env_ids, :]    # This only works if I compute the new location once per step/on a timer
-    # env.cfg.control_count += 1
-    # print(f"updated des pos! time: {env.sim.current_time}")
-    return p
 
 def foot_clearance(env: ManagerBasedRLEnv,
                    target_height: float,
@@ -500,6 +502,7 @@ def phase_contact(
     env: ManagerBasedRLEnv,
         period: float = 0.8,
         command_name: str | None = None,
+        Tswing: float =0.4,
     sensor_cfg: SceneEntityCfg = SceneEntityCfg("contact_sensor"),
     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")
 ) -> torch.Tensor:
@@ -511,11 +514,10 @@ def phase_contact(
 
     # Contact phase
     tp = (env.sim.current_time % period) / period     # Scaled between 0-1
-    phi_c = torch.tensor(math.sin(2*torch.pi*tp)/math.sqrt(math.sin(2*torch.pi*tp)**2 + 0.04), device=env.device)
+    phi_c = torch.tensor(math.sin(2*torch.pi*tp)/math.sqrt(math.sin(2*torch.pi*tp)**2 + Tswing), device=env.device)
 
-    stance_i = 0
-    if phi_c > 0:
-        stance_i = 1
+    stance_i = int(0.5 - 0.5 * torch.sign(phi_c))
+
 
      # check if robot needs to be standing
     if command_name is not None:
@@ -536,12 +538,3 @@ def phase_contact(
             res += ~(contact ^ is_stance)
     return res
 
-def contact_no_vel(env, sensor_cfg: SceneEntityCfg, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")) -> torch.Tensor:
-    """Reward feet contact with zero velocity."""
-    # extract the used quantities (to enable type-hinting)
-    contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
-    contacts = contact_sensor.data.net_forces_w_history[:, :, sensor_cfg.body_ids, :].norm(dim=-1).max(dim=1)[0] > 1.0
-    asset = env.scene[asset_cfg.name]
-    body_vel = asset.data.body_lin_vel_w[:, asset_cfg.body_ids] * contacts.unsqueeze(-1)
-    penalize = torch.square(body_vel[:,:,:3])
-    return torch.sum(penalize, dim=(1,2))

@@ -1,0 +1,413 @@
+config: clf_rl_policy
+onboard:
+  # --------------------------------- #
+  # ----------- Controller ---------- #
+  # --------------------------------- #
+  control:
+  # ----- Low Level Controller ----- #
+    - pkg: g1_control
+      params:
+        policy_name: "clf_policy.pt"
+        num_obs: 74
+        num_actions: 21
+        period: 0.8                   # s
+        ang_vel_scale: 0.25
+        cmd_scale: [2., 2., 2.]
+        qpos_scale: 1
+        qvel_scale: 0.05 #0.1
+        action_scale: 0.25
+        kps: [100.0,100,100,150,40,40,
+              100.0,100,100,150,40,40,
+              100,
+              100,100,50,50,
+              50,50,50,
+              100,100,50,50,
+              50,50,50
+        ]
+        kds: [2.0,2,2,4,2,2,
+              2.0,2,2,4,2,2,
+              2,
+              2,2,2,2,
+              2,2,2,
+              2,2,2,2,
+              2,2,2]
+        default_angles: [-0.1, 0, 0, 0.3, -0.2, 0,
+                  -0.1, 0, 0, 0.3, -0.2, 0,
+                  0,
+                  0.1, 0.27, 0, 1.2,
+                  0.1, -0.27, 0, 1.2]
+        default_angles_names: [
+          "left_hip_pitch_joint",
+          "left_hip_roll_joint",
+          "left_hip_yaw_joint",
+          "left_knee_joint",
+          "left_ankle_pitch_joint",
+          "left_ankle_roll_joint",
+          "right_hip_pitch_joint",
+          "right_hip_roll_joint",
+          "right_hip_yaw_joint",
+          "right_knee_joint",
+          "right_ankle_pitch_joint",
+          "right_ankle_roll_joint",
+          "waist_yaw_joint",
+          "left_shoulder_pitch_joint",
+          "left_shoulder_roll_joint",
+          "left_shoulder_yaw_joint",
+          "left_elbow_joint",
+          "right_shoulder_pitch_joint",
+          "right_shoulder_roll_joint",
+          "right_shoulder_yaw_joint",
+          "right_elbow_joint",
+        ]
+      executable: g1_controller
+      # callback_groups:
+      publishers:
+        - ros_parameter: pub_ctrl_setting
+          topic: /obelisk/g1/low_level_control
+          history_depth: 10
+          callback_group: None
+      subscribers:
+        - ros_parameter: sub_est_setting
+          topic: /obelisk/g1/est_state
+          history_depth: 10
+          callback_group: None
+        # ----- Joystick subscriber ----- #
+        - ros_parameter: sub_vel_cmd_setting
+          topic: /obelisk/g1/high_level_ctrl
+          history_depth: 10
+          callback_group: None
+      timers:
+        - ros_parameter: timer_ctrl_setting
+          timer_period_sec: 0.02    # 50 Hz
+          callback_group: None
+  # ----- High Level/Execution FSM Controller ----- #
+    - pkg: obelisk_unitree_cpp
+      executable: obelisk_unitree_joystick
+      params:
+        v_x_max: 1.
+        v_y_max: 0.4
+        w_z_max: 0.3
+      # callback_groups:
+      publishers:
+      # ----- Execution FSM ----- #
+        - ros_parameter: pub_exec_fsm_setting
+          topic: /obelisk/g1/exec_fsm
+          history_depth: 10
+          callback_group: None
+      # ----- High Level Control ----- #
+        - ros_parameter: pub_ctrl_setting
+          topic: /obelisk/g1/high_level_ctrl
+          history_depth: 10
+          callback_group: None
+      subscribers:
+      # ----- Joystick subscriber ----- #
+        - ros_parameter: sub_est_setting
+          topic: /obelisk/g1/joy
+      timers:
+        - ros_parameter: timer_ctrl_setting
+          timer_period_sec: 100  # Control callback is not being used
+          callback_group: None
+  # --------------------------------- #
+  # ----------- Estimator ----------- #
+  # --------------------------------- #
+  estimation:
+    - pkg: g1_control
+      executable: g1_estimator
+      # callback_groups:
+      publishers:
+        - ros_parameter: pub_est_setting
+          topic: /obelisk/g1/est_state
+          msg_type: EstimatedState
+          history_depth: 10
+          callback_group: None
+      subscribers:
+        - ros_parameter: sub_joint_encoders
+          topic: /obelisk/g1/joint_encoders
+          msg_type: ObkJointEncoders
+          history_depth: 10
+          callback_group: None
+        - ros_parameter: sub_pelvis_imu
+          topic: /obelisk/g1/pelvis_imu
+          msg_type: ObkIMU
+          history_depth: 10
+          callback_group: None
+      timers:
+        - ros_parameter: timer_est_setting
+          timer_period_sec: 0.001
+          callback_group: None
+  # sensing:
+  # --------------------------------- #
+  # ------------- Robot ------------- #
+  # --------------------------------- #
+  robot:
+    - is_simulated: False
+      pkg: obelisk_unitree_cpp
+      executable: obelisk_unitree_g1_hardware
+      params:
+        ic_keyframe: standing
+        network_interface_name: enp4s0 # From ifconfig
+        default_kp: [
+          30., 30., 30.,    # L hip
+          30., 30., 30.,    # L knee, ankle
+          30., 30., 30.,    # R hip
+          30., 30., 30.,    # R knee, ankle
+          10.,              # Waist
+          5., 5., 5.,       # L shoulder
+          5., 5., 5., 5.,   # L elbow, wrist
+          5., 5., 5.,       # R shoulder
+          5., 5., 5., 5.,   # R elbow, wrist
+        ]
+        default_kd: [
+          3.,3.,3.,         # L hip
+          3.,3.,3.,         # L knee, ankle
+          3.,3.,3.,         # R hip
+          3.,3.,3.,         # R knee, ankle
+          1.,               # Waist
+          1., 1., 1.,       # L shoulder
+          1., 1., 1., 1.,   # L elbow, wrist
+          1., 1., 1.,       # R shoulder
+          1., 1., 1., 1.,   # R elbow, wrist
+        ]
+        user_pose: [ -0.42, 0, 0, 0.81, -0.4, 0,
+                     -0.42, 0, 0, 0.81, -0.4, 0,
+                     0, 0, 0,
+                     0, 0.27, 0, 0.5, 0, 0, 0,
+                     0, -0.27, 0, 0.5, 0, 0, 0 ]
+      # callback_groups:
+      publishers:
+        - ros_parameter: pub_true_sim_state_setting
+          topic: /obelisk/g1/true_sim_state
+          history_depth: 10
+          callback_group: None
+          # ----- Joints ----- #
+        - ros_parameter: pub_sensor_setting
+          topic: /obelisk/g1/joint_encoders
+          history_depth: 10
+        # ----- IMU ----- #
+        - ros_parameter: pub_imu_setting
+          topic: /obelisk/g1/pelvis_imu
+          history_depth: 10
+        # ----- Odom ----- #
+        - ros_parameter: pub_odom_setting
+          topic: /obelisk/g1/odom
+          history_depth: 10
+      timers:
+        - ros_parameter: timer_true_sim_state_setting
+          history_depth: 10
+          timer_period_sec: 0.002
+          callback_group: None
+      subscribers:
+        # ----- Control ----- #
+        - ros_parameter: sub_ctrl_setting
+          topic: /obelisk/g1/low_level_control
+          history_depth: 10
+          callback_group: None
+        # ----- Execution FSM ----- #
+        - ros_parameter: sub_fsm_setting
+          topic: /obelisk/g1/exec_fsm
+          history_depth: 10
+          callback_group: None
+        # ----- High Level Control ----- #
+        - ros_parameter: sub_high_level_ctrl_setting
+          topic: /obelisk/g1/high_level_ctrl
+          history_depth: 10
+          callback_group: None
+      sim:
+        - ros_parameter: mujoco_setting
+          robot_pkg: g1_model
+          model_xml_path: scene.xml
+          sensor_settings:
+          # ---------- Joint Encoders ---------- #
+          - topic: /obelisk/g1/joint_encoders
+            dt: 0.001
+            msg_type: ObkJointEncoders
+            sensor_names:
+            # ---------- Joint Positions ---------- #
+              left_hip_pitch_joint_pos_sensor: jointpos
+              left_hip_roll_joint_pos_sensor: jointpos
+              left_hip_yaw_joint_pos_sensor: jointpos
+              left_knee_joint_pos_sensor: jointpos
+              left_ankle_pitch_joint_pos_sensor: jointpos
+              left_ankle_roll_joint_pos_sensor: jointpos
+
+              right_hip_pitch_joint_pos_sensor: jointpos
+              right_hip_roll_joint_pos_sensor: jointpos
+              right_hip_yaw_joint_pos_sensor: jointpos
+              right_knee_joint_pos_sensor: jointpos
+              right_ankle_pitch_joint_pos_sensor: jointpos
+              right_ankle_roll_joint_pos_sensor: jointpos
+
+              waist_yaw_joint_pos_sensor: jointpos
+              # waist_roll_joint_pos_sensor: jointpos
+              # waist_pitch_joint_pos_sensor: jointpos
+
+              left_shoulder_pitch_joint_pos_sensor: jointpos
+              left_shoulder_roll_joint_pos_sensor: jointpos
+              left_shoulder_yaw_joint_pos_sensor: jointpos
+              left_elbow_joint_pos_sensor: jointpos
+              left_wrist_roll_joint_pos_sensor: jointpos
+              left_wrist_pitch_joint_pos_sensor: jointpos
+              left_wrist_yaw_joint_pos_sensor: jointpos
+
+              # left_hand_thumb_0_joint_pos_sensor: jointpos
+              # left_hand_thumb_1_joint_pos_sensor: jointpos
+              # left_hand_thumb_2_joint_pos_sensor: jointpos
+              # left_hand_middle_0_joint_pos_sensor: jointpos
+              # left_hand_middle_1_joint_pos_sensor: jointpos
+              # left_hand_index_0_joint_pos_sensor: jointpos
+              # left_hand_index_1_joint_pos_sensor: jointpos
+
+              right_shoulder_pitch_joint_pos_sensor: jointpos
+              right_shoulder_roll_joint_pos_sensor: jointpos
+              right_shoulder_yaw_joint_pos_sensor: jointpos
+              right_elbow_joint_pos_sensor: jointpos
+              right_wrist_roll_joint_pos_sensor: jointpos
+              right_wrist_pitch_joint_pos_sensor: jointpos
+              right_wrist_yaw_joint_pos_sensor: jointpos
+
+              # right_hand_thumb_0_joint_pos_sensor: jointpos
+              # right_hand_thumb_1_joint_pos_sensor: jointpos
+              # right_hand_thumb_2_joint_pos_sensor: jointpos
+              # right_hand_middle_0_joint_pos_sensor: jointpos
+              # right_hand_middle_1_joint_pos_sensor: jointpos
+              # right_hand_index_0_joint_pos_sensor: jointpos
+              # right_hand_index_1_joint_pos_sensor: jointpos
+            # ---------- Joint Velocities ---------- #
+              left_hip_pitch_joint_vel_sensor: jointvel
+              left_hip_roll_joint_vel_sensor: jointvel
+              left_hip_yaw_joint_vel_sensor: jointvel
+              left_knee_joint_vel_sensor: jointvel
+              left_ankle_pitch_joint_vel_sensor: jointvel
+              left_ankle_roll_joint_vel_sensor: jointvel
+
+              right_hip_pitch_joint_vel_sensor: jointvel
+              right_hip_roll_joint_vel_sensor: jointvel
+              right_hip_yaw_joint_vel_sensor: jointvel
+              right_knee_joint_vel_sensor: jointvel
+              right_ankle_pitch_joint_vel_sensor: jointvel
+              right_ankle_roll_joint_vel_sensor: jointvel
+
+              waist_yaw_joint_vel_sensor: jointvel
+              # waist_roll_joint_vel_sensor: jointvel
+              # waist_pitch_joint_vel_sensor: jointvel
+
+              left_shoulder_pitch_joint_vel_sensor: jointvel
+              left_shoulder_roll_joint_vel_sensor: jointvel
+              left_shoulder_yaw_joint_vel_sensor: jointvel
+              left_elbow_joint_vel_sensor: jointvel
+              left_wrist_roll_joint_vel_sensor: jointvel
+              left_wrist_pitch_joint_vel_sensor: jointvel
+              left_wrist_yaw_joint_vel_sensor: jointvel
+
+              # left_hand_thumb_0_joint_vel_sensor: jointvel
+              # left_hand_thumb_1_joint_vel_sensor: jointvel
+              # left_hand_thumb_2_joint_vel_sensor: jointvel
+              # left_hand_middle_0_joint_vel_sensor: jointvel
+              # left_hand_middle_1_joint_vel_sensor: jointvel
+              # left_hand_index_0_joint_vel_sensor: jointvel
+              # left_hand_index_1_joint_vel_sensor: jointvel
+
+              right_shoulder_pitch_joint_vel_sensor: jointvel
+              right_shoulder_roll_joint_vel_sensor: jointvel
+              right_shoulder_yaw_joint_vel_sensor: jointvel
+              right_elbow_joint_vel_sensor: jointvel
+              right_wrist_roll_joint_vel_sensor: jointvel
+              right_wrist_pitch_joint_vel_sensor: jointvel
+              right_wrist_yaw_joint_vel_sensor: jointvel
+
+              # right_hand_thumb_0_joint_vel_sensor: jointvel
+              # right_hand_thumb_1_joint_vel_sensor: jointvel
+              # right_hand_thumb_2_joint_vel_sensor: jointvel
+              # right_hand_middle_0_joint_vel_sensor: jointvel
+              # right_hand_middle_1_joint_vel_sensor: jointvel
+              # right_hand_index_0_joint_vel_sensor: jointvel
+              # right_hand_index_1_joint_vel_sensor: jointvel
+          # ---------- Torso IMU ---------- #
+          - topic: /obelisk/g1/torso_imu
+            dt: 0.001
+            msg_type: ObkImu
+            sensor_names:
+              torso_imu_acc_sensor: accelerometer
+              torso_imu_gyro_sensor: gyro
+              torso_imu_quat_sensor: framequat
+          # ---------- Pelvis IMU ---------- #
+          - topic: /obelisk/g1/pelvis_imu
+            dt: 0.001
+            msg_type: ObkImu
+            sensor_names:
+              pelvis_imu_acc_sensor: accelerometer
+              pelvis_imu_gyro_sensor: gyro
+              pelvis_imu_quat_sensor: framequat
+          # ---------- Pelvis Mocap ---------- #
+          - topic: /obelisk/g1/pelvis_pose
+            dt: 0.00416   # 240 Hz
+            msg_type: PoseStamped
+            sensor_names:
+              base_mocap_pos_sensor: framepos
+              base_mocap_quat_sensor: framequat
+          # ---------- Torso Mocap ---------- #
+          - topic: /obelisk/g1/torso_pose
+            dt: 0.00416   # 240 Hz
+            msg_type: PoseStamped
+            sensor_names:
+              torso_mocap_pos_sensor: framepos
+              torso_mocap_quat_sensor: framequat
+          # ---------- Torso Camera Odometry ---------- #
+          - topic: /obelisk/g1/torso_odom
+            dt: 0.005
+            msg_type: Odometry
+            sensor_names:
+              torso_camera_pos_sensor: framepos
+              torso_camera_orientation_sensor: framequat
+              torso_camera_velocimeter: velocimeter
+              torso_camera_gyro: gyro
+          # viz_geoms:
+          #   dt: 1
+          #   # ----- Stair scene ----- #
+          #   stair1: box
+          #   stair2: box
+          #   stair3: box
+          #   # ----- Tile scene ----- #
+          #   tile1: box
+          #   tile2: box
+          #   tile3: box
+          #   tile4: box
+          #   tile5: box
+          #   tile6: box
+          #   tile7: box
+          #   tile8: box
+          #   tile9: box
+  # --------------------------------- #
+  # -------------- Viz -------------- #
+  # --------------------------------- #
+  viz:
+    on: True
+    viz_tool: foxglove
+    viz_nodes:
+      - pkg: obelisk_viz_cpp
+        executable: default_robot_viz
+        robot_pkg: g1_model
+        urdf: g1_hand.urdf
+        robot_topic: robot_description
+        subscribers:
+          - ros_parameter: sub_viz_est_setting
+            topic: /obelisk/g1/est_state
+            history_depth: 10
+            callback_group: None
+            non_obelisk: False
+        publishers:
+          - ros_parameter: pub_viz_joint_setting
+            topic: joint_states
+            history_depth: 10
+            callback_group: None
+        timers:
+          - ros_parameter: timer_viz_joint_setting
+            timer_period_sec: 0.01
+            callback_group: None
+  # --------------------------------- #
+  # ----------- Joystick ------------ #
+  # --------------------------------- #
+  joystick:
+    on: True
+    pub_topic: /obelisk/g1/joy
+    sub_topic: /obelisk/g1/joy_feedback

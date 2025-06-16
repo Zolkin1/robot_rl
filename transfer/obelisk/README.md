@@ -1,5 +1,27 @@
 # Running the Docker
-For now, we suggest bringing the docker up in a `devcontainer` within vscode.
+
+## Prerequisites
+- Docker and Docker Compose plugin installed
+  - Installation guide: [Docker Compose Installation](https://docs.docker.com/compose/install/linux/#install-using-the-repository)
+- VSCode with devcontainer support (recommended)
+
+## Environment Setup
+Set the `ROBOT_RL_ROOT` environment variable:
+```bash
+export ROBOT_RL_ROOT=/your/path/to/robot_rl/transfer/obelisk
+```
+
+## Running in Docker
+We recommend using VSCode's devcontainer feature to run the Docker environment.
+
+### Initial Setup
+1. Navigate to the obelisk folder
+2. Open VSCode command palette (Ctrl+Shift+P)
+3. Select "Dev Container: Rebuild and Reopen in Container"
+4. Choose your preferred configuration:
+   - GPU-based (recommended for better performance)
+   - No-GPU (if GPU is not available)
+
 
 # Setup within the Docker
 Run

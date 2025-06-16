@@ -16,13 +16,16 @@ from robot_rl.tasks.manager_based.robot_rl.humanoid_env_cfg import HumanoidEnvCf
 # Pre-defined configs
 ##
 from robot_rl.assets.robots.g1_21j import G1_MINIMAL_CFG  # isort: skip
-
+from robot_rl.tasks.manager_based.robot_rl.g1.g1_rough_env_lip_cfg import G1RoughLipCommandsCfg
+from robot_rl.tasks.manager_based.robot_rl.g1_isaac.rough_env_cfg import G1_Observations
 ##
 # Environment configuration
 ##
 @configclass
 class G1RoughEnvCfg(HumanoidEnvCfg):
-    """Configuration for the G1 Flat environment."""
+    """Configuration for the G1 Rough environment."""
+    commands: G1RoughLipCommandsCfg = G1RoughLipCommandsCfg()
+    observations: G1_Observations = G1_Observations()
     def __post_init__(self):
         # post init of parent
         super().__post_init__()
@@ -62,12 +65,13 @@ class G1RoughEnvCfg(HumanoidEnvCfg):
             },
         }
 
+        self.events.base_external_force_torque = None
         ##
         # Commands
         ##
-        self.commands.base_velocity.ranges.lin_vel_x = (-1.5, 1.5) # 0 - 1
-        self.commands.base_velocity.ranges.lin_vel_y = (-0.4,0.4) #(-1.0, 1.0)
-        self.commands.base_velocity.ranges.ang_vel_z = (-1.0, 1.0)
+        self.commands.base_velocity.ranges.lin_vel_x = (-1.0,1.0) #(-1.0, 1.0) # 0 - 1
+        self.commands.base_velocity.ranges.lin_vel_y = (-0.3,0.3) #(-1.0, 1.0)
+        self.commands.base_velocity.ranges.ang_vel_z = (-1,1) #(-1.0, 1.0) #(-1.0, 1.0)
 
         ##
         # Terminations
@@ -80,7 +84,7 @@ class G1RoughEnvCfg(HumanoidEnvCfg):
         ##
         self.rewards.track_lin_vel_xy_exp.weight = 1.0
         self.rewards.track_ang_vel_z_exp.weight = 0.5
-        self.rewards.lin_vel_z_l2.weight =  -2.0 # TODO reduce this maybe?
+        self.rewards.lin_vel_z_l2.weight = -2.0 # TODO reduce this maybe?
         self.rewards.ang_vel_xy_l2.weight = -0.05
         self.rewards.dof_torques_l2.weight = -1.0e-5
         self.rewards.dof_acc_l2.weight = -2.5e-7

@@ -8,6 +8,10 @@
 """Launch Isaac Sim Simulator first."""
 
 import argparse
+import pickle
+import time
+import os
+from datetime import datetime
 
 from isaaclab.app import AppLauncher
 
@@ -45,8 +49,6 @@ simulation_app = app_launcher.app
 """Rest everything follows."""
 
 import gymnasium as gym
-import os
-import time
 import torch
 
 from rsl_rl.runners import OnPolicyRunner
@@ -73,7 +75,7 @@ def main():
     agent_cfg: RslRlOnPolicyRunnerCfg = cli_args.parse_rsl_rl_cfg(args_cli.task, args_cli)
 
     # specify directory for logging experiments
-    log_root_path = os.path.join("logs", "rsl_rl", agent_cfg.experiment_name)
+    log_root_path = os.path.join("logs", "g1_policies", "stair", agent_cfg.experiment_name)
     log_root_path = os.path.abspath(log_root_path)
     print(f"[INFO] Loading experiment from directory: {log_root_path}")
     if args_cli.use_pretrained_checkpoint:
@@ -138,9 +140,14 @@ def main():
 
     dt = env.unwrapped.step_dt
 
+
+    # Setup logging
+    log_dir = os.path.join("logs", "play", datetime.now().strftime("%Y-%m-%d_%H-%M-%S"))
+
     # reset environment
     obs, _ = env.get_observations()
     timestep = 0
+
     # simulate environment
     while simulation_app.is_running():
         start_time = time.time()
@@ -149,12 +156,16 @@ def main():
             # agent stepping
             actions = policy(obs)
             # env stepping
-            obs, _, _, _ = env.step(actions)
+            obs, reward, _, extra = env.step(actions)
+        #    
+           
+        timestep += 1
         if args_cli.video:
-            timestep += 1
+            
             # Exit the play loop after recording one video
             if timestep == args_cli.video_length:
                 break
+        
 
         # time delay for real-time evaluation
         sleep_time = dt - (time.time() - start_time)
@@ -163,8 +174,7 @@ def main():
 
     # close the simulator
     env.close()
-
-
+    
 if __name__ == "__main__":
     # run the main function
     main()

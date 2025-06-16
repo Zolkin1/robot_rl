@@ -18,50 +18,34 @@ Position and velocity actuators added. -->
     <!-- ############## -->
     <!-- Hip Pitch -->
     <default class="hip_pitch_pos">
-       <position kp="100" ctrllimited="false"/>
+       <position kp="100" kv="2" ctrllimited="false"/>
     </default>
-    <default class="hip_pitch_vel">
-      <position kv="2" ctrllimited="false"/>
-    </default>
+  
 
     <!-- Hip Roll -->
     <default class="hip_roll_pos">
-       <position kp="100" ctrllimited="false"/>
+       <position kp="100" kv="2" ctrllimited="false"/>
     </default>
-    <default class="hip_roll_vel">
-        <position kv="2" ctrllimited="false"/>
-    </default>
-
+ 
     <!-- Hip Yaw -->
     <default class="hip_yaw_pos">
-       <position kp="100" ctrllimited="false"/>
+       <position kp="100" kv="2" ctrllimited="false"/>
     </default>
-    <default class="hip_yaw_vel">
-      <position kv="2" ctrllimited="false"/>
-    </default>
-
     <!-- Knee -->
     <default class="knee_pos">
-       <position kp="150" ctrllimited="false"/>
-    </default>
-    <default class="knee_vel">
-      <position kv="4" ctrllimited="false"/>
+       <position kp="150" kv="4" ctrllimited="false"/>
     </default>
 
     <!-- Ankle Pitch -->
     <default class="ankle_pitch_pos">
-       <position kp="40" ctrllimited="false"/>
+       <position kp="40" kv="2" ctrllimited="false"/>
     </default>
-    <default class="ankle_pitch_vel">
-      <position kv="2" ctrllimited="false"/>
-    </default>
+
+
 
     <!-- Ankle Roll -->
     <default class="ankle_roll_pos">
-      <position kp="40" ctrllimited="false"/>
-    </default>
-    <default class="ankle_roll_vel">
-      <position kv="2" ctrllimited="false"/>
+       <position kp="40" kv="2" ctrllimited="false"/>
     </default>
 
     <!-- ############## -->
@@ -69,71 +53,47 @@ Position and velocity actuators added. -->
     <!-- ############## -->
     <!-- Waist Yaw -->
     <default class="waist_yaw_pos">
-      <position kp="100" ctrllimited="false"/>
+       <position kp="100" kv="2" ctrllimited="false"/>
     </default>
-    <default class="waist_yaw_vel">
-      <position kv="2" ctrllimited="false"/>
-    </default>
+
 
     <!-- ############## -->
     <!--   Arm Gains    -->
     <!-- ############## -->
     <!-- Shoulder Pitch -->
     <default class="shoulder_pitch_pos">
-      <position kp="100" ctrllimited="false"/>
-    </default>
-    <default class="shoulder_pitch_vel">
-      <position kv="2" ctrllimited="false"/>
+       <position kp="100" kv="2" ctrllimited="false"/>
     </default>
 
     <!-- Shoulder Roll -->
     <default class="shoulder_roll_pos">
-      <position kp="100" ctrllimited="false"/>
-    </default>
-    <default class="shoulder_roll_vel">
-      <position kv="2" ctrllimited="false"/>
+       <position kp="100" kv="2" ctrllimited="false"/>
     </default>
 
     <!-- Shoulder Yaw -->
     <default class="shoulder_yaw_pos">
-      <position kp="50" ctrllimited="false"/>
-    </default>
-    <default class="shoulder_yaw_vel">
-      <position kv="2" ctrllimited="false"/>
+       <position kp="50" kv="2" ctrllimited="false"/>
     </default>
 
     <!-- Elbow -->
     <default class="elbow_pos">
-      <position kp="50" ctrllimited="false"/>
-    </default>
-    <default class="elbow_vel">
-      <position kv="2" ctrllimited="false"/>
+       <position kp="50" kv="2" ctrllimited="false"/>
     </default>
 
     <!-- Wrist Roll -->
     <default class="wrist_roll_pos">
-      <position kp="50" ctrllimited="false"/>
-    </default>
-    <default class="wrist_roll_vel">
-      <position kv="4" ctrllimited="false"/>
+       <position kp="50" kv="2" ctrllimited="false"/>
     </default>
 
     <!-- Wrist Pitch -->
     <default class="wrist_pitch_pos">
-      <position kp="50" ctrllimited="false"/>
-    </default>
-    <default class="wrist_pitch_vel">
-      <position kv="4" ctrllimited="false"/>
+       <position kp="50" kv="2" ctrllimited="false"/>
     </default>
 
     <!-- Wrist Yaw -->
     <default class="wrist_yaw_pos">
-      <position kp="50" ctrllimited="false"/>
+       <position kp="50" kv="2" ctrllimited="false"/>
     </default>
-    <default class="wrist_yaw_vel">
-      <position kv="4" ctrllimited="false"/>
-    </default>
-
 
     <!-- Foot Contact Parameters -->
     <default class="collision">
@@ -256,6 +216,8 @@ Position and velocity actuators added. -->
                   <geom size="0.005" pos="0.035 -0.025 -0.03" rgba="0.2 0.2 0.2 1"/>
                   <geom size="0.005" pos="0.12 0.03 -0.03" rgba="0.2 0.2 0.2 1"/>
                   <geom size="0.005" pos="0.12 -0.03 -0.03" rgba="0.2 0.2 0.2 1"/>
+
+                  <site name="left_ankle_site" size="0.001" pos="0 0 -0.03" rgba="1 0 0 1"/>
                   <!-- ####################### -->
                   <!-- ####################### -->
 
@@ -321,6 +283,8 @@ Position and velocity actuators added. -->
                   <geom size="0.005" pos="0.035 -0.025 -0.03" rgba="0.2 0.2 0.2 1"/>
                   <geom size="0.005" pos="0.12 0.03 -0.03" rgba="0.2 0.2 0.2 1"/>
                   <geom size="0.005" pos="0.12 -0.03 -0.03" rgba="0.2 0.2 0.2 1"/>
+
+                  <site name="right_ankle_site" size="0.001" pos="0 0 -0.03" rgba="1 0 0 1"/>
                   <!-- ####################### -->
                   <!-- ####################### -->
 
@@ -596,89 +560,7 @@ Position and velocity actuators added. -->
     <position name="right_shoulder_roll_join_post" class="shoulder_roll_pos" joint="right_shoulder_roll_joint"/>
     <position name="right_shoulder_yaw_joint_pos" class="shoulder_yaw_pos" joint="right_shoulder_yaw_joint"/>
     <position name="right_elbow_joint_pos" class="elbow_pos" joint="right_elbow_joint"/>
-<!--    <position name="right_wrist_roll_joint_pos" class="wrist_roll_pos" joint="right_wrist_roll_joint"/>-->
-<!--    <position name="right_wrist_pitch_joint_pos" class="wrist_pitch_pos" joint="right_wrist_pitch_joint"/>-->
-<!--    <position name="right_wrist_yaw_joint_pos" class="wrist_yaw_pos"joint="right_wrist_yaw_joint"/>-->
 
-    <!-- ################## -->
-    <!-- Velocity Actuation -->
-    <!-- ################## -->
-    <!-- Left Leg -->
-    <velocity name="left_hip_pitch_joint_vel" class="hip_pitch_vel" joint="left_hip_pitch_joint"/>
-    <velocity name="left_hip_roll_joint_vel" class="hip_roll_vel" joint="left_hip_roll_joint"/>
-    <velocity name="left_hip_yaw_joint_vel" class="hip_yaw_vel" joint="left_hip_yaw_joint"/>
-    <velocity name="left_knee_joint_vel" class="knee_vel" joint="left_knee_joint"/>
-    <velocity name="left_ankle_pitch_joint_vel" class="ankle_pitch_vel" joint="left_ankle_pitch_joint"/>
-    <velocity name="left_ankle_roll_joint_vel" class="ankle_roll_vel" joint="left_ankle_roll_joint"/>
-
-    <!-- Right Leg -->
-    <velocity name="right_hip_pitch_joint_vel" class="hip_pitch_vel" joint="right_hip_pitch_joint"/>
-    <velocity name="right_hip_roll_joint_vel" class="hip_roll_vel" joint="right_hip_roll_joint"/>
-    <velocity name="right_hip_yaw_joint_vel" class="hip_yaw_vel" joint="right_hip_yaw_joint"/>
-    <velocity name="right_knee_joint_vel" class="knee_vel" joint="right_knee_joint"/>
-    <velocity name="right_ankle_pitch_joint_vel" class="ankle_pitch_vel" joint="right_ankle_pitch_joint"/>
-    <velocity name="right_ankle_roll_joint_vel" class="ankle_roll_vel" joint="right_ankle_roll_joint"/>
-
-    <!-- Waist -->
-    <velocity name="waist_yaw_joint_vel" class="waist_yaw_vel" joint="waist_yaw_joint"/>
-
-    <!-- Left Arm -->
-    <velocity name="left_shoulder_pitch_joint_vel" class="shoulder_pitch_vel" joint="left_shoulder_pitch_joint"/>
-    <velocity name="left_shoulder_roll_joint_vel" class="shoulder_roll_vel" joint="left_shoulder_roll_joint"/>
-    <velocity name="left_shoulder_yaw_joint_vel" class="shoulder_yaw_vel" joint="left_shoulder_yaw_joint"/>
-    <velocity name="left_elbow_joint_vel" class="elbow_vel" joint="left_elbow_joint"/>
-<!--    <velocity name="left_wrist_roll_joint_vel" class="wrist_roll_vel" joint="left_wrist_roll_joint"/>-->
-<!--    <velocity name="left_wrist_pitch_joint_vel" class="wrist_pitch_vel" joint="left_wrist_pitch_joint"/>-->
-<!--    <velocity name="left_wrist_yaw_joint_vel" class="wrist_yaw_vel" joint="left_wrist_yaw_joint"/>-->
-
-    <!-- Right Arm -->
-    <velocity name="right_shoulder_pitch_joint_vel" class="shoulder_pitch_vel" joint="right_shoulder_pitch_joint"/>
-    <velocity name="right_shoulder_roll_joint_vel" class="shoulder_roll_vel" joint="right_shoulder_roll_joint"/>
-    <velocity name="right_shoulder_yaw_joint_vel" class="shoulder_yaw_vel" joint="right_shoulder_yaw_joint"/>
-    <velocity name="right_elbow_joint_vel" class="elbow_vel" joint="right_elbow_joint"/>
-<!--    <velocity name="right_wrist_roll_joint_vel" class="wrist_roll_vel" joint="right_wrist_roll_joint"/>-->
-<!--    <velocity name="right_wrist_pitch_joint_vel" class="wrist_pitch_vel" joint="right_wrist_pitch_joint"/>-->
-<!--    <velocity name="right_wrist_yaw_joint_vel" class="wrist_yaw_vel" joint="right_wrist_yaw_joint"/>-->
-    
-    <!-- ################ -->
-    <!-- Torque Actuation -->
-    <!-- ################ -->
-    <!-- Left Leg -->
-    <motor name="left_hip_pitch_joint" joint="left_hip_pitch_joint"/>
-    <motor name="left_hip_roll_joint" joint="left_hip_roll_joint"/>
-    <motor name="left_hip_yaw_joint" joint="left_hip_yaw_joint"/>
-    <motor name="left_knee_joint" joint="left_knee_joint"/>
-    <motor name="left_ankle_pitch_joint" joint="left_ankle_pitch_joint"/>
-    <motor name="left_ankle_roll_joint" joint="left_ankle_roll_joint"/>
-
-    <!-- Right Leg -->
-    <motor name="right_hip_pitch_joint" joint="right_hip_pitch_joint"/>
-    <motor name="right_hip_roll_joint" joint="right_hip_roll_joint"/>
-    <motor name="right_hip_yaw_joint" joint="right_hip_yaw_joint"/>
-    <motor name="right_knee_joint" joint="right_knee_joint"/>
-    <motor name="right_ankle_pitch_joint" joint="right_ankle_pitch_joint"/>
-    <motor name="right_ankle_roll_joint" joint="right_ankle_roll_joint"/>
-
-    <!-- Waist -->
-    <motor name="waist_yaw_joint" joint="waist_yaw_joint"/>
-
-    <!-- Left Arm -->
-    <motor name="left_shoulder_pitch_joint" joint="left_shoulder_pitch_joint"/>
-    <motor name="left_shoulder_roll_joint" joint="left_shoulder_roll_joint"/>
-    <motor name="left_shoulder_yaw_joint" joint="left_shoulder_yaw_joint"/>
-    <motor name="left_elbow_joint" joint="left_elbow_joint"/>
-<!--    <motor name="left_wrist_roll_joint" joint="left_wrist_roll_joint"/>-->
-<!--    <motor name="left_wrist_pitch_joint" joint="left_wrist_pitch_joint"/>-->
-<!--    <motor name="left_wrist_yaw_joint" joint="left_wrist_yaw_joint"/>-->
-
-    <!-- Right Arm -->
-    <motor name="right_shoulder_pitch_joint" joint="right_shoulder_pitch_joint"/>
-    <motor name="right_shoulder_roll_joint" joint="right_shoulder_roll_joint"/>
-    <motor name="right_shoulder_yaw_joint" joint="right_shoulder_yaw_joint"/>
-    <motor name="right_elbow_joint" joint="right_elbow_joint"/>
-<!--    <motor name="right_wrist_roll_joint" joint="right_wrist_roll_joint"/>-->
-<!--    <motor name="right_wrist_pitch_joint" joint="right_wrist_pitch_joint"/>-->
-<!--    <motor name="right_wrist_yaw_joint" joint="right_wrist_yaw_joint"/>-->
   </actuator>
 
   <sensor>
@@ -790,30 +672,19 @@ Position and velocity actuators added. -->
 
   <keyframe>
     <key name="standing" 
-      qpos="0 0 0.74
+      qpos="0 0 0.75
             0 0 0 0
             -0.42 0 0 0.81 -0.4 0
             -0.42 0 0 0.81 -0.4 0
             0
-            0 0.27 0 0.5
-            0 -0.27 0 0.5"
+            0.1 0.27 0 1.2
+            0.1 -0.27 0 1.2"
       ctrl="-0.42 0 0 0.81 -0.4 0
             -0.42 0 0 0.81 -0.4 0
             0
-            0 0.27 0 0.5
-            0 -0.27 0 0.5
-            
-            0 0 0 0 0 0
-            0 0 0 0 0 0
-            0
-            0 0 0 0
-            0 0 0 0
-            
-            0 0 0 0 0 0
-            0 0 0 0 0 0
-            0
-            0 0 0 0
-            0 0 0 0"/>
+            0.1 0.27 0 1.2
+            0.1 -0.27 0 1.2
+            "/>
       <!-- <key name="standing" 
       qpos="0 0 0.75
             0.707106781 0 0 -0.707106781

@@ -1,7 +1,10 @@
 # G1_21j config
 robot_name: "g1_21j"
 #checkpoint_path: "/home/zolkin/AmberLab/Project-Isaac-RL/robot-rl/robot_rl/logs/rsl_rl/g1/2025-05-23_15-51-34/exported/policy.pt"  # Not LIP, all dir
-checkpoint_path: "/home/zolkin/AmberLab/Project-Isaac-RL/robot-rl/robot_rl/logs/rsl_rl/g1/2025-05-23_17-37-39/exported/policy.pt"
+# checkpoint_path: "/home/amy/gitrepo/robot_rl/logs/g1_policies/clf/g1/2025-06-10_14-20-56/exported/policy.pt"
+# checkpoint_path: "/home/amy/gitrepo/robot_rl/logs/g1_policies/clf/g1/2025-06-10_15-59-40/exported/policy.pt" #previous_good version
+# checkpoint_path: "/home/amy/gitrepo/robot_rl/logs/g1_policies/clf/g1/2025-06-10_17-33-32/exported/policy.pt" #good
+checkpoint_path: "/home/amy/gitrepo/robot_rl/logs/g1_policies/clf/g1/2025-06-10_19-23-16/exported/policy.pt"
 #checkpoint_path: "/home/zolkin/AmberLab/Project-Isaac-RL/robot-rl/robot_rl/logs/rsl_rl/g1/2025-05-20_12-23-37/exported/policy.pt"  # Not LIP
 #checkpoint_path: "/home/zolkin/AmberLab/Project-Isaac-RL/robot-rl/robot_rl/logs/rsl_rl/g1/2025-05-23_15-09-10/exported/policy.pt" # LIP
 num_obs: 74
@@ -9,13 +12,16 @@ num_action: 21
 period: 0.8                   # s
 dt: 0.02                      # 50 Hz
 ang_vel_scale: 0.25
-command_scale: [2, 2, 0.25]
+command_scale: [2, 2, 2]
 qpos_scale: 1
 qvel_scale: 0.05 #0.1
 action_scale: 0.25
+height_map_scale: null        # Explicitly set to null for non-height-sensor version
 def_ang_order: "mj"
-default_angles: [-0.42, 0, 0, 0.81, -0.4, 0,
-                  -0.42, 0, 0, 0.81, -0.4, 0,
+default_angles: [-0.1, 0, 0, 0.3, -0.2, 0,
+                  -0.1, 0, 0, 0.3, -0.2, 0,
                   0,
-                  0, 0.27, 0, 0.5,
-                  0, -0.27, 0, 0.5]
+                  0.1, 0.27, 0, 1.2,
+                  0.1, -0.27, 0, 1.2]
+log: true
+log_dir: "logs"

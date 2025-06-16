@@ -234,6 +234,8 @@ def main():
             {'name': 'obs', 'length': policy.get_num_obs()},
             {'name': 'action', 'length': policy.get_num_actions()},
             {'name': 'torque', 'length': 21},
+            {'name': 'left_ankle_pos', 'length': 3},
+            {'name': 'right_ankle_pos', 'length': 3},
         ]
     }
     with open(os.path.join(new_folder_path, "sim_config.yaml"), 'w') as f:

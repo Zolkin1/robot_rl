@@ -68,3 +68,9 @@ transfer/obelisk/install/
 transfer/obelisk/log/
 transfer/obelisk/build/
 
+
+*.pkl
+
+*.png
+
+transfer/obelisk/.vscode/
