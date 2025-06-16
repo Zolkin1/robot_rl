@@ -25,7 +25,7 @@ def no_progress(env, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")) -> tor
     behind_schedule = distance < (0.5 * expected_distance)
 
     # Optional: only trigger after a minimum time has passed (e.g., 30% of episode)
-    enough_time_passed = env.episode_length_buf > (0.5 * env.max_episode_length)
+    enough_time_passed = env.episode_length_buf > (0.3 * env.max_episode_length)
     no_progress_flag = behind_schedule & enough_time_passed
 
     return no_progress_flag

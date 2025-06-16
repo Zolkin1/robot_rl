@@ -262,5 +262,5 @@ class G1StairPlay_EnvCfg(G1StairEnvCfg):
         self.scene.terrain.terrain_generator.num_cols = 2
         # self.scene.terrain.terrain_generator.max_init_terrain_level = (.,3.)
 
-        self.commands.base_velocity.ranges.lin_vel_x = (0.5,0.5)
+        self.commands.base_velocity.ranges.lin_vel_x = (0.5,0.6)
         

@@ -87,22 +87,22 @@ STAIR_CFG = TerrainGeneratorCfg(
             border_width=1.0,
             holes=False,
         ),
-        # "flat_stairs_inv": terrain_gen.MeshInvertedPyramidStairsTerrainCfg(
-        #     proportion=0.2,
-        #     step_height_range=(0.0, 0.05),
-        #     step_width=0.3,
-        #     platform_width=2,
-        #     border_width=1.0,
-        #     holes=True,
-        # ),
-        # "flat_stairs": terrain_gen.MeshPyramidStairsTerrainCfg(
-        #     proportion=0.2,
-        #     step_height_range=(0.0, 0.05),
-        #     step_width=0.3,
-        #     platform_width=2.0,
-        #     border_width=1.0,
-        #     holes=True,
-        # ),
+        "flat_stairs_inv": terrain_gen.MeshInvertedPyramidStairsTerrainCfg(
+            proportion=0.1,
+            step_height_range=(0.0, 0.05),
+            step_width=0.3,
+            platform_width=2,
+            border_width=1.0,
+            holes=False,
+        ),
+        "flat_stairs": terrain_gen.MeshPyramidStairsTerrainCfg(
+            proportion=0.1,
+            step_height_range=(0.0, 0.05),
+            step_width=0.3,
+            platform_width=2.0,
+            border_width=1.0,
+            holes=False,
+        ),
         # "boxes": terrain_gen.MeshRandomGridTerrainCfg(
         #     proportion=0.2, grid_width=0.45, grid_height_range=(0.05, 0.05), platform_width=2.0
         # ),

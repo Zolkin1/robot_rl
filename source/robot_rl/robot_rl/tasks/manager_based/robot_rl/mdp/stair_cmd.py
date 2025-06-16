@@ -3,6 +3,7 @@ from isaaclab.utils.math import euler_xyz_from_quat, wrap_to_pi, quat_from_euler
 from .hlip_cmd import HLIPCommandTerm, euler_rates_to_omega, _transfer_to_global_frame, _transfer_to_local_frame
 from .ref_gen import bezier_deg, calculate_cur_swing_foot_pos_stair, calculate_cur_swing_foot_pos
 from .clf import CLF
+from .hlip_batch import HLIPBatch
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -11,7 +12,10 @@ if TYPE_CHECKING:
 class StairCmd(HLIPCommandTerm):
     def __init__(self, cfg: "StairHLIPCommandCfg", env):
           super().__init__(cfg, env)
-          self.T = torch.zeros((self.num_envs), device=self.device)
+          self.T = self.cfg.gait_period/2*torch.ones((self.num_envs), device=self.device)
+          grav = torch.abs(torch.tensor(self.env.cfg.sim.gravity[2], device=self.device))
+          self.hlip_controller = HLIPBatch(grav,self.z0,self.T_ds,self.T,self.y_nom)
+          
           self.tp = torch.zeros((self.num_envs), device=self.device)
           self.z_height = torch.zeros((self.num_envs), device=self.device)
           self.stance_foot_box_z = torch.zeros((self.num_envs), device=self.device)
@@ -640,8 +644,6 @@ class StairCmd(HLIPCommandTerm):
 
           
           # import pdb; pdb.set_trace()
-          self.hlip_controller.T = self.T
-          self.hlip_controller._compute_s2s_matrices()
           self.hlip_controller.compute_orbit(self.T, base_velocity)
           #select init and Xdes, Ux, Ydes, Uy
           x0 = self.hlip_controller.x_init
@@ -649,7 +651,8 @@ class StairCmd(HLIPCommandTerm):
 
 
 
-          import pdb; pdb.set_trace()
+
+          # import pdb; pdb.set_trace()
           com_x, com_xd = self.hlip_controller._compute_desire_com_trajectory(
                cur_time=self.cur_swing_time,
                Xdesire=x0,
