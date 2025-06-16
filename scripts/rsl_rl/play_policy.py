@@ -104,7 +104,7 @@ def parse_args():
     parser.add_argument(
         "--video_length",
         type=int,
-        default=200,
+        default=300,
         help="Length of the recorded video (in steps)."
     )
     parser.add_argument(
@@ -153,7 +153,7 @@ def extract_reference_trajectory(env, log_vars):
 
     for var in log_vars:
         if hasattr(ref, var):
-            results[var] = getattr(ref, var)
+            results[var] = getattr(ref, var).clone()
         elif var in ref.metrics:
             results[var] = ref.metrics[var]
         elif var == "base_velocity":

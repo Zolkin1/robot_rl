@@ -11,14 +11,16 @@ from isaaclab.utils.noise import AdditiveUniformNoiseCfg as Unoise
 from isaaclab.sensors import  RayCasterCfg, patterns
 from isaaclab.managers import RewardTermCfg as RewTerm
 from isaaclab.managers import CurriculumTermCfg as CurrTerm
-from isaaclab_tasks.manager_based.locomotion.velocity.velocity_env_cfg import ObservationsCfg
+from isaaclab_tasks.manager_based.locomotion.velocity.velocity_env_cfg import TerminationsCfg
+from isaaclab.managers import TerminationTermCfg as DoneTerm
 
-from .g1_rough_env_lip_cfg import G1RoughLipEnvCfg, G1RoughLipRewards
+from .g1_rough_env_lip_cfg import G1RoughLipEnvCfg, G1RoughLipRewards, G1RoughLipObservationsCfg
 from robot_rl.tasks.manager_based.robot_rl.terrains.rough import STAIR_CFG
 
 from isaaclab_tasks.manager_based.locomotion.velocity.velocity_env_cfg import CommandsCfg  #Inherit from the base envs
 
 from robot_rl.tasks.manager_based.robot_rl import mdp
+from robot_rl.tasks.manager_based.robot_rl.humanoid_env_cfg import HumanoidEventsCfg
 from robot_rl.tasks.manager_based.robot_rl.mdp.stair_cfg import StairHLIPCommandCfg
 ##
 # Pre-defined configs
@@ -26,6 +28,65 @@ from robot_rl.tasks.manager_based.robot_rl.mdp.stair_cfg import StairHLIPCommand
 from robot_rl.assets.robots.g1_21j import G1_MINIMAL_CFG  # isort: skip
 
 #
+
+@configclass
+class G1StairObservationsCfg(G1RoughLipObservationsCfg):
+    """Observation specifications for the G1 Flat environment."""
+    @configclass
+    class PolicyCfg(G1RoughLipObservationsCfg.PolicyCfg):
+      height_scan = None
+      sin_phase = None
+      height_scan = ObsTerm(
+            func=mdp.height_scan,
+            params={"sensor_cfg": SceneEntityCfg("height_scanner")},
+            noise=Unoise(n_min=-0.1, n_max=0.1),
+            scale=1,
+            clip=(-1.0, 1.0)
+        )
+      sin_phase = ObsTerm(
+            func=mdp.stair_sin_phase,
+            params={"command_name": "hlip_ref"},
+        )
+      cos_phase = ObsTerm(
+            func=mdp.stair_cos_phase,
+            params={"command_name": "hlip_ref"},
+        )
+      step_duration = ObsTerm(
+            func=mdp.step_duration,
+            params={"command_name": "hlip_ref"},
+        )
+      
+    @configclass
+    class CriticCfg(G1RoughLipObservationsCfg.CriticCfg):
+        height_scan = None
+        sin_phase = None
+        cos_phase = None
+        height_scan = ObsTerm(
+            func=mdp.height_scan,
+            params={"sensor_cfg": SceneEntityCfg("height_scanner")},
+            scale=1,
+            clip=(-1.0, 1.0)
+        )
+        sin_phase = ObsTerm(
+            func=mdp.stair_sin_phase,
+            params={"command_name": "hlip_ref"},
+        )
+        cos_phase = ObsTerm(
+            func=mdp.stair_cos_phase,
+            params={"command_name": "hlip_ref"},
+        )
+
+        step_duration = ObsTerm(
+            func=mdp.step_duration,
+            params={"command_name": "hlip_ref"},
+        )
+        
+        contact_state = ObsTerm(
+            func=mdp.contact_state,
+            params={"sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*_ankle_roll_link")},
+        )
+    policy: PolicyCfg = PolicyCfg()
+    critic: CriticCfg = CriticCfg()
 
 @configclass
 class G1StairCommandsCfg(CommandsCfg):
@@ -47,15 +108,24 @@ class G1StairRewardsCfg(G1RoughLipRewards):
         func=mdp.swing_foot_contact_penalty,
         params={"command_name": "hlip_ref",
                 "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*_ankle_roll_link")},
-        weight=-0.5,
+        weight=-2.0,
     )
 
+@configclass
+class G1StairsTerminationCfg(TerminationsCfg):
+    """Events for the G1 Flat environment."""
+    no_progress = DoneTerm(
+        func=mdp.no_progress,
+        params={},
+       )
 
 @configclass
 class G1StairEnvCfg(G1RoughLipEnvCfg):
     """Configuration for the G1 Flat environment."""
     commands: G1StairCommandsCfg = G1StairCommandsCfg()
     rewards: G1StairRewardsCfg = G1StairRewardsCfg()
+    terminations: G1StairsTerminationCfg = G1StairsTerminationCfg()
+    observations: G1StairObservationsCfg = G1StairObservationsCfg()
     # curriculum: CurriculumCfg = CurriculumCfg()
     def __post_init__(self):
         # post init of parent
@@ -69,18 +139,11 @@ class G1StairEnvCfg(G1RoughLipEnvCfg):
         self.scene.robot = G1_MINIMAL_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
         
         # No height scanner for now
-        # self.scene.height_scanner = None
+     
         self.scene.terrain.terrain_type = "generator"
 
-        # STAIR_CFG.sub_terrains["pyramid_stairs_inv"].step_height_range = (0.05,0.25)
-        # self.scene.terrain.terrain_generator.max_init_terrain_level = 3
-        # del STAIR_CFG.sub_terrains["pyramid_stairs"]
-
         self.scene.terrain.terrain_generator = STAIR_CFG
-
-        # self.scene.terrain.terrain_type = "plane"
-        # self.scene.terrain.terrain_generator = None
-  
+        # self.scene.terrain.terrain_generator.max_init_terrain_level = 2.0
         # self.curriculum.terrain_levels = None
         self.curriculum.terrain_levels = CurrTerm(func=mdp.terrain_levels)
         self.scene.height_scanner = RayCasterCfg(
@@ -95,59 +158,13 @@ class G1StairEnvCfg(G1RoughLipEnvCfg):
         self.scene.height_scanner.prim_path = "{ENV_REGEX_NS}/Robot/pelvis_link"
 
 
-        self.observations.policy.height_scan = ObsTerm(
-            func=mdp.height_scan,
-            params={"sensor_cfg": SceneEntityCfg("height_scanner")},
-            noise=Unoise(n_min=-0.1, n_max=0.1),
-            scale=0.1,
-            clip=(-1.0, 1.0)
-        )
-        self.observations.critic.height_scan = ObsTerm(
-            func=mdp.height_scan,
-            params={"sensor_cfg": SceneEntityCfg("height_scanner")},
-            scale=0.1,
-            clip=(-1.0, 1.0)
-        )
-
-        self.observations.policy.sin_phase = ObsTerm(
-            func=mdp.stair_sin_phase,
-            params={"command_name": "hlip_ref"},
-        )
-        self.observations.policy.cos_phase = ObsTerm(
-            func=mdp.stair_cos_phase,
-            params={"command_name": "hlip_ref"},
-        )
-        
-
-        self.observations.critic.sin_phase = ObsTerm(
-            func=mdp.stair_sin_phase,
-            params={"command_name": "hlip_ref"},
-        )
-        self.observations.critic.cos_phase = ObsTerm(
-            func=mdp.stair_cos_phase,
-            params={"command_name": "hlip_ref"},
-        )
-
-        self.observations.policy.step_duration = ObsTerm(
-            func=mdp.step_duration,
-            params={"command_name": "hlip_ref"},
-        )
-        self.observations.critic.step_duration = ObsTerm(
-            func=mdp.step_duration,
-            params={"command_name": "hlip_ref"},
-        )
-
-
-        self.observations.critic.contact_state = ObsTerm(
-            func=mdp.contact_state,
-            params={"sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*_ankle_roll_link")},
-        )
+      
         ##
         # Randomization
         ##
-        self.events.push_robot = None
-        # self.events.push_robot.params["velocity_range"] = {"x": (-0.5, 0.5), "y": (-0.5, 0.5), "roll": (-0.4, 0.4),
-        #                                                    "pitch": (-0.4, 0.4), "yaw": (-0.4, 0.4)}
+        # self.events.push_robot = None
+        self.events.push_robot.params["velocity_range"] = {"x": (-0.5, 0.5), "y": (-0.5, 0.5), "roll": (-0.4, 0.4),
+                                                           "pitch": (-0.4, 0.4), "yaw": (-0.4, 0.4)}
         # self.events.push_robot.params["velocity_range"] = {"x": (-0, 0), "y": (-0, 0), "roll": (-0.0, 0.0),
         #                                                    "pitch": (-0., 0.), "yaw": (-0.0, 0.0)}
         self.events.add_base_mass.params["asset_cfg"].body_names = ["pelvis_link"]
@@ -174,7 +191,7 @@ class G1StairEnvCfg(G1RoughLipEnvCfg):
         ##
         # Commands
         ##
-        self.commands.base_velocity.ranges.lin_vel_x = (0.75,0.75)
+        self.commands.base_velocity.ranges.lin_vel_x = (0.4,0.75)
         self.commands.base_velocity.ranges.lin_vel_y = (0.0,0.0)
         self.commands.base_velocity.ranges.ang_vel_z = (0.0,0.0)
 
@@ -245,5 +262,5 @@ class G1StairPlay_EnvCfg(G1StairEnvCfg):
         self.scene.terrain.terrain_generator.num_cols = 2
         # self.scene.terrain.terrain_generator.max_init_terrain_level = (.,3.)
 
-        self.commands.base_velocity.ranges.lin_vel_x = (0.75,0.75)
+        self.commands.base_velocity.ranges.lin_vel_x = (0.5,0.5)
         

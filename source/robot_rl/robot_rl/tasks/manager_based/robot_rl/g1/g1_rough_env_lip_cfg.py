@@ -61,8 +61,8 @@ class G1RoughLipObservationsCfg(ObservationsCfg):
         foot_ang_vel = ObsTerm(func=mdp.foot_ang_vel, params={"command_name": "hlip_ref"},scale=1.0)
         ref_traj = ObsTerm(func=mdp.ref_traj, params={"command_name": "hlip_ref"},scale=1.0)
         act_traj = ObsTerm(func=mdp.act_traj, params={"command_name": "hlip_ref"},scale=1.0)
-        ref_traj_vel = ObsTerm(func=mdp.ref_traj_vel, params={"command_name": "hlip_ref"},scale=0.1)
-        act_traj_vel = ObsTerm(func=mdp.act_traj_vel, params={"command_name": "hlip_ref"},scale=0.1)
+        ref_traj_vel = ObsTerm(func=mdp.ref_traj_vel, params={"command_name": "hlip_ref"},clip=(-20.0,20.0,),scale=0.1)
+        act_traj_vel = ObsTerm(func=mdp.act_traj_vel, params={"command_name": "hlip_ref"},clip=(-20.0,20.0,),scale=0.1)
         height_scan = None      # Removed - not supported yet
         # v_dot = ObsTerm(func=mdp.v_dot, params={"command_name": "hlip_ref"},clip=(-1000.0,1000.0),scale=0.001)
         # v = ObsTerm(func=mdp.v, params={"command_name": "hlip_ref"},clip=(0.0,500.0),scale=0.01)

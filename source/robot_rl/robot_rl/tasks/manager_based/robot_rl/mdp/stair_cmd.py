@@ -1,7 +1,7 @@
 import torch,math
 from isaaclab.utils.math import euler_xyz_from_quat, wrap_to_pi, quat_from_euler_xyz,quat_rotate_inverse, yaw_quat, quat_rotate, quat_inv, quat_apply
 from .hlip_cmd import HLIPCommandTerm, euler_rates_to_omega, _transfer_to_global_frame, _transfer_to_local_frame
-from .ref_gen import bezier_deg, calculate_cur_swing_foot_pos_stair, HLIP
+from .ref_gen import bezier_deg, calculate_cur_swing_foot_pos_stair, calculate_cur_swing_foot_pos
 from .clf import CLF
 from typing import TYPE_CHECKING
 
@@ -353,7 +353,7 @@ class StairCmd(HLIPCommandTerm):
           phi_c = torch.sin(2 * torch.pi * self.tp) / torch.sqrt(torch.sin(2 * torch.pi * self.tp)**2 + self.T)
 
 
-
+          
         # 1) compute new stance & swing indices
           new_stance_idx = (phi_c < 0).long()     # or however you get it
           self.swing_idx = 1 - new_stance_idx
@@ -376,11 +376,14 @@ class StairCmd(HLIPCommandTerm):
           # 5) stash the new stance_idx
           self.stance_idx = new_stance_idx
 
+
+
           # 6) **only** overwrite those entries that changed
           self.stance_foot_pos_0      [changed] = pos      [changed]
           self.stance_foot_ori_quat_0 [changed] = quat     [changed]
           self.stance_foot_ori_0      [changed] = euler    [changed]
           self.swing2stance_foot_pos_0[changed] = s2s      [changed]
+
 
 
           self.phase_var = torch.where(
@@ -635,14 +638,18 @@ class StairCmd(HLIPCommandTerm):
 
           
 
-
+          
+          # import pdb; pdb.set_trace()
+          self.hlip_controller.T = self.T
+          self.hlip_controller._compute_s2s_matrices()
+          self.hlip_controller.compute_orbit(self.T, base_velocity)
           #select init and Xdes, Ux, Ydes, Uy
           x0 = self.hlip_controller.x_init
           y0 = self.hlip_controller.y_init[batch_idx,self.stance_idx]
 
 
 
-
+          import pdb; pdb.set_trace()
           com_x, com_xd = self.hlip_controller._compute_desire_com_trajectory(
                cur_time=self.cur_swing_time,
                Xdesire=x0,
@@ -693,6 +700,17 @@ class StairCmd(HLIPCommandTerm):
                foot_target_yaw_adjusted[:, 0], foot_target_yaw_adjusted[:, 1]
           )
 
+          flat_foot_pos, flat_sw_z = calculate_cur_swing_foot_pos(
+               bht_tensor, z_init, z_sw_max_tensor, phase_var_tensor,self.swing2stance_foot_pos_0[:,0], sign*self.cfg.y_nom,T_tensor, z_sw_neg_tensor,
+               foot_target_yaw_adjusted[:, 0], foot_target_yaw_adjusted[:, 1]
+          )
+
+          #for the envs with self.z_height < 0.01: use flat_foot_pos and flat_sw_z instead of foot_pos and sw_z
+          condition = (torch.abs(self.z_height) < 0.01).unsqueeze(-1)  # shape [B, 1]
+          foot_pos_new = torch.where(condition, flat_foot_pos, foot_pos)
+          sw_z_new = torch.where(condition, flat_sw_z, sw_z)  # sw_z is probably [B], so no unsqueeze needed
+          foot_pos = foot_pos_new
+          sw_z = sw_z_new
 
           dbht = bezier_deg(1, phase_var_tensor, T_tensor, horizontal_control_points, five_tensor)
           foot_vel = torch.zeros((N,3), device=self.device)

@@ -54,21 +54,31 @@ def clf_curriculum(
 def terrain_levels(
     env: ManagerBasedRLEnv, env_ids: Sequence[int], asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")
 ) -> torch.Tensor:
-    """Curriculum based on the distance the robot walked when commanded to move at a desired velocity.
-
-    This term is used to increase the difficulty of the terrain when the robot walks far enough and decrease the
-    difficulty when the robot walks less than half of the distance required by the commanded velocity.
-
-    .. note::
-        It is only possible to use this term with the terrain type ``generator``. For further information
-        on different terrain types, check the :class:`isaaclab.terrains.TerrainImporter` class.
-
-    Returns:
-        The mean terrain level for the given environment ids.
     """
-    # extract the used quantities (to enable type-hinting)
+    Curriculum based on distance traveled vs expected distance.
+    Promotes to harder terrain if distance > 50% of expected so far.
+    Demotes if distance < 50% of expected and not already moving up.
+    """
     asset: Articulation = env.scene[asset_cfg.name]
     terrain: TerrainImporter = env.scene.terrain
+    command = env.command_manager.get_command("base_velocity")
+
+    # # Distance traveled in XY
+    # distance = torch.norm(asset.data.root_pos_w[env_ids, :2] - env.scene.env_origins[env_ids, :2], dim=1)
+
+    # # Time-aware expected distance
+    # elapsed_time = env.episode_length_buf[env_ids] * env.step_dt
+    # commanded_speed = torch.norm(command[env_ids, :2], dim=1)
+    # expected_distance = commanded_speed * elapsed_time
+
+    # # Curriculum decisions
+    # # time_gate_down = env.episode_length_buf[env_ids] > 0.4 * env.max_episode_length
+    # # time_gate_up = env.episode_length_buf[env_ids] > 0.7 * env.max_episode_length
+
+    # # Logic
+    # move_up = (distance > 0.6 * expected_distance) 
+    # move_down = (distance < 0.5 * expected_distance) & (~move_up) 
+  
     command = env.command_manager.get_command("base_velocity")
     # compute the distance the robot walked
     distance = torch.norm(asset.data.root_pos_w[env_ids, :2] - env.scene.env_origins[env_ids, :2], dim=1)
@@ -79,5 +89,6 @@ def terrain_levels(
     move_down *= ~move_up
     # update terrain levels
     terrain.update_env_origins(env_ids, move_up, move_down)
-    # return the mean terrain level
+
+    # Return average terrain level (for logging or scaling)
     return torch.mean(terrain.terrain_levels.float())

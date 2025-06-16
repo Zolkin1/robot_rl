@@ -4,26 +4,26 @@ from .stair_cmd import StairCmd
 
 Q_weights = [
     1.0,   300.0,    # com_x pos, vel
-    1.0,   1.0,   # com_y pos, vel
+    100.0,   1.0,   # com_y pos, vel
     1.0,  1.0,  # com_z pos, vel
     1.0,    1.0,    # pelvis_roll pos, vel
     1.0,    1.0,    # pelvis_pitch pos, vel
     101.0,    11.0,    # pelvis_yaw pos, vel
-    1001.0, 1251.0,  # swing_x pos, vel
-    1701.0,  125.0,  # swing_y pos, vel
-    3501.0, 1001.0,   # swing_z pos, vel
-    31.0,    1.0,    # swing_ori_roll pos, vel
-    1.0,    1.0,    # swing_ori_pitch pos, vel
-    401.0,    11.0,    # swing_ori_yaw pos, vel
-    1.0,    1.0,    # waist_yaw pos, vel
-    1.0,1.0, #left sholder pitch
-    1.0,1.0, #right sholder pitch
-    1.0,1.0, #left sholder roll
-    1.0,1.0, #right sholder roll
-    1.0,1.0, #left sholder yaw
-    1.0,1.0, #right sholder yaw
-    1.0,1.0, #left elbow 
-    1.0,1.0, #right elbow 
+    1000.0, 250.0,  # swing_x pos, vel
+    1700.0,  125.0,  # swing_y pos, vel
+    3500.0, 200.0,   # swing_z pos, vel
+    100.0,    1.0,    # swing_ori_roll pos, vel
+    100.0,    1.0,    # swing_ori_pitch pos, vel
+    400.0,    10.0,    # swing_ori_yaw pos, vel
+    10.0,    1.0,    # waist_yaw pos, vel
+    10.0,1.0, #left sholder pitch
+    10.0,1.0, #right sholder pitch
+    10.0,1.0, #left sholder roll
+    10.0,1.0, #right sholder roll
+    10.0,1.0, #left sholder yaw
+    10.0,1.0, #right sholder yaw
+    10.0,1.0, #left elbow 
+    10.0,1.0, #right elbow 
 ]
 
 
