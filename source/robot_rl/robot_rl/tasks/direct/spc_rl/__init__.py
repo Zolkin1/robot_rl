@@ -37,16 +37,16 @@ gym.register(
     },
 )
 
-# ## SPC Cartpole
-# gym.register(
-#     id="SPC-Cartpole",
-#     entry_point=f"{__name__}.cart_pole_env:CartpoleEnv",
-#     disable_env_checker=True,
-#     kwargs={
-#         "env_cfg_entry_point": f"{__name__}.cart_pole_env:CartpoleEnvCfg",
-#         "rl_games_cfg_entry_point": f"{agents.__name__}:rl_games_ppo_cfg.yaml",
-#         "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_rl_ppo_cfg:CartPolePPORunnerCfg",
-#         "skrl_cfg_entry_point": f"{agents.__name__}:skrl_ppo_cfg.yaml",
-#         "sb3_cfg_entry_point": f"{agents.__name__}:sb3_ppo_cfg.yaml",
-#     },
-# )
+## SPC Cartpole
+gym.register(
+    id="SPC-Cartpole",
+    entry_point=f"{__name__}.spc_cartpole_env:SpcCartpoleEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.spc_cartpole_env:SpcCartpoleEnvCfg",
+        "rl_games_cfg_entry_point": f"{agents.__name__}:rl_games_ppo_cfg.yaml",
+        "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_rl_ppo_cfg:SpcCartpolePPORunnerCfg",
+        "skrl_cfg_entry_point": f"{agents.__name__}:skrl_ppo_cfg.yaml",
+        "sb3_cfg_entry_point": f"{agents.__name__}:sb3_ppo_cfg.yaml",
+    },
+)

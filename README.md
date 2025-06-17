@@ -156,3 +156,4 @@ First, set the environment variable `ROBOT_RL_ROOT` to the repo path.
 ## Other Deps
 pygame
 mujoco
+judo-rai
