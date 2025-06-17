@@ -41,7 +41,7 @@ ROBOT_ASSETS_AMBER = "/home/s-ritwik/src/robot_rl/robot_assets/amber5/amber"
 
 AMBER_CONFIG = ArticulationCfg(
     spawn=sim_utils.UsdFileCfg(
-        usd_path=f"{ROBOT_ASSETS_AMBER}/amber_corrected.usd",
+        usd_path=f"{ROBOT_ASSETS_AMBER}/amber_correct.usd",
         activate_contact_sensors=True,
         # path_in_usd="/Amber",
         rigid_props=sim_utils.RigidBodyPropertiesCfg(   
