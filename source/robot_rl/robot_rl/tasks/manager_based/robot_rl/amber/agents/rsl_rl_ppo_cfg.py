@@ -22,6 +22,9 @@ class PPORunnerCfg(RslRlOnPolicyRunnerCfg):
         actor_hidden_dims=[512, 256, 128],
         critic_hidden_dims=[512, 256, 128],
         activation="elu",
+        # learn_std=False,
+        # free_log_std=True,
+        # std_transform="exp",
     )
     algorithm = RslRlPpoAlgorithmCfg(
         value_loss_coef=1.0,

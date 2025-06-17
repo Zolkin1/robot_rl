@@ -11,9 +11,11 @@ from isaaclab.utils.noise import AdditiveUniformNoiseCfg as Unoise
 from isaaclab.managers import ObservationTermCfg as ObsTerm
 from isaaclab.managers import RewardTermCfg as RewTerm
 from isaaclab.managers import TerminationTermCfg, SceneEntityCfg
+# from isaaclab.managers.reset_manager import ResetCallback
 from isaaclab.assets import AssetBaseCfg
 from isaaclab.sensors import ContactSensorCfg
 import robot_rl.tasks.manager_based.robot_rl.amber.mdp as mdp
+from isaaclab.managers import EventTermCfg
 
 
 from isaaclab_tasks.manager_based.locomotion.velocity.velocity_env_cfg import (
@@ -154,15 +156,43 @@ class AmberEnvCfg(LocomotionVelocityRoughEnvCfg):
 
         # — add a scene‐level contact sensor on the torso link —
         self.scene.contact_forces = ContactSensorCfg(
-                prim_path="{ENV_REGEX_NS}/Amber/torso",
-                update_period=0.0,     # every physics step
-                history_length=1,      # only current reading
-                debug_vis=False,
-            )
+            prim_path="{ENV_REGEX_NS}/Amber/torso",
+            update_period=0.0,
+            history_length=1,
+            debug_vis=False,
+        )
 
         # now let the base class wire up buffers, spaces, etc.
         super().__post_init__()
 
+        # self.commands.base_velocity.goal_vel_visualizer_cfg.pose_in_robot_frame = False
+        # self.commands.base_velocity.goal_vel_visualizer_cfg = None
+
+        # turn off heading (yaw) control entirely
+        self.commands.base_velocity.heading_command = False
+        # zero out any lateral (Y) command
+        self.commands.base_velocity.ranges.lin_vel_y = (0.0, 0.0)
+        # zero out any yaw‐rate command
+        self.commands.base_velocity.ranges.ang_vel_z = (0.0, 0.0)
+        # =============================================
+        # AVOID BOUNCING ON RESET
+        # =============================================
+        # 1) Always lift the root 1 cm above ground on reset
+        base_reset = self.events.reset_base
+        base_reset.params["pose_range"]["z"] = (0.01, 0.01)
+
+        # 2) Always zero out any reset velocity
+        for axis in base_reset.params["velocity_range"].keys():
+            base_reset.params["velocity_range"][axis] = (0.0, 0.0)
+
+        # (Optional) 3) If you still see small jitter, you can add
+        #     a small settle‐physics event here to run a few substeps:
+        # self.events.settle_physics = EventTermCfg(
+        #     func="robot_rl.tasks.manager_based.robot_rl.amber.amber_env:settle_physics_after_reset",
+        #     mode="reset",
+        #     interval_range_s=None,
+        #     min_step_count_between_reset=0,
+        # )
         # — re‐enable collision termination on torso hits —
         self.terminations.base_contact = TerminationTermCfg(
             func=mdp.torso_contact_termination,
@@ -171,6 +201,12 @@ class AmberEnvCfg(LocomotionVelocityRoughEnvCfg):
                 "asset_cfg":  SceneEntityCfg(name="robot"),
             },
         )
+        # self.events.reset_robot_joints = None
+        # # disable random “push” velocities
+        # self.events.push_robot         = None
+        # # disable any external‐force‐torque at reset
+        # self.events.base_external_force_torque = None
+
 
         # keep your other terms disabled
         self.rewards.feet_air_time      = None
@@ -179,9 +215,6 @@ class AmberEnvCfg(LocomotionVelocityRoughEnvCfg):
 
         # preserve whatever you did with external forces
         self.events.base_external_force_torque.params["asset_cfg"].body_names = ["torso"]
-
-
-
 
     # def define_markers(self) -> VisualizationMarkers:
     # """Define markers with various different shapes."""

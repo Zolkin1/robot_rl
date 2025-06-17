@@ -16,13 +16,14 @@ from isaaclab.managers import RewardTermCfg as RewTerm
 # Pre-defined configs
 ##
 from .amber_env_cfg import AmberEnvCfg
-
+from .amber_env import AmberFlatEnv
 ##
 # Environment configuration
 ##
 
 @configclass
 class AmberFlatEnvCfg(AmberEnvCfg):
+    env: type = AmberFlatEnv    
     def __post_init__(self):
         super().__post_init__()
         # override terrain to flat plane...

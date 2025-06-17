@@ -41,7 +41,7 @@ ROBOT_ASSETS_AMBER = "/home/s-ritwik/src/robot_rl/robot_assets/amber5/amber"
 
 AMBER_CONFIG = ArticulationCfg(
     spawn=sim_utils.UsdFileCfg(
-        usd_path=f"{ROBOT_ASSETS_AMBER}/amber4.usd",
+        usd_path=f"{ROBOT_ASSETS_AMBER}/amber_corrected.usd",
         activate_contact_sensors=True,
         # path_in_usd="/Amber",
         rigid_props=sim_utils.RigidBodyPropertiesCfg(   
@@ -62,7 +62,7 @@ AMBER_CONFIG = ArticulationCfg(
     ),
     init_state=ArticulationCfg.InitialStateCfg(
         # lift Amber up so you can see it, and offset to the side
-        pos=(0., 0., 1.3),
+        pos=(0., 0., 1.5),
         joint_pos={
             # world → base_link is fixed (handled in USD), so we start at:
             # "base_link_to_base_link2": 0.0,   # revolute (yaw about Y)
@@ -150,31 +150,31 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
 
     while simulation_app.is_running():
         # reset every 500 steps
-        if count % 300 == 0:
-            count = 0
+        # if count % 10000 == 0:
+        #     count = 0
 
-            # Reset Amber
-            root = scene["Amber"].data.default_root_state.clone()
-            root[:, :3] += scene.env_origins
-            scene["Amber"].write_root_pose_to_sim(root[:, :7])
-            scene["Amber"].write_root_velocity_to_sim(root[:, 7:])
-            scene["Amber"].write_joint_state_to_sim(
-                scene["Amber"].data.default_joint_pos.clone(),
-                scene["Amber"].data.default_joint_vel.clone(),
-            )
+        #     # Reset Amber
+        #     root = scene["Amber"].data.default_root_state.clone()
+        #     root[:, :3] += scene.env_origins
+        #     scene["Amber"].write_root_pose_to_sim(root[:, :7])
+        #     scene["Amber"].write_root_velocity_to_sim(root[:, 7:])
+        #     scene["Amber"].write_joint_state_to_sim(
+        #         scene["Amber"].data.default_joint_pos.clone(),
+        #         scene["Amber"].data.default_joint_vel.clone(),
+        #     )
 
-            scene.reset()
-            print("[INFO]: Resetting all robots state...")
+        #     scene.reset()
+        #     print("[INFO]: Resetting all robots state...")
 
         # 1) Per-joint randomness: set to 0.0 if you want that joint fixed at default.
         random_scales = {
             # "base_link_to_base_link2": 0.0,   # torso yaw
             # "base_link2_to_base_link3": 0.0,  # prismatic Z (usually left unconstrained here)
             # "base_link3_to_torso":      0.0,  # prismatic X
-            "q1_left":   0.2,
-            "q2_left":   0.2,
-            "q1_right":  0.4,
-            "q2_right":  0.4,
+            "q1_left":   1.3,
+            "q2_left":   1.4,
+            "q1_right":  1.2,
+            "q2_right":  0.6,
         }
 
         amber = scene["Amber"]
