@@ -40,7 +40,7 @@ def swing_foot_contact_penalty(
     net_forces = contact_sensor.data.net_forces_w_history  # [N, T, B, 3]
     latest_forces = net_forces[:, -1, sensor_cfg.body_ids, :]  # [num_envs,2, 3]
     # get the correct forces
-    latest_forces = latest_forces[batch_idx, swing_foot_indices,:]  # [num_envs, 3]
+    latest_forces = latest_forces[batch_idx, swing_foot_indices,0:2]  # [num_envs, 3]
     force_mags = torch.norm(latest_forces, dim=-1)  # [num_envs]
     capped_penalty = torch.clamp(force_mags, max=penalty_cap)  # [num_envs]
     return capped_penalty  # Standard is to return per-env reward/penalty

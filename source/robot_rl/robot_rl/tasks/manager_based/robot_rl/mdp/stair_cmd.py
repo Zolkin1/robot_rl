@@ -224,7 +224,7 @@ class StairCmd(HLIPCommandTerm):
           terrain_importer = self.env.scene.terrain
           env_origins = terrain_importer.env_origins           # (N, 3) world-space origin per env
           terrain_origins = terrain_importer.terrain_origins   # (rows, cols, 3)
-          cfg = self.env.cfg.scene.terrain.terrain_generator.sub_terrains['pyramid_stairs_inv']
+          cfg = self.env.cfg.scene.terrain.terrain_generator.sub_terrains['pyramid_stairs']
           cell_x, cell_y = cfg.size
 
           # 2) Compute world-frame desired foot positions from stance-foot frame offsets
@@ -340,7 +340,7 @@ class StairCmd(HLIPCommandTerm):
     def update_Stance_Swing_idx(self):
           base_velocity = self.env.command_manager.get_command("base_velocity")  # (N,3)
           #check stair width
-          cfg = self.env.cfg.scene.terrain.terrain_generator.sub_terrains['pyramid_stairs_inv']
+          cfg = self.env.cfg.scene.terrain.terrain_generator.sub_terrains['pyramid_stairs']
           stair_width = cfg.step_width
 
           # Calculate Tswing only if velocity is high enough, else use default
@@ -627,11 +627,11 @@ class StairCmd(HLIPCommandTerm):
           self.update_z_height(foot_target_yaw_adjusted[:,0], foot_target_yaw_adjusted[:,1])
           
           #transform it into the global frame
-          # foot_target_global_yaw_frame = _transfer_to_global_frame(foot_target_yaw_adjusted, self.stance_foot_ori_quat_0)
+          foot_target_global_yaw_frame = _transfer_to_global_frame(foot_target_yaw_adjusted, self.stance_foot_ori_quat_0)
 
           
           # based on the nominal step size, check the stair height
-          # self.update_z_height(foot_target_global_yaw_frame[:,0], foot_target_global_yaw_frame[:,1])
+          self.update_z_height(foot_target_global_yaw_frame[:,0], foot_target_global_yaw_frame[:,1])
 
          
           # foot_target_yaw_adjusted = self.adjust_foot_target(foot_target_global_yaw_frame)
@@ -699,12 +699,12 @@ class StairCmd(HLIPCommandTerm):
 
           sign = torch.sign(foot_target_yaw_adjusted[:, 1])
           foot_pos, sw_z = calculate_cur_swing_foot_pos_stair(
-               bht_tensor, z_init, z_sw_max_tensor, phase_var_tensor,self.swing2stance_foot_pos_0[:,0], sign*self.cfg.y_nom,T_tensor, z_sw_neg_tensor,
+               bht_tensor, -self.z_height, z_sw_max_tensor, phase_var_tensor,-Ux, sign*self.cfg.y_nom,T_tensor, z_sw_neg_tensor,
                foot_target_yaw_adjusted[:, 0], foot_target_yaw_adjusted[:, 1]
           )
 
           flat_foot_pos, flat_sw_z = calculate_cur_swing_foot_pos(
-               bht_tensor, z_init, z_sw_max_tensor, phase_var_tensor,self.swing2stance_foot_pos_0[:,0], sign*self.cfg.y_nom,T_tensor, z_sw_neg_tensor,
+               bht_tensor, z_init, z_sw_max_tensor, phase_var_tensor,-Ux, sign*self.cfg.y_nom,T_tensor, z_sw_neg_tensor,
                foot_target_yaw_adjusted[:, 0], foot_target_yaw_adjusted[:, 1]
           )
 

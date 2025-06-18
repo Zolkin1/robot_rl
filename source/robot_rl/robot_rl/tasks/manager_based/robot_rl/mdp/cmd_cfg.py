@@ -7,15 +7,15 @@ import isaaclab.sim as sim_utils
 import torch
 
 Q_weights = [
-    25.0,   200.0,    # com_x pos, vel
+    100.0,   200.0,    # com_x pos, vel
     300.0,   50.0,   # com_y pos, vel
     600.0,  20.0,  # com_z pos, vel
     420.0,    20.0,    # pelvis_roll pos, vel
     200.0,    10.0,    # pelvis_pitch pos, vel
     500.0,    30.0,    # pelvis_yaw pos, vel
-    1500.0, 125.0,  # swing_x pos, vel
+    2500.0, 125.0,  # swing_x pos, vel
     1700.0,  125.0,  # swing_y pos, vel
-    3500.0, 100.0,   # swing_z pos, vel
+    4000.0, 100.0,   # swing_z pos, vel
     30.0,    1.0,    # swing_ori_roll pos, vel
     10.0,    1.0,    # swing_ori_pitch pos, vel
     400.0,    10.0,    # swing_ori_yaw pos, vel

@@ -29,7 +29,8 @@ EXPERIMENT_NAMES = {
     "clf": "g1",
     "ref_tracking": "g1",
     "stair": "g1",
-    "clf_vdot": "g1"
+    "clf_vdot": "g1",
+    "height-scan-flat": "g1"
 }
 
 SIM_ENVIRONMENTS = {
@@ -39,6 +40,7 @@ SIM_ENVIRONMENTS = {
     "ref_tracking": "G1-flat-ref-play",
     "clf_vdot": "G1-flat-ref-play",
     "stair": "G1-stair-play",
+    "height-scan-flat": "G1-height-scan-flat-play",
 }
 
 class DataLogger:
@@ -231,7 +233,9 @@ def main():
         # Import necessary modules after app launch
         import gymnasium as gym
         import torch
-        from rsl_rl.runners import OnPolicyRunner
+        # from rsl_rl.runners import OnPolicyRunner
+        from robot_rl.network.custom_policy_runner import CustomOnPolicyRunner
+    
         from isaaclab.envs import (
             DirectMARLEnv,
             multi_agent_to_single_agent,
@@ -321,7 +325,7 @@ def main():
 
         print(f"[DEBUG] Loading model checkpoint from: {resume_path}")
         # load previously trained model
-        ppo_runner = OnPolicyRunner(env, agent_cfg.to_dict(), log_dir=None, device=agent_cfg.device)
+        ppo_runner = CustomOnPolicyRunner(env, agent_cfg.to_dict(), log_dir=None, device=agent_cfg.device)
         ppo_runner.load(resume_path)
 
         # obtain the trained policy for inference

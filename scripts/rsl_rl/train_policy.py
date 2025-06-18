@@ -14,6 +14,7 @@ ENVIRONMENTS = {
     "clf_vdot": "G1-flat-clf-vdot",
     "clf": "G1-flat-clf",
     "stair": "G1-stair",
+    "height-scan-flat": "G1-height-scan-flat",
 }
 
 def parse_args():
@@ -71,6 +72,7 @@ def main():
     import gymnasium as gym
     import torch
     from rsl_rl.runners import OnPolicyRunner
+    from robot_rl.network.custom_policy_runner import CustomOnPolicyRunner
     from isaaclab.envs import (
         DirectMARLEnv,
         DirectMARLEnvCfg,
@@ -163,7 +165,7 @@ def main():
         env = RslRlVecEnvWrapper(env, clip_actions=agent_cfg.clip_actions)
 
         # Create and configure runner
-        runner = OnPolicyRunner(env, agent_cfg.to_dict(), log_dir=log_dir, device=agent_cfg.device)
+        runner = CustomOnPolicyRunner(env, agent_cfg.to_dict(), log_dir=log_dir, device=agent_cfg.device)
         runner.add_git_repo_to_log(__file__)
 
         # Load checkpoint if resuming
