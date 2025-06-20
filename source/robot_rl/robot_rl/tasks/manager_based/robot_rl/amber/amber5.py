@@ -12,7 +12,7 @@ DAMPING = 50.0
 # --- AMBER5 ROBOT CONFIGURATION ---
 AMBER_CFG = ArticulationCfg(
     spawn=sim_utils.UsdFileCfg(
-        usd_path=f"{ROBOT_ASSETS}/amber_test.usd",
+        usd_path=f"{ROBOT_ASSETS}/amber.usd",
         activate_contact_sensors=True,
         rigid_props=sim_utils.RigidBodyPropertiesCfg(
             disable_gravity=False,
