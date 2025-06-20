@@ -183,7 +183,7 @@ def plot_trajectories(data, save_dir=None):
         plt.tight_layout(rect=[0, 0.03, 1, 0.95])
         if save_dir:
             plt.savefig(os.path.join(save_dir, "stance_foot_pos_ori.png"), dpi=300, bbox_inches="tight")
-        plt.show()
+
 
     # Plot positions (y_out vs y_act)
     if 'y_out' in processed_data and 'y_act' in processed_data:
@@ -213,7 +213,7 @@ def plot_trajectories(data, save_dir=None):
         plt.tight_layout(rect=[0, 0.03, 1, 0.95])
         if save_dir:
             plt.savefig(os.path.join(save_dir, 'positions.png'), dpi=300, bbox_inches='tight')
-        plt.show()
+
     
     # Plot velocities (dy_out vs dy_act)
     if 'dy_out' in processed_data and 'dy_act' in processed_data:
@@ -241,7 +241,7 @@ def plot_trajectories(data, save_dir=None):
         plt.tight_layout(rect=[0, 0.03, 1, 0.95])
         if save_dir:
             plt.savefig(os.path.join(save_dir, 'velocities.png'), dpi=300, bbox_inches='tight')
-        plt.show()
+
     
     # Plot base velocity
     if 'base_velocity' in processed_data:
@@ -260,7 +260,7 @@ def plot_trajectories(data, save_dir=None):
         plt.tight_layout(rect=[0, 0.03, 1, 0.95])
         if save_dir:
             plt.savefig(os.path.join(save_dir, 'base_velocity.png'), dpi=300, bbox_inches='tight')
-        plt.show()
+
     
     # Plot swing time
     # if 'cur_swing_time' in processed_data:
@@ -278,7 +278,7 @@ def plot_trajectories(data, save_dir=None):
     if 'v' in processed_data and 'vdot' in processed_data:
         v_data = processed_data['v']
         vdot_data = processed_data['vdot']
-        fig, axs = plt.subplots(2, 1, figsize=(10, 8), sharex=True)
+        fig, axs = plt.subplots(3, 1, figsize=(10, 8), sharex=True)
         
         axs[0].plot(time_steps, v_data[:, env_ids], label='v', color='g')
         axs[0].set_title('clf v')
@@ -292,11 +292,20 @@ def plot_trajectories(data, save_dir=None):
         axs[1].set_ylabel(units['vdot'][0] if 'vdot' in units else '')
         axs[1].grid(True)
         axs[1].legend()
+
+        alpha=1.0
+        decay = alpha*v_data[:, env_ids] + vdot_data[:, env_ids]
+        axs[2].plot(time_steps, decay, label='decay', color='y')
+        axs[2].set_title('clf decay')
+        axs[2].set_xlabel('Time Steps')
+        axs[2].set_ylabel(units['decay'][0] if 'decay' in units else '')
+        axs[2].grid(True)
+        axs[2].legend()
         
         plt.tight_layout()
         if save_dir:
             plt.savefig(os.path.join(save_dir, 'v_and_vdot.png'), dpi=300, bbox_inches='tight')
-        plt.show()
+
 
     # Plot error metrics
     error_metrics = [key for key in processed_data.keys() if key.startswith('error_')]
@@ -331,7 +340,7 @@ def plot_trajectories(data, save_dir=None):
         plt.tight_layout(rect=[0, 0.03, 1, 0.95])
         if save_dir:
             plt.savefig(os.path.join(save_dir, 'error_metrics.png'), dpi=300, bbox_inches='tight')
-        plt.show()
+        # plt.show()
 
     # Plot log_terms.pkl if it exists
     # if save_dir:

@@ -109,7 +109,7 @@ def parse_args():
     parser.add_argument(
         "--video_length",
         type=int,
-        default=300,
+        default=400,
         help="Length of the recorded video (in steps)."
     )
     parser.add_argument(
@@ -144,6 +144,13 @@ def parse_args():
         type=str,
         default = None,
         help="export directory "
+    )
+
+    parser.add_argument(
+        "--log_data",
+        action="store_true",
+        default=False,
+        help="Log data during playback."
     )
     # append RSL-RL cli arguments
     cli_args.add_rsl_rl_args(parser)
@@ -406,8 +413,9 @@ def main():
                 obs, reward, _, extra = env.step(actions)
                 
                 # Log data
-                data = extract_reference_trajectory(env, log_vars)
-                logger.log_from_dict(data)
+                if args_cli.log_data:
+                    data = extract_reference_trajectory(env, log_vars)
+                    logger.log_from_dict(data)
 
             timestep += 1
             if args_cli.video:
@@ -428,15 +436,16 @@ def main():
         env.close()
 
         # Save all logged data
-        logger.save()
+        if args_cli.log_data:
+            logger.save()
 
-        # Create plots directory and generate plots
-        plot_dir = os.path.join(play_log_dir, "plots")
-        os.makedirs(plot_dir, exist_ok=True)
-        print(f"[DEBUG] Generating plots in directory: {plot_dir}")
-        
-        
-        plot_trajectories(logger.data, save_dir=plot_dir)
+            # Create plots directory and generate plots
+            plot_dir = os.path.join(play_log_dir, "plots")
+            os.makedirs(plot_dir, exist_ok=True)
+            print(f"[DEBUG] Generating plots in directory: {plot_dir}")
+            
+            
+            plot_trajectories(logger.data, save_dir=plot_dir)
 
     except Exception as e:
         print(f"[ERROR] An error occurred: {str(e)}")

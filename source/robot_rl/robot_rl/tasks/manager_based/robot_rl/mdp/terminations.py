@@ -29,3 +29,4 @@ def no_progress(env, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")) -> tor
     no_progress_flag = behind_schedule & enough_time_passed
 
     return no_progress_flag
+

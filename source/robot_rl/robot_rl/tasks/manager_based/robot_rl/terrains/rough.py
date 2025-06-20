@@ -62,8 +62,8 @@ ROUGH_TERRAINS_CFG = TerrainGeneratorCfg(
 
 STAIR_CFG = TerrainGeneratorCfg(
     curriculum=True,
-    size=(8.0, 8.0),
-    border_width=20.0,
+    size=(6.0, 6.0),
+    border_width=5.0,
     num_rows=10,
     num_cols=20,
     horizontal_scale=0.1,
@@ -72,36 +72,36 @@ STAIR_CFG = TerrainGeneratorCfg(
     use_cache=False,
     sub_terrains={
         "pyramid_stairs": terrain_gen.MeshPyramidStairsTerrainCfg(
-            proportion=0.4,
+            proportion=0.25,
             step_height_range=(0.0, 0.20),
             step_width=0.3,
             platform_width=0.6,
-            border_width=1.0,
+            border_width=0.0,
             holes=False,
         ),
         "pyramid_stairs_inv": terrain_gen.MeshInvertedPyramidStairsTerrainCfg(
-            proportion=0.4,
+            proportion=0.25,
             step_height_range=(0.0, 0.20),
             step_width=0.3,
             platform_width=0.6,
-            border_width=1.0,
+            border_width=0.0,
             holes=False,
         ),
-        "flat_stairs_inv": terrain_gen.MeshInvertedPyramidStairsTerrainCfg(
-            proportion=0.1,
-            step_height_range=(0.0, 0.05),
+        "stairs_inv_w_hole": terrain_gen.MeshInvertedPyramidStairsTerrainCfg(
+            proportion=0.25,
+            step_height_range=(0.0, 0.20),
             step_width=0.3,
-            platform_width=2,
-            border_width=1.0,
-            holes=False,
+            platform_width=0.6,
+            border_width=0.0,
+            holes=True,
         ),
-        "flat_stairs": terrain_gen.MeshPyramidStairsTerrainCfg(
-            proportion=0.1,
-            step_height_range=(0.0, 0.05),
+        "stairs_w_hole": terrain_gen.MeshPyramidStairsTerrainCfg(
+            proportion=0.25,
+            step_height_range=(0.0, 0.20),
             step_width=0.3,
-            platform_width=2.0,
-            border_width=1.0,
-            holes=False,
+            platform_width=0.6,
+            border_width=0.0,
+            holes=True,
         ),
         # "boxes": terrain_gen.MeshRandomGridTerrainCfg(
         #     proportion=0.2, grid_width=0.45, grid_height_range=(0.05, 0.05), platform_width=2.0

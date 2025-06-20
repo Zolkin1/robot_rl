@@ -623,22 +623,22 @@ class StairCmd(HLIPCommandTerm):
                delta_psi                                  # yaw=Δψ
           ) 
 
-          foot_target_yaw_adjusted = quat_apply(q_delta_yaw, foot_target)  # [B,3]
-          self.update_z_height(foot_target_yaw_adjusted[:,0], foot_target_yaw_adjusted[:,1])
+          # foot_target_yaw_adjusted = quat_apply(q_delta_yaw, foot_target)  # [B,3]
+          self.update_z_height(foot_target[:,0], foot_target[:,1])
           
           #transform it into the global frame
-          foot_target_global_yaw_frame = _transfer_to_global_frame(foot_target_yaw_adjusted, self.stance_foot_ori_quat_0)
+          # foot_target_global_yaw_frame = _transfer_to_global_frame(foot_target, self.stance_foot_ori_quat_0)
 
           
           # based on the nominal step size, check the stair height
-          self.update_z_height(foot_target_global_yaw_frame[:,0], foot_target_global_yaw_frame[:,1])
+          # self.update_z_height(foot_target_global_yaw_frame[:,0], foot_target_global_yaw_frame[:,1])
 
          
           # foot_target_yaw_adjusted = self.adjust_foot_target(foot_target_global_yaw_frame)
 
 
           #clip based on the kinematics range
-          foot_target_yaw_adjusted[:,1] = torch.sign(Uy) * torch.clamp(torch.abs(foot_target_yaw_adjusted[:,1]), min=self.cfg.foot_target_range_y[0], max=self.cfg.foot_target_range_y[1])
+          foot_target[:,1] = torch.sign(Uy) * torch.clamp(torch.abs(foot_target[:,1]), min=self.cfg.foot_target_range_y[0], max=self.cfg.foot_target_range_y[1])
 
           
 
@@ -669,12 +669,12 @@ class StairCmd(HLIPCommandTerm):
 
 
           
-          com_pos_des_yaw_adjusted = quat_apply(q_delta_yaw, com_pos_des)  # [B,3]
-          com_vel_des_yaw_adjusted = quat_apply(q_delta_yaw, com_vel_des)  # [B,3]
+          # com_pos_des_yaw_adjusted = quat_apply(q_delta_yaw, com_pos_des)  # [B,3]
+          # com_vel_des_yaw_adjusted = quat_apply(q_delta_yaw, com_vel_des)  # [B,3]
 
 
           # clip foot target based on kinematic range
-          self.foot_target = foot_target_yaw_adjusted[:,0:2]
+          self.foot_target = foot_target[:,0:2]
 
           z_sw_max_tensor = self.cfg.z_sw_max + self.z_height
           z_sw_neg_tensor = self.cfg.z_sw_min + self.z_height
@@ -697,15 +697,15 @@ class StairCmd(HLIPCommandTerm):
           # Convert bht to tensor if it's not already
           bht_tensor = torch.tensor(bht, device=self.device) if not isinstance(bht, torch.Tensor) else bht
 
-          sign = torch.sign(foot_target_yaw_adjusted[:, 1])
+          sign = torch.sign(foot_target[:, 1])
           foot_pos, sw_z = calculate_cur_swing_foot_pos_stair(
-               bht_tensor, -self.z_height, z_sw_max_tensor, phase_var_tensor,-Ux, sign*self.cfg.y_nom,T_tensor, z_sw_neg_tensor,
-               foot_target_yaw_adjusted[:, 0], foot_target_yaw_adjusted[:, 1]
+               bht_tensor, z_init, z_sw_max_tensor, phase_var_tensor,-Ux, sign*self.cfg.y_nom,T_tensor, z_sw_neg_tensor,
+               foot_target[:, 0], foot_target[:, 1]
           )
 
           flat_foot_pos, flat_sw_z = calculate_cur_swing_foot_pos(
                bht_tensor, z_init, z_sw_max_tensor, phase_var_tensor,-Ux, sign*self.cfg.y_nom,T_tensor, z_sw_neg_tensor,
-               foot_target_yaw_adjusted[:, 0], foot_target_yaw_adjusted[:, 1]
+               foot_target[:, 0], foot_target[:, 1]
           )
 
           #for the envs with self.z_height < 0.01: use flat_foot_pos and flat_sw_z instead of foot_pos and sw_z
@@ -717,8 +717,8 @@ class StairCmd(HLIPCommandTerm):
 
           dbht = bezier_deg(1, phase_var_tensor, T_tensor, horizontal_control_points, five_tensor)
           foot_vel = torch.zeros((N,3), device=self.device)
-          foot_vel[:,0] = -dbht * -foot_target_yaw_adjusted[:,0]+ dbht * foot_target_yaw_adjusted[:,0]
-          foot_vel[:,1] = -dbht * foot_target_yaw_adjusted[:,1] + dbht * foot_target_yaw_adjusted[:,1]
+          foot_vel[:,0] = -dbht * -foot_target[:,0]+ dbht * foot_target[:,0]
+          foot_vel[:,1] = -dbht * foot_target[:,1] + dbht * foot_target[:,1]
           foot_vel[:,2] = sw_z.squeeze(-1)  # Remove the last dimension to match foot_vel[:,2] shape
 
 
@@ -728,8 +728,8 @@ class StairCmd(HLIPCommandTerm):
           omega_ref = euler_rates_to_omega(pelvis_euler, pelvis_eul_dot)
           omega_foot_ref = euler_rates_to_omega(foot_eul, foot_eul_dot)  # (N,3)
           #setup up reference trajectory, com pos, pelvis orientation, swing foot pos, ori
-          self.y_out = torch.cat([com_pos_des_yaw_adjusted, pelvis_euler, foot_pos, foot_eul,upper_body_joint_pos], dim=-1)
-          self.dy_out = torch.cat([com_vel_des_yaw_adjusted, omega_ref, foot_vel, omega_foot_ref,upper_body_joint_vel], dim=-1)
+          self.y_out = torch.cat([com_pos_des, pelvis_euler, foot_pos, foot_eul,upper_body_joint_pos], dim=-1)
+          self.dy_out = torch.cat([com_vel_des, omega_ref, foot_vel, omega_foot_ref,upper_body_joint_vel], dim=-1)
 
 
 #     def _update_command(self):

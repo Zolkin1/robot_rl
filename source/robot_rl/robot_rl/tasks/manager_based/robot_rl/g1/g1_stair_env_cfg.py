@@ -43,12 +43,12 @@ class G1StairObservationsCfg:
             clip=(-1.0, 1.0)
         )
         
-        base_ang_vel = ObsTerm(func=mdp.base_ang_vel, noise=Unoise(n_min=-0.2, n_max=0.2),scale=0.25)
+        base_ang_vel = ObsTerm(func=mdp.base_ang_vel, noise=Unoise(n_min=-0.2, n_max=0.2))
         projected_gravity = ObsTerm(
             func=mdp.projected_gravity,
             noise=Unoise(n_min=-0.05, n_max=0.05),
         )
-        velocity_commands = ObsTerm(func=mdp.generated_commands, params={"command_name": "base_velocity"},scale=(2.0,2.0,0.25))
+        velocity_commands = ObsTerm(func=mdp.generated_commands, params={"command_name": "base_velocity"},scale=(2.0,2.0,2.0))
         joint_vel = ObsTerm(func=mdp.joint_vel_rel, noise=Unoise(n_min=-1.5, n_max=1.5),scale=0.05)
         joint_pos = ObsTerm(func=mdp.joint_pos_rel, noise=Unoise(n_min=-0.01, n_max=0.01))
         actions = ObsTerm(func=mdp.last_action)
@@ -77,12 +77,13 @@ class G1StairObservationsCfg:
             clip=(-1.0, 1.0)
         )
         base_lin_vel = ObsTerm(func=mdp.base_lin_vel,scale=1.0)
-        base_ang_vel = ObsTerm(func=mdp.base_ang_vel,scale=0.25)
+        base_ang_vel = ObsTerm(func=mdp.base_ang_vel,scale=1.0)
         projected_gravity = ObsTerm(
             func=mdp.projected_gravity,
         )
-        velocity_commands = ObsTerm(func=mdp.generated_commands, params={"command_name": "base_velocity"},scale=(2.0,2.0,0.25))
-        joint_vel = ObsTerm(func=mdp.joint_vel_rel,scale=0.05)
+        # root_quat = ObsTerm(func=mdp.root_quat)
+        velocity_commands = ObsTerm(func=mdp.generated_commands, params={"command_name": "base_velocity"},scale=(2.0,2.0,2.0))
+        joint_vel = ObsTerm(func=mdp.joint_vel_rel, scale=0.05)
         joint_pos = ObsTerm(func=mdp.joint_pos_rel)
         actions = ObsTerm(func=mdp.last_action)
         # Phase clock
@@ -169,11 +170,7 @@ class G1StairEnvCfg(G1RoughLipEnvCfg):
         # No height scanner for now
      
         self.scene.terrain.terrain_type = "generator"
-
-        STAIR_CFG.sub_terrains["pyramid_stairs_inv"].step_height_range = (0.0,0.2)
-        del STAIR_CFG.sub_terrains["pyramid_stairs_inv"]
-        del STAIR_CFG.sub_terrains["flat_stairs_inv"]
-        del STAIR_CFG.sub_terrains["flat_stairs"]
+     
         self.scene.terrain.terrain_generator = STAIR_CFG
         # self.scene.terrain.terrain_generator.max_init_terrain_level = 2.0
         # self.curriculum.terrain_levels = None
@@ -223,9 +220,9 @@ class G1StairEnvCfg(G1RoughLipEnvCfg):
         ##
         # Commands
         ##
-        self.commands.base_velocity.ranges.lin_vel_x = (0.6,0.6)
+        self.commands.base_velocity.ranges.lin_vel_x = (0.3,0.6)
         self.commands.base_velocity.ranges.lin_vel_y = (0.0,0.0)
-        self.commands.base_velocity.ranges.ang_vel_z = (-0.2,0.2)
+        self.commands.base_velocity.ranges.ang_vel_z = (-0.5,0.5)
         self.commands.base_velocity.ranges.heading= (0.0,0.0)
 
         ##
@@ -253,7 +250,7 @@ class G1StairEnvCfg(G1RoughLipEnvCfg):
         self.rewards.track_ang_vel_z_exp = None
 
         self.rewards.clf_reward.params["max_clf"] = 100.0
-        self.rewards.clf_decreasing_condition.params["max_clf_decreasing"] = 100.0
+        self.rewards.clf_decreasing_condition.params["max_clf_decreasing"] = 50.0
         # self.rewards.track_ang_vel_z_exp.weight = 1.0
  
         # torque, acc, vel, action rate regularization
@@ -299,8 +296,7 @@ class G1HeightScanFlatEnvCfg(G1RoughLipEnvCfg):
         self.scene.terrain.terrain_type = "generator"
         STAIR_CFG.sub_terrains["pyramid_stairs"].step_height_range = (0.0,0.0)
         del STAIR_CFG.sub_terrains["pyramid_stairs_inv"]
-        del STAIR_CFG.sub_terrains["flat_stairs_inv"]
-        del STAIR_CFG.sub_terrains["flat_stairs"]
+        
         self.scene.terrain.terrain_generator = STAIR_CFG
 
         self.scene.height_scanner = RayCasterCfg(
@@ -443,17 +439,25 @@ class G1StairPlay_EnvCfg(G1StairEnvCfg):
         # STAIR_CFG.sub_terrains["pyramid_stairs_inv"].step_height_range = (0.1,0.1)
         # STAIR_CFG.sub_terrains["pyramid_stairs"].step_height_range = (0.1,0.1)
         # self.scene.terrain.terrain_generator = STAIR_CFG
-        STAIR_CFG.sub_terrains["pyramid_stairs"].step_height_range = (0.025,0.025)
+        STAIR_CFG.sub_terrains["pyramid_stairs"].step_height_range = (0.1,0.15)
+        STAIR_CFG.sub_terrains["pyramid_stairs_inv"].step_height_range = (0.1,0.15)
+        STAIR_CFG.sub_terrains["pyramid_stairs"].holes = True
+        STAIR_CFG.sub_terrains["pyramid_stairs_inv"].holes = True
         # STAIR_CFG.sub_terrains["pyramid_stairs"].step_height_range = (0.025,0.025)
         # del STAIR_CFG.sub_terrains["pyramid_stairs_inv"]
+        # del STAIR_CFG.sub_terrains["pyramid_stairs"]
+        # STAIR_CFG.sub_terrains["stairs_w_hole"].step_height_range = (0.1,0.1)
+        # STAIR_CFG.sub_terrains["stairs_inv_w_hole"].step_height_range = (0.1,0.1)
         # del STAIR_CFG.sub_terrains["flat_stairs_inv"]
         # del STAIR_CFG.sub_terrains["flat_stairs"]
         self.scene.terrain.terrain_generator = STAIR_CFG
-        self.scene.terrain.terrain_generator.num_rows = 1
+        self.scene.terrain.terrain_generator.num_rows = 2
         self.scene.terrain.terrain_generator.num_cols = 2
-        # self.scene.terrain.terrain_generator.max_init_terrain_level = (.,3.)
+
 
         self.commands.base_velocity.ranges.lin_vel_x = (0.6,0.6)
         self.commands.base_velocity.ranges.lin_vel_y = (0.0,0.0)
-        self.commands.base_velocity.ranges.ang_vel_z = (0.0,0.0)
-        self.terminations.no_progress = None
+        self.commands.base_velocity.ranges.heading= (0.0,0.0)
+
+        # self.commands.base_velocity.ranges.ang_vel_z = (0.0,0.0)
+        # self.terminations.no_progress = None
