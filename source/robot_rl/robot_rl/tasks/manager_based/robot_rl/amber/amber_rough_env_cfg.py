@@ -5,10 +5,18 @@ from isaaclab.envs import ManagerBasedEnv, ManagerBasedEnvCfg
 from isaaclab.managers import EventTermCfg as EventTerm
 from isaaclab.managers import ObservationGroupCfg as ObsGroup
 from isaaclab.managers import ObservationTermCfg as ObsTerm
-from isaaclab.managers import SceneEntityCfg
+from isaaclab.managers import TerminationTermCfg, SceneEntityCfg
 from isaaclab.utils import configclass
 from isaaclab.utils.noise import AdditiveUniformNoiseCfg as Unoise
 from isaaclab.managers import RewardTermCfg as RewTerm
+from isaaclab.sensors import ContactSensorCfg
+from isaaclab_tasks.manager_based.locomotion.velocity.velocity_env_cfg import (
+    LocomotionVelocityRoughEnvCfg,
+    ObservationsCfg,
+    RewardsCfg,
+    EventCfg,
+)
+import robot_rl.tasks.manager_based.robot_rl.amber.mdp as mdp
 
 # from robot_rl.tasks.manager_based.robot_rl.humanoid_env_cfg import HumanoidEnvCfg
 
@@ -26,42 +34,57 @@ class AmberRoughEnvCfg(AmberEnvCfg):
     def __post_init__(self):
         # post init of parent
         super().__post_init__()
+        self.scene.robot = AMBER_CFG.replace(prim_path="{ENV_REGEX_NS}/Amber")
+        self.scene.contact_forces = ContactSensorCfg(
+            prim_path="{ENV_REGEX_NS}/Amber/amber3_PF/torso",
+            update_period=0.0,
+            history_length=1,
+            debug_vis=False,
+        )
 
         ##
         # Scene
         ##
         # self.scene.robot = AMBER_CFG.replace(prim_path="{ENV_REGEX_NS}/Amber")
-        self.scene.robot = AmberEnvCfg.replace(prim_path="{ENV_REGEX_NS}/Robot")
-        self.scene.height_scanner.prim_path = "{ENV_REGEX_NS}/Robot/pelvis_link"
+        # self.scene.robot = AMBER_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
+        # self.scene.height_scanner.prim_path = "{ENV_REGEX_NS}/Robot/pelvis_link"
 
         # No height scanner for now
         self.scene.height_scanner = None
 
-
+        self.terminations.base_contact = TerminationTermCfg(
+            func=mdp.torso_contact_termination,
+            params={
+                "sensor_cfg": SceneEntityCfg(name="contact_forces"),
+                "asset_cfg":  SceneEntityCfg(name="robot"),
+            },
+        )
         ##
         # Randomization
         ##
         # self.events.push_robot = None
-        self.events.push_robot.params["velocity_range"] = {"x": (-1, 1), "y": (-1, 1), "roll": (-0.4, 0.4),
-                                                           "pitch": (-0.4, 0.4), "yaw": (-0.4, 0.4)}
-        self.events.add_base_mass.params["asset_cfg"].body_names = ["pelvis_link"]
-        self.events.add_base_mass.params["mass_distribution_params"] = (0.8, 1.2)
-        self.events.add_base_mass.params["operation"] = "scale"
+        # self.events.push_robot.params["velocity_range"] = {"x": (-1, 1), "y": (-1, 1), "roll": (-0.4, 0.4),
+        #                                                    "pitch": (-0.4, 0.4), "yaw": (-0.4, 0.4)}
+        # self.events.add_base_mass.params["asset_cfg"].body_names = ["pelvis_link"]
+        # self.events.add_base_mass.params["mass_distribution_params"] = (0.8, 1.2)
+        # self.events.add_base_mass.params["operation"] = "scale"
         # self.events.randomize_ground_contact_friction.params["static_friction_range"] = (0.1, 1.25)
         # self.events.randomize_ground_contact_friction.params["dynamic_friction_range"] = (0.1, 1.25)
-        self.events.reset_robot_joints.params["position_range"] = (1.0, 1.0)
-        self.events.base_external_force_torque.params["asset_cfg"].body_names = ["pelvis_link"]
-        self.events.reset_base.params = {
-            "pose_range": {"x": (-0.5, 0.5), "y": (-0.5, 0.5), "yaw": (-3.14, 3.14)},
-            "velocity_range": {
-                "x": (0.0, 0.0),
-                "y": (0.0, 0.0),
-                "z": (0.0, 0.0),
-                "roll": (0.0, 0.0),
-                "pitch": (0.0, 0.0),
-                "yaw": (0.0, 0.0),
-            },
-        }
+        # self.events.reset_robot_joints.params["position_range"] = (1.0, 1.0)
+        # self.events.base_external_force_torque.params["asset_cfg"].body_names = ["pelvis_link"]
+        # self.events.reset_base.params = {
+        #     "pose_range": {"x": (-0.5, 0.5), "y": (-0.5, 0.5), "yaw": (-3.14, 3.14)},
+        #     "velocity_range": {
+        #         "x": (0.0, 0.0),
+        #         "y": (0.0, 0.0),
+        #         "z": (0.0, 0.0),
+        #         "roll": (0.0, 0.0),
+        #         "pitch": (0.0, 0.0),
+        #         "yaw": (0.0, 0.0),
+        #     },
+        # }
+        # preserve whatever you did with external forces
+        # self.events.base_external_force_torque.params["asset_cfg"].body_names = ["torso"]
 
         ##
         # Commands
@@ -69,7 +92,7 @@ class AmberRoughEnvCfg(AmberEnvCfg):
         self.commands.base_velocity.ranges.lin_vel_x = (-1.5, 1.5) # 0 - 1
         self.commands.base_velocity.ranges.lin_vel_y = (0,0) #(-1.0, 1.0)
         self.commands.base_velocity.ranges.ang_vel_z = (0, 0)
-
+        self.events.add_base_mass = None
         ##
         # Terminations
         ##
@@ -79,29 +102,33 @@ class AmberRoughEnvCfg(AmberEnvCfg):
         ##
         # Rewards
         ##
+        
         self.rewards.track_lin_vel_xy_exp.weight = 1.0
         self.rewards.track_ang_vel_z_exp.weight = 0.5
         self.rewards.lin_vel_z_l2.weight =  -2.0 # TODO reduce this maybe?
         self.rewards.ang_vel_xy_l2.weight = -0.05
         self.rewards.dof_torques_l2.weight = -1.0e-5
         self.rewards.dof_acc_l2.weight = -2.5e-7
-        self.rewards.dof_vel_l2.weight = -1.0e-3
+        # self.rewards.dof_vel_l2.weight = -1.0e-3
         self.rewards.action_rate_l2.weight = -0.01
-        self.rewards.feet_air_time.weight = 0.0
+        # self.rewards.feet_air_time.weight = 0.0
+        self.rewards.feet_air_time = None
         self.rewards.flat_orientation_l2.weight = -1.0
         self.rewards.dof_pos_limits.weight = -5.0
         self.rewards.alive.weight = 0.15
-        self.rewards.contact_no_vel.weight = -0.2
-        self.rewards.joint_deviation_hip.weight = -1.0
-        self.rewards.height_torso.weight = -10.0
-        self.rewards.feet_clearance.weight = -20.0
-        self.rewards.phase_contact.weight = 0.25
+        self.rewards.undesired_contacts = None
 
-        self.rewards.joint_deviation_arms.weight = -0.5             # Arms regularization
-        self.rewards.joint_deviation_torso.weight = -1.0
+        # self.rewards.contact_no_vel.weight = -0.2
+        # self.rewards.joint_deviation_hip.weight = -1.0
+        # self.rewards.height_torso.weight = -10.0
+        # self.rewards.feet_clearance.weight = -20.0
+        # self.rewards.phase_contact.weight = 0.25
 
-        self.rewards.height_torso.params["target_height"] = 0.75
-        self.rewards.feet_clearance.params["target_height"] = 0.12
+        # self.rewards.joint_deviation_arms.weight = -0.5             # Arms regularization
+        # self.rewards.joint_deviation_torso.weight = -1.0
+
+        # self.rewards.height_torso.params["target_height"] = 0.75
+        # self.rewards.feet_clearance.params["target_height"] = 0.12
 
 
 
@@ -140,3 +167,4 @@ class AmberRoughEnvCfg(AmberEnvCfg):
         # # -- Unused
         # self.rewards.track_heading.weight = 0.                     # Base heading
         # self.rewards.feet_air_time.weight = 0.
+        self.events.base_external_force_torque.params["asset_cfg"].body_names = ["torso"]

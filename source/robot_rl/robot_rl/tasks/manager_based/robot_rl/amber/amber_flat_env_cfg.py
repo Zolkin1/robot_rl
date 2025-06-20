@@ -11,7 +11,7 @@ from isaaclab.utils.noise import AdditiveUniformNoiseCfg as Unoise
 from isaaclab.managers import RewardTermCfg as RewTerm
 
 # from .g1_rough_env_cfg import G1RoughEnvCfg
-
+from .amber_rough_env_cfg import AmberRoughEnvCfg
 ##
 # Pre-defined configs
 ##
@@ -22,7 +22,7 @@ from .amber_env_cfg import AmberEnvCfg
 ##
 
 @configclass
-class AmberFlatEnvCfg(AmberEnvCfg):
+class AmberFlatEnvCfg(AmberRoughEnvCfg):
     # env: type = AmberFlatEnv    
     def __post_init__(self):
         super().__post_init__()

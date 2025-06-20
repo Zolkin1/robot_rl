@@ -149,94 +149,96 @@ class AmberEnvCfg(LocomotionVelocityRoughEnvCfg):
     events: AmberEventsCfg = AmberEventsCfg()
 
     def __post_init__(self):
-        # — swap in our Amber robot articulation —
-        self.scene.robot = AMBER_CFG.replace(prim_path="{ENV_REGEX_NS}/Amber")
-
-        # — add a scene‐level contact sensor on the torso link —
-        self.scene.contact_forces = ContactSensorCfg(
-            prim_path="{ENV_REGEX_NS}/Amber/amber3_PF/torso",
-            update_period=0.0,
-            history_length=1,
-            debug_vis=False,
-        )
-
-        # now let the base class wire up buffers, spaces, etc.
-
-        # gv_cfg = self.commands.base_velocity.goal_vel_visualizer_cfg
-        # gv_cfg.pose_in_robot_frame = True
-        # gv_cfg.parent_prim_path   = "{ENV_REGEX_NS}/Amber/torso"
-        # gv_cfg.pose_offset        = (0.0, 0.0, 0.20)
-
-        # cv_cfg = self.commands.base_velocity.current_vel_visualizer_cfg
-        # cv_cfg.pose_in_robot_frame = True
-        # cv_cfg.parent_prim_path   = "{ENV_REGEX_NS}/Amber/torso"
-        # cv_cfg.pose_offset        = (0.0, 0.0, 0.15)
         super().__post_init__()
 
-        # # turn off heading (yaw) control entirely
-        # self.commands.base_velocity.heading_command = False
-        # # zero out any lateral (Y) command
-        # self.commands.base_velocity.ranges.lin_vel_y = (0.0, 0.0)
-        # # zero out any yaw‐rate command
-        # self.commands.base_velocity.ranges.ang_vel_z = (0.0, 0.0)
-        # =============================================
-        # AVOID BOUNCING ON RESET
-        # =============================================
-        # 1) Always lift the root 1 cm above ground on reset
-        base_reset = self.events.reset_base
-        base_reset.params["pose_range"]["z"] = (0.01, 0.01)
+        # # — swap in our Amber robot articulation —
+        # self.scene.robot = AMBER_CFG.replace(prim_path="{ENV_REGEX_NS}/Amber")
 
-        # 2) Always zero out any reset velocity
-        for axis in base_reset.params["velocity_range"].keys():
-            base_reset.params["velocity_range"][axis] = (0.0, 0.0)
+        # # — add a scene‐level contact sensor on the torso link —
+        # self.scene.contact_forces = ContactSensorCfg(
+        #     prim_path="{ENV_REGEX_NS}/Amber/amber3_PF/torso",
+        #     update_period=0.0,
+        #     history_length=1,
+        #     debug_vis=False,
+        # )
 
-        # self.terminations.base_contact = None
-        # — re‐enable collision termination on torso hits —
-        self.terminations.base_contact = TerminationTermCfg(
-            func=mdp.torso_contact_termination,
-            params={
-                "sensor_cfg": SceneEntityCfg(name="contact_forces"),
-                "asset_cfg":  SceneEntityCfg(name="robot"),
-            },
-        )
+        # # now let the base class wire up buffers, spaces, etc.
 
-        # # — terminate on *any* contact force (non-zero) —
-        # self.terminations.any_contact = TerminationTermCfg(
-        #     func=mdp.any_contact_force_termination,
+        # # gv_cfg = self.commands.base_velocity.goal_vel_visualizer_cfg
+        # # gv_cfg.pose_in_robot_frame = True
+        # # gv_cfg.parent_prim_path   = "{ENV_REGEX_NS}/Amber/torso"
+        # # gv_cfg.pose_offset        = (0.0, 0.0, 0.20)
+
+        # # cv_cfg = self.commands.base_velocity.current_vel_visualizer_cfg
+        # # cv_cfg.pose_in_robot_frame = True
+        # # cv_cfg.parent_prim_path   = "{ENV_REGEX_NS}/Amber/torso"
+        # # cv_cfg.pose_offset        = (0.0, 0.0, 0.15)
+        # super().__post_init__()
+
+        # # # turn off heading (yaw) control entirely
+        # # self.commands.base_velocity.heading_command = False
+        # # # zero out any lateral (Y) command
+        # # self.commands.base_velocity.ranges.lin_vel_y = (0.0, 0.0)
+        # # # zero out any yaw‐rate command
+        # # self.commands.base_velocity.ranges.ang_vel_z = (0.0, 0.0)
+        # # =============================================
+        # # AVOID BOUNCING ON RESET
+        # # =============================================
+        # # 1) Always lift the root 1 cm above ground on reset
+        # base_reset = self.events.reset_base
+        # base_reset.params["pose_range"]["z"] = (0.01, 0.01)
+
+        # # 2) Always zero out any reset velocity
+        # for axis in base_reset.params["velocity_range"].keys():
+        #     base_reset.params["velocity_range"][axis] = (0.0, 0.0)
+
+        # # self.terminations.base_contact = None
+        # # — re‐enable collision termination on torso hits —
+        # self.terminations.base_contact = TerminationTermCfg(
+        #     func=mdp.torso_contact_termination,
         #     params={
         #         "sensor_cfg": SceneEntityCfg(name="contact_forces"),
-        #         "threshold": 0.0,       # trigger if contact_force > 0
+        #         "asset_cfg":  SceneEntityCfg(name="robot"),
         #     },
         # )
 
-        # # — terminate if forward‐velocity obs explodes beyond 5000 m/s —
-        # self.terminations.too_fast = TerminationTermCfg(
-        #     func=mdp.excessive_velocity_termination,
-        #     params={"command_name": "base_velocity",
-        #                 "std": 0.5, "vthreshold": 5000.0, },
+        # # # — terminate on *any* contact force (non-zero) —
+        # # self.terminations.any_contact = TerminationTermCfg(
+        # #     func=mdp.any_contact_force_termination,
+        # #     params={
+        # #         "sensor_cfg": SceneEntityCfg(name="contact_forces"),
+        # #         "threshold": 0.0,       # trigger if contact_force > 0
+        # #     },
+        # # )
+
+        # # # — terminate if forward‐velocity obs explodes beyond 5000 m/s —
+        # # self.terminations.too_fast = TerminationTermCfg(
+        # #     func=mdp.excessive_velocity_termination,
+        # #     params={"command_name": "base_velocity",
+        # #                 "std": 0.5, "vthreshold": 5000.0, },
+        # # )
+        # # — reset if our tracked forward-speed reward goes NaN —
+        # self.terminations.nan_track_vel = TerminationTermCfg(
+        #     func=mdp.nan_velocity_termination,
+        #     params={
+        #         "asset_cfg":  SceneEntityCfg(name="robot"),  # same key used above
+        #         "command_name": "base_velocity",
+        #     },
         # )
-        # — reset if our tracked forward-speed reward goes NaN —
-        self.terminations.nan_track_vel = TerminationTermCfg(
-            func=mdp.nan_velocity_termination,
-            params={
-                "asset_cfg":  SceneEntityCfg(name="robot"),  # same key used above
-                "command_name": "base_velocity",
-            },
-        )
-        # self.events.reset_robot_joints = None
-        # # disable random “push” velocities
-        # self.events.push_robot         = None
-        # # disable any external‐force‐torque at reset
-        # self.events.base_external_force_torque = None
+        # # self.events.reset_robot_joints = None
+        # # # disable random “push” velocities
+        # # self.events.push_robot         = None
+        # # # disable any external‐force‐torque at reset
+        # # self.events.base_external_force_torque = None
 
 
-        # keep your other terms disabled
-        self.rewards.feet_air_time      = None
-        self.rewards.undesired_contacts = None
-        self.events.add_base_mass       = None
+        # # keep your other terms disabled
+        # self.rewards.feet_air_time      = None
+        # self.rewards.undesired_contacts = None
+        # self.events.add_base_mass       = None
 
-        # preserve whatever you did with external forces
-        self.events.base_external_force_torque.params["asset_cfg"].body_names = ["torso"]
+        # # preserve whatever you did with external forces
+        # self.events.base_external_force_torque.params["asset_cfg"].body_names = ["torso"]
 
     # def define_markers(self) -> VisualizationMarkers:
     # """Define markers with various different shapes."""
