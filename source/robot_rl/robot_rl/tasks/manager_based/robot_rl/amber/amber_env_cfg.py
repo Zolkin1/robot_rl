@@ -24,7 +24,7 @@ from isaaclab_tasks.manager_based.locomotion.velocity.velocity_env_cfg import (
     RewardsCfg,
     EventCfg,
 )
-from .amber5 import AMBER_MINIMAL_CFG
+from .amber5 import AMBER_CFG
 from . import mdp
 ##
 # Pre-defined configs
@@ -47,7 +47,6 @@ class AmberActionsCfg:
         asset_name="robot",
         joint_names=["q1_left", "q2_left", "q1_right", "q2_right"],
         scale=1.0,
-        use_default_offset=True,
     )
 
 # TODO: Try playing with the period for the lip model
@@ -65,12 +64,12 @@ class AmberObservationsCfg(ObservationsCfg):
         height_scan = None
 
         # angular velocity around Y (planar pitch rate; mdp.base_ang_vel returns [wx, wy, wz])
-        base_ang_vel = ObsTerm(
-            func=mdp.base_ang_vel,
-            noise=Unoise(n_min=-0.1, n_max=0.1),
-            history_length=1,
-            scale=0.5,
-        )
+        # base_ang_vel = ObsTerm(
+        #     func=mdp.base_ang_vel,
+        #     noise=Unoise(n_min=-0.1, n_max=0.1),
+        #     history_length=1,
+        #     scale=0.5,
+        # )
 
         # the commanded forward velocity (so the policy knows the target)
         velocity_commands = ObsTerm(
@@ -132,7 +131,6 @@ class AmberRewardCfg(RewardsCfg):
     alive = RewTerm(func=mdp.is_alive, weight=0.1)
 
 
-
 @configclass
 class AmberEventsCfg(EventCfg):
     """You can insert random pushes or mass‐perturbation here if desired."""
@@ -152,28 +150,35 @@ class AmberEnvCfg(LocomotionVelocityRoughEnvCfg):
 
     def __post_init__(self):
         # — swap in our Amber robot articulation —
-        self.scene.robot = AMBER_MINIMAL_CFG.replace(prim_path="{ENV_REGEX_NS}/Amber")
+        self.scene.robot = AMBER_CFG.replace(prim_path="{ENV_REGEX_NS}/Amber")
 
         # — add a scene‐level contact sensor on the torso link —
         self.scene.contact_forces = ContactSensorCfg(
-            prim_path="{ENV_REGEX_NS}/Amber/torso",
+            prim_path="{ENV_REGEX_NS}/Amber/amber3_PF/torso",
             update_period=0.0,
             history_length=1,
             debug_vis=False,
         )
 
         # now let the base class wire up buffers, spaces, etc.
+
+        # gv_cfg = self.commands.base_velocity.goal_vel_visualizer_cfg
+        # gv_cfg.pose_in_robot_frame = True
+        # gv_cfg.parent_prim_path   = "{ENV_REGEX_NS}/Amber/torso"
+        # gv_cfg.pose_offset        = (0.0, 0.0, 0.20)
+
+        # cv_cfg = self.commands.base_velocity.current_vel_visualizer_cfg
+        # cv_cfg.pose_in_robot_frame = True
+        # cv_cfg.parent_prim_path   = "{ENV_REGEX_NS}/Amber/torso"
+        # cv_cfg.pose_offset        = (0.0, 0.0, 0.15)
         super().__post_init__()
 
-        # self.commands.base_velocity.goal_vel_visualizer_cfg.pose_in_robot_frame = False
-        # self.commands.base_velocity.goal_vel_visualizer_cfg = None
-
-        # turn off heading (yaw) control entirely
-        self.commands.base_velocity.heading_command = False
-        # zero out any lateral (Y) command
-        self.commands.base_velocity.ranges.lin_vel_y = (0.0, 0.0)
-        # zero out any yaw‐rate command
-        self.commands.base_velocity.ranges.ang_vel_z = (0.0, 0.0)
+        # # turn off heading (yaw) control entirely
+        # self.commands.base_velocity.heading_command = False
+        # # zero out any lateral (Y) command
+        # self.commands.base_velocity.ranges.lin_vel_y = (0.0, 0.0)
+        # # zero out any yaw‐rate command
+        # self.commands.base_velocity.ranges.ang_vel_z = (0.0, 0.0)
         # =============================================
         # AVOID BOUNCING ON RESET
         # =============================================
@@ -185,20 +190,37 @@ class AmberEnvCfg(LocomotionVelocityRoughEnvCfg):
         for axis in base_reset.params["velocity_range"].keys():
             base_reset.params["velocity_range"][axis] = (0.0, 0.0)
 
-        # (Optional) 3) If you still see small jitter, you can add
-        #     a small settle‐physics event here to run a few substeps:
-        # self.events.settle_physics = EventTermCfg(
-        #     func="robot_rl.tasks.manager_based.robot_rl.amber.amber_env:settle_physics_after_reset",
-        #     mode="reset",
-        #     interval_range_s=None,
-        #     min_step_count_between_reset=0,
-        # )
+        # self.terminations.base_contact = None
         # — re‐enable collision termination on torso hits —
         self.terminations.base_contact = TerminationTermCfg(
             func=mdp.torso_contact_termination,
             params={
                 "sensor_cfg": SceneEntityCfg(name="contact_forces"),
                 "asset_cfg":  SceneEntityCfg(name="robot"),
+            },
+        )
+
+        # # — terminate on *any* contact force (non-zero) —
+        # self.terminations.any_contact = TerminationTermCfg(
+        #     func=mdp.any_contact_force_termination,
+        #     params={
+        #         "sensor_cfg": SceneEntityCfg(name="contact_forces"),
+        #         "threshold": 0.0,       # trigger if contact_force > 0
+        #     },
+        # )
+
+        # # — terminate if forward‐velocity obs explodes beyond 5000 m/s —
+        # self.terminations.too_fast = TerminationTermCfg(
+        #     func=mdp.excessive_velocity_termination,
+        #     params={"command_name": "base_velocity",
+        #                 "std": 0.5, "vthreshold": 5000.0, },
+        # )
+        # — reset if our tracked forward-speed reward goes NaN —
+        self.terminations.nan_track_vel = TerminationTermCfg(
+            func=mdp.nan_velocity_termination,
+            params={
+                "asset_cfg":  SceneEntityCfg(name="robot"),  # same key used above
+                "command_name": "base_velocity",
             },
         )
         # self.events.reset_robot_joints = None

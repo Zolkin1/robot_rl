@@ -16,7 +16,7 @@ from isaaclab.managers import RewardTermCfg as RewTerm
 # Pre-defined configs
 ##
 from .amber_env_cfg import AmberEnvCfg
-from ..amber5 import AMBER_CFG
+from .amber5 import AMBER_CFG
 ##
 # Environment configuration
 ##
@@ -67,13 +67,13 @@ class AmberRoughEnvCfg(AmberEnvCfg):
         # Commands
         ##
         self.commands.base_velocity.ranges.lin_vel_x = (-1.5, 1.5) # 0 - 1
-        self.commands.base_velocity.ranges.lin_vel_y = (-0.4,0.4) #(-1.0, 1.0)
-        self.commands.base_velocity.ranges.ang_vel_z = (-1.0, 1.0)
+        self.commands.base_velocity.ranges.lin_vel_y = (0,0) #(-1.0, 1.0)
+        self.commands.base_velocity.ranges.ang_vel_z = (0, 0)
 
         ##
         # Terminations
         ##
-        self.terminations.base_contact.params["sensor_cfg"].body_names = "waist_yaw_link"
+        # self.terminations.base_contact.params["sensor_cfg"].body_names = "waist_yaw_link"
         # self.terminations.base_contact.params["sensor_cfg"].body_names = ["pelvis_link"]
 
         ##

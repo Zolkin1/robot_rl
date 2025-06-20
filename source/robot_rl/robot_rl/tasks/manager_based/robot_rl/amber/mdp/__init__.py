@@ -7,7 +7,7 @@
 
 
 from .termination import torso_contact_termination
-
+from .generate_vel import *
 
 from isaaclab.envs.mdp import *  # noqa: F401, F403
 from isaaclab_tasks.manager_based.locomotion.velocity.mdp import *    #Inherit from the base envs

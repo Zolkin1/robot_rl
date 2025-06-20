@@ -141,7 +141,17 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     # create isaac environment
     if hasattr(env_cfg, "__prepare_tensors__") and callable(getattr(env_cfg, "__prepare_tensors__")):
         env_cfg.__prepare_tensors__()
-    env = gym.make(args_cli.task, cfg=env_cfg, render_mode="rgb_array" if args_cli.video else None)
+    #uncomment for G1    ------------------------------------------------------------------------------------------------
+    # env = gym.make(args_cli.task, cfg=env_cfg, render_mode="rgb_array" if args_cli.video else None)
+
+    #EXTRA CODE : COMMENT FOR G1------------------------------------------------------------------------------------------
+    base_env = gym.make(args_cli.task, cfg=env_cfg, render_mode="rgb_array" if args_cli.video else None)
+    # wrap to catch any NaN or super‐large rewards and reset those sub‐envs immediately
+    # from robot_rl.wrappers.nan_reset_wrapper import NaNResetWrapper
+    from robot_rl.tasks.manager_based.robot_rl.amber.amber_env import NaNResetWrapper
+    env = NaNResetWrapper(base_env, vel_threshold=5000.0)
+
+
 
     # convert to single-agent instance if required by the RL algorithm
     if isinstance(env.unwrapped, DirectMARLEnv):

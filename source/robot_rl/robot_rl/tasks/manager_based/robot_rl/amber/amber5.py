@@ -3,7 +3,7 @@ from isaaclab.actuators import ImplicitActuatorCfg
 from isaaclab.assets.articulation import ArticulationCfg
 
 # Path to Amber USD asset directory
-ROBOT_ASSETS = "robot_assets/amber5/amber"
+ROBOT_ASSETS = "/home/s-ritwik/src/robot_rl/robot_assets/amber5/amber"
 
 # Stiffness and damping constants for Amber joints
 STIFFNESS = 1000.0
@@ -12,24 +12,25 @@ DAMPING = 50.0
 # --- AMBER5 ROBOT CONFIGURATION ---
 AMBER_CFG = ArticulationCfg(
     spawn=sim_utils.UsdFileCfg(
-        usd_path=f"{ROBOT_ASSETS}/amber4.usd",
+        usd_path=f"{ROBOT_ASSETS}/amber_test.usd",
         activate_contact_sensors=True,
         rigid_props=sim_utils.RigidBodyPropertiesCfg(
             disable_gravity=False,
+            rigid_body_enabled=True,
             linear_damping=0.0,
             angular_damping=0.0,
             max_linear_velocity=1000.0,
             max_angular_velocity=1000.0,
             max_depenetration_velocity=1.0,
+            enable_gyroscopic_forces=True,
+
         ),
         articulation_props=sim_utils.ArticulationRootPropertiesCfg(
             enabled_self_collisions=False,
             solver_position_iteration_count=8,
             solver_velocity_iteration_count=4,
-        ),
-        collision_props=sim_utils.CollisionPropertiesCfg(
-            contact_offset=0.01,
-            rest_offset=0.05,
+            sleep_threshold=0.005,
+            stabilization_threshold=0.001,
         ),
     ),
     init_state=ArticulationCfg.InitialStateCfg(
@@ -58,34 +59,34 @@ AMBER_CFG = ArticulationCfg(
     ),
     soft_joint_pos_limit_factor=0.9,
     actuators={
-        # "left_thigh_act": ImplicitActuatorCfg(
-        #     joint_names_expr=["q1_left"],
-        #     effort_limit_sim=400.0,
-        #     velocity_limit_sim=4.0,
-        #     stiffness=STIFFNESS,
-        #     damping=DAMPING,
-        # ),
-        # "left_shin_act": ImplicitActuatorCfg(
-        #     joint_names_expr=["q2_left"],
-        #     effort_limit_sim=400.0,
-        #     velocity_limit_sim=4.0,
-        #     stiffness=STIFFNESS,
-        #     damping=DAMPING,
-        # ),
-        # "right_thigh_act": ImplicitActuatorCfg(
-        #     joint_names_expr=["q1_right"],
-        #     effort_limit_sim=400.0,
-        #     velocity_limit_sim=4.0,
-        #     stiffness=STIFFNESS,
-        #     damping=DAMPING,
-        # ),
-        # "right_shin_act": ImplicitActuatorCfg(
-        #     joint_names_expr=["q2_right"],
-        #     effort_limit_sim=400.0,
-        #     velocity_limit_sim=5.0,
-        #     stiffness=STIFFNESS,
-        #     damping=DAMPING,
-        # ),
+        "left_thigh_act": ImplicitActuatorCfg(
+            joint_names_expr=["q1_left"],
+            effort_limit_sim=400.0,
+            velocity_limit_sim=4.0,
+            stiffness=STIFFNESS,
+            damping=DAMPING,
+        ),
+        "left_shin_act": ImplicitActuatorCfg(
+            joint_names_expr=["q2_left"],
+            effort_limit_sim=400.0,
+            velocity_limit_sim=4.0,
+            stiffness=STIFFNESS,
+            damping=DAMPING,
+        ),
+        "right_thigh_act": ImplicitActuatorCfg(
+            joint_names_expr=["q1_right"],
+            effort_limit_sim=400.0,
+            velocity_limit_sim=4.0,
+            stiffness=STIFFNESS,
+            damping=DAMPING,
+        ),
+        "right_shin_act": ImplicitActuatorCfg(
+            joint_names_expr=["q2_right"],
+            effort_limit_sim=400.0,
+            velocity_limit_sim=5.0,
+            stiffness=STIFFNESS,
+            damping=DAMPING,
+        ),
     },
 )
 

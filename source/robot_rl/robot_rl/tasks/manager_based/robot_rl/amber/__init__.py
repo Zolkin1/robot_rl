@@ -1,6 +1,6 @@
 import gymnasium as gym
 from . import agents  # if you end up giving Amber its own agent configs
-from .amber_env import AmberFlatEnv
+# from .amber_env import AmberFlatEnv
 
 gym.register(
     id="Amber-flat-vel",
