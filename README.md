@@ -148,10 +148,15 @@ Run
 python /robot_rl/scripts/rsl_rl/play.py --task=G1-flat-vel --num_envs=10 --checkpoint=<log_dir_checkpoint>
 
 ```
-## Run AMBER From A Checkpoint
+## AMBER 
+Train
+```
+python scripts/rsl_rl/train.py --task="Amber-flat-vel"  --num_envs=4096
+```
+
 Run
 ```
-python scripts/rsl_rl/play.py --task="Amber-flat-vel"  --num_envs=10
+python scripts/rsl_rl/play.py --task="Amber-flat-vel"  --num_envs=1
 ```
 ## Other Deps
 pygame
