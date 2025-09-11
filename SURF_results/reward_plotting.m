@@ -1,0 +1,150 @@
+close all;  clc;clear;
+
+% 1. Load the log as a table (keeps headers)
+% T = readtable('model_data/2025-07-20_00-01-48_33349.csv');   % first column must be 'step'
+T = readtable('model_data/2025-07-22_17-26-18_5000_13.csv');   % first column must be 'step'
+% T = readtable('model_data/2025-07-09_14-55-53_9999.csv');   % first column must be 'step'
+
+dt   = 0.02;                % sec between physics steps (✓ adjust if needed)
+time  = T.step * dt;
+
+%%
+% 2. Identify the reward columns automatically
+varNames   = T.Properties.VariableNames;
+rewardCols = setdiff(varNames, {'step'});   % all but the step counter
+
+% 3. Generate a figure for every reward term
+for k = 1:numel(rewardCols)
+    figure('Name', rewardCols{k}, 'NumberTitle', 'off');
+    plot(T.step*dt, T.(rewardCols{k}), 'LineWidth', 1.2);
+    grid on;
+    xlabel('Simulation step');
+    ylabel(rewardCols{k}, 'Interpreter', 'none');
+    title(strrep(rewardCols{k}, '_', '\_'));  % preserve underscores
+end
+%% Velocity graph
+
+time = T.step * dt;         % elapsed simulation time
+currVel     = T.curr_vel*1e10;
+cmdVelGiven = T.cmd_vel_given*1e10;
+
+% 3. Low-pass filter on curr_vel  (Butterworth -> lowpass)
+Fs   = 1/dt;                % sampling rate  (Hz)
+Fc   = 0.00001;                   % cut-off (Hz) – change to taste
+currVel_lp = lowpass(currVel, Fc, Fs);
+
+% 4. Plot all three curves
+figure('Name','Velocity-related rewards','NumberTitle','off'); hold on;
+plot(time, currVel,     '-',  'LineWidth',1.3);
+plot(time, cmdVelGiven, '--', 'LineWidth',2.5);
+% plot(time, currVel_lp,  '-.', 'LineWidth',1.5);
+grid on;
+
+% 5. Decorations
+xlabel('Time (s)', 'FontSize', 20);
+ylabel('Velocity (m/s)', 'FontSize', 20);
+title('Current vs. Command Velocity (Extra Mass: 0 Kg)', 'FontSize', 20);
+legend({'Current velocity','Command velocity'}, ...
+       'Interpreter','none','Location','best');set(gca, 'FontSize', 20);
+set(gca, 'FontSize', 20);
+avg_err=mean(abs((currVel_lp-cmdVelGiven)./cmdVelGiven))*100
+% fprintf("Avg error:%d ",);
+%% 3D plot
+
+% --- Define time window ---
+t_start = 4.0;   % [s] set your desired start time
+t_end   = 10.0;   % [s] set your desired end time
+mask    = (time >= t_start) & (time <= t_end);
+xL = T.curr_x_L(mask)*1e10;
+zL = T.curr_z_L(mask)*1e10-.03;
+xR = T.curr_x_R(mask)*1e10;
+zR = T.curr_z_R(mask)*1e10-.03;
+xL_target = T.left_target(mask)*1e10+xL;
+xR_target = T.right_target(mask)*1e10+xR;
+time_plot = time(mask);
+
+% --- Plot 1: X current vs target over time ---
+figure('Name','Foot X Position vs Target','NumberTitle','off');
+plot(time_plot, xL, 'b-', 'LineWidth', 1.5); hold on;
+plot(time_plot, xL_target, 'b--', 'LineWidth', 1.5);
+plot(time_plot, xR, 'r-', 'LineWidth', 1.5);
+plot(time_plot, xR_target, 'r--', 'LineWidth', 1.5);
+grid on;
+xlabel('Time (s)', 'FontSize', 14);
+ylabel('Foot X Position (m)', 'FontSize', 14);
+title('Current vs Target X Position', 'FontSize', 16);
+legend({'Left X Current','Left X Target','Right X Current','Right X Target'}, 'FontSize', 12);
+set(gca, 'FontSize', 16);
+% Mark every 0.4 seconds
+t_mark = ceil(t_start/0.4)*0.4 : 0.4 : t_end;
+xline(t_mark(1), '--k', 'LineWidth', 0.75);
+for t = t_mark
+    xline(t, '--k', 'LineWidth', 0.75, 'HandleVisibility','off');
+end
+% --- Plot 2: 3D plot of current foot pos and targets ---
+figure('Name','3D Foot Position vs Target','NumberTitle','off');
+yL = -0.1 * ones(size(xL));
+yR =  0.1 * ones(size(xR));
+
+% Current foot positions
+plot3(xL, yL, zL, 'b-', 'LineWidth', 2); hold on;
+plot3(xR, yR, zR, 'r-', 'LineWidth', 2);
+
+% Target foot positions (z = 0)
+plot3(xL_target, yL, zeros(size(xL_target)), 'bx', 'LineWidth', 2);
+plot3(xR_target, yR, zeros(size(xR_target)), 'rx', 'LineWidth', 2);
+
+grid on;
+xlabel('X (m)', 'FontSize', 20);
+ylabel('Y (m)', 'FontSize', 20);
+zlabel('Z (m)', 'FontSize', 20);
+title('3D Foot Position vs Target', 'FontSize', 22);
+legend({'Left Curr','Right Curr','Left Target','Right Target'}, 'FontSize', 16);
+set(gca, 'FontSize', 16);
+view(3);
+
+%% 3D plotting of swing traj
+% --- Define time window ---
+t_start = 15.0;   % [s] set your desired start time
+t_end   = 25.0;   % [s] set your desired end time
+mask    = (time >= t_start) & (time <= t_end);
+
+% --- Extract foot positions within time window ---
+xR = T.policy_31_(mask);
+zR = T.policy_32_(mask);
+xL = T.policy_29_(mask);
+zL = T.policy_30_(mask);
+time_plot = time(mask);
+
+% --- 2D Plot: x vs time for both feet ---
+figure('Name','Foot X Position vs Time','NumberTitle','off');
+plot(time_plot, xL, 'b-', 'LineWidth', 1.5); hold on;
+plot(time_plot, xR, 'r--', 'LineWidth', 1.5);
+grid on;
+xlabel('Time (s)', 'FontSize', 14);
+ylabel('Foot X Position (m)', 'FontSize', 14);
+title('Left and Right Foot X Position vs Time', 'FontSize', 16);
+legend({'Left Foot','Right Foot'}, 'FontSize', 12);
+set(gca, 'FontSize', 12);
+
+% Mark every 0.4 seconds
+t_mark = ceil(t_start/0.4)*0.4 : 0.4 : t_end;
+for t = t_mark
+    xline(t, '--k', 'LineWidth', 0.75, 'HandleVisibility','off');
+end
+
+% --- 3D Plot: foot trajectory in X-Z with fixed Y offset ---
+figure('Name','Foot Trajectories in 3D','NumberTitle','off');
+yL = -0.1 * ones(size(xL));  % constant y for left
+yR =  0.1 * ones(size(xR));  % constant y for right
+
+plot3(xL, yL, zL, 'b-',  'LineWidth', 2); hold on;
+plot3(xR, yR, zR, 'r--', 'LineWidth', 2);
+grid on;
+xlabel('X (m)', 'FontSize', 14);
+ylabel('Y (m)', 'FontSize', 14);
+zlabel('Z (m)', 'FontSize', 14);
+title('Left and Right Foot Trajectories in 3D', 'FontSize', 16);
+legend({'Left Foot', 'Right Foot'}, 'FontSize', 12);
+set(gca, 'FontSize', 12);
+view(3);

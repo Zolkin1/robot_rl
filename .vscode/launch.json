@@ -1,0 +1,30 @@
+{
+  // .vscode/launch.json
+  "version": "0.2.0",
+  "configurations": [
+    
+    {
+      "name": "Train  Amber-flat-vel",
+      "type": "python",
+      "request": "launch",
+
+      // script to run
+      "program": "${workspaceFolder}/scripts/rsl_rl/train.py",
+
+      // CLI flags (one array element per shell token)
+      "args": ["--task", "Amber-flat-vel", "--num_envs=2"],
+
+      // run from repo root so relative imports & logging paths work
+      "cwd": "${workspaceFolder}",
+
+      // show output in the Integrated Terminal instead of Debug Console
+      "console": "integratedTerminal",
+
+      // step into library code (PyTorch, Isaac Gym, etc.) if you need to
+      "justMyCode": false,
+
+      // expose PYTHONPATH so sub-packages resolve cleanly
+      "env": { "PYTHONPATH": "${workspaceFolder}" }
+    }
+  ]
+}

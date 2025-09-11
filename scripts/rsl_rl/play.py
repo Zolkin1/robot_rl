@@ -108,7 +108,22 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
 
     # create isaac environment
     env = gym.make(args_cli.task, cfg=env_cfg, render_mode="rgb_array" if args_cli.video else None)
+    base_env = env.unwrapped
+    obs_mgr  = base_env.observation_manager
 
+    # run the manager once to get the dict   {name: tensor}
+    obs_dict = obs_mgr.compute()            # shapes:  [N, dim_i]
+
+    print("=== Observation slice map ===")
+    slice_map = {}
+    start = 0
+    for name, tensor in obs_dict.items():   # preserves cfg order
+        dim = tensor.shape[1] if tensor.ndim > 1 else 1
+        sl  = slice(start, start + dim)
+        slice_map[name] = sl
+        print(f"{name:25s} -> {sl}")
+        start += dim
+    print("Vector length:", start)
     # convert to single-agent instance if required by the RL algorithm
     if isinstance(env.unwrapped, DirectMARLEnv):
         env = multi_agent_to_single_agent(env)
@@ -166,6 +181,9 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
             actions = policy(obs)
             # env stepping
             obs, _, _, _ = env.step(actions)
+            # print(obs) 
+            # for name, sl in slice_map.items():
+            #     print(name, obs[:, sl])             # per-env values for that term
         if args_cli.video:
             timestep += 1
             # Exit the play loop after recording one video

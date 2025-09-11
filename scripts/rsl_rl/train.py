@@ -6,7 +6,7 @@
 """Script to train RL agent with RSL-RL."""
 
 """Launch Isaac Sim Simulator first."""
-
+# import torch  
 import argparse
 import sys
 
@@ -96,6 +96,7 @@ torch.backends.cudnn.allow_tf32 = True
 torch.backends.cudnn.deterministic = False
 torch.backends.cudnn.benchmark = False
 
+torch.autograd.set_detect_anomaly(True)
 
 @hydra_task_config(args_cli.task, "rsl_rl_cfg_entry_point")
 def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agent_cfg: RslRlOnPolicyRunnerCfg):
@@ -134,8 +135,16 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         log_dir += f"_{agent_cfg.run_name}"
     log_dir = os.path.join(log_root_path, log_dir)
 
-    # create isaac environment
-    env = gym.make(args_cli.task, cfg=env_cfg, render_mode="rgb_array" if args_cli.video else None)
+    # create isaac environment : Uncomment for G1-------------------------------------------------------------------
+    # env = gym.make(args_cli.task, cfg=env_cfg, render_mode="rgb_array" if args_cli.video else None)
+
+    #EXTRA CODE : COMMENT FOR G1 : This code will reset an env with nan in its policy-------------------------------
+    base_env = gym.make(args_cli.task, cfg=env_cfg, render_mode="rgb_array" if args_cli.video else None)
+    # wrap to catch any NaN or super‐large rewards and reset those sub‐envs immediately
+    from robot_rl.tasks.manager_based.robot_rl.amber.amber_env import NaNResetWrapper
+    env = NaNResetWrapper(base_env, vel_threshold=5000.0)
+
+
 
     # convert to single-agent instance if required by the RL algorithm
     if isinstance(env.unwrapped, DirectMARLEnv):

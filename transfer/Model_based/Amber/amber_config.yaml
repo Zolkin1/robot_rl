@@ -1,0 +1,27 @@
+# amber_policy_cfg.yaml
+robot_name: "amber"
+
+# Path to your trained policy checkpoint (.pt) file
+checkpoint_path: "/home/s-ritwik/src/robot_rl/logs/rsl_rl/amber/2025-07-22_17-26-18/exported/policy.pt"
+# checkpoint_path: "/home/s-ritwik/src/robot_rl/logs/rsl_rl/amber/2025-07-18_12-44-26/exported/policy.pt"
+
+# checkpoint_path: "/home/s-ritwik/src/robot_rl/logs/rsl_rl/g1/2025-06-09_18-44-04/exported/policy.pt"   # After re-factor
+# Number of observations and actions used when training Amber
+num_obs: 29
+num_action: 4
+
+# Control and sim frequency
+period: 0.8        # s — gait cycle period (adjust to your setup)
+dt: 0.02           # s — 50 Hz policy update
+
+# Scales and normalization — match these to how you trained the policy
+ang_vel_scale: 1
+command_scale: [2, 0.0, 0.0]   # Only X-axis command for planar walker
+qpos_scale: 1.0
+qvel_scale: .1
+action_scale: 1
+
+# Your policy’s expected joint default angles, in MuJoCo order
+# If your Amber only has 4 joints: e.g. 2 hips and 2 knees
+def_ang_order: "isaac"
+default_angles: [0,0,0,0,0,0,0]
