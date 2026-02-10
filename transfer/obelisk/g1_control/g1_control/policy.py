@@ -159,44 +159,46 @@ class RLPolicy:
         self.prev_phi = self.phi
         raw_phi = ((time - self.last_zero_time) % self.get_total_time()) / self.get_total_time()
 
-        # Determine if we should hold
-        prev_should_hold = self.should_hold
-        self.should_hold = np.abs(cmd_vel[0]) < 0.1
+        # # Determine if we should hold
+        # prev_should_hold = self.should_hold
+        # self.should_hold = np.abs(cmd_vel[0]) < 0.1
 
-        # Reset tracking when newly holding
-        if self.should_hold and not prev_should_hold:
-            self.boundaries_crossed = 0
-            self.hold_phi_value = -1.0
+        # # Reset tracking when newly holding
+        # if self.should_hold and not prev_should_hold:
+        #     self.boundaries_crossed = 0
+        #     self.hold_phi_value = -1.0
 
-        # Hold at start: if this is the first call and velocity is low, lock at 0.0
-        if self.should_hold and self.prev_phi == 0.0 and self.phi == 0.0:
-            self.hold_phi_value = 0.0
+        # # Hold at start: if this is the first call and velocity is low, lock at 0.0
+        # if self.should_hold and self.prev_phi == 0.0 and self.phi == 0.0:
+        #     self.hold_phi_value = 0.0
 
-        # Release hold when no longer should hold
-        if not self.should_hold:
-            self.hold_phi_value = -1.0
-            self.boundaries_crossed = 0
+        # # Release hold when no longer should hold
+        # if not self.should_hold:
+        #     self.hold_phi_value = -1.0
+        #     self.boundaries_crossed = 0
 
-        # Detect boundary crossings (only if should hold and not locked yet)
-        if self.should_hold and self.hold_phi_value < 0:
-            crosses_zero = (raw_phi < self.prev_phi) and (self.prev_phi > 0)
-            crosses_half = (self.prev_phi < 0.5) and (raw_phi >= 0.5)
+        # # Detect boundary crossings (only if should hold and not locked yet)
+        # if self.should_hold and self.hold_phi_value < 0:
+        #     crosses_zero = (raw_phi < self.prev_phi) and (self.prev_phi > 0)
+        #     crosses_half = (self.prev_phi < 0.5) and (raw_phi >= 0.5)
 
-            if crosses_zero or crosses_half:
-                self.boundaries_crossed += 1
+        #     if crosses_zero or crosses_half:
+        #         self.boundaries_crossed += 1
 
-            # Lock hold on second boundary crossing
-            if self.boundaries_crossed >= 4:
-                if crosses_zero:
-                    self.hold_phi_value = 0.0
-                elif crosses_half:
-                    self.hold_phi_value = 0.5
+        #     # Lock hold on second boundary crossing
+        #     if self.boundaries_crossed >= 4:
+        #         if crosses_zero:
+        #             self.hold_phi_value = 0.0
+        #         elif crosses_half:
+        #             self.hold_phi_value = 0.5
 
-        # Apply hold or use raw phi
-        if self.hold_phi_value >= 0:
-            self.phi = self.hold_phi_value
-        else:
-            self.phi = raw_phi
+        # # Apply hold or use raw phi
+        # if self.hold_phi_value >= 0:
+        #     self.phi = self.hold_phi_value
+        # else:
+        #     self.phi = raw_phi
+
+        self.phi = raw_phi
 
         # Create the observation
         obs_idx = 0
