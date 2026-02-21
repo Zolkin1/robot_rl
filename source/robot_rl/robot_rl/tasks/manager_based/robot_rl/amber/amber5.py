@@ -4,7 +4,7 @@ from isaaclab.actuators import ImplicitActuatorCfg
 from isaaclab.assets.articulation import ArticulationCfg
 
 # Path to Amber USD asset directory
-ROBOT_ASSETS = "/home/s-ritwik/src/robot_rl/robot_assets/amber5/amber"
+ROBOT_ASSETS = "/home/rycker/src/robot_rl/robot_assets/amber5/amber"
 
 # Stiffness and damping constants for Amber joints
 STIFFNESS = 1000.0
@@ -13,7 +13,7 @@ DAMPING = 50.0
 # --- AMBER5 ROBOT CONFIGURATION ---
 AMBER_CFG = ArticulationCfg(
     spawn=sim_utils.UsdFileCfg(
-        usd_path=f"{ROBOT_ASSETS}/amber_nc.usd",
+        usd_path=f"{ROBOT_ASSETS}/amber.usd",
         activate_contact_sensors=True,
         rigid_props=sim_utils.RigidBodyPropertiesCfg(
             disable_gravity=False,
@@ -38,10 +38,10 @@ AMBER_CFG = ArticulationCfg(
     init_state=ArticulationCfg.InitialStateCfg(
         pos=(0.0, 0.0, 1.7),
         joint_pos={
-            "q1_left": 0.85542953,
-            "q2_left": -1.3705312,
-            "q1_right": 0.85542953,
-            "q2_right": -1.3705312,
+            "q1_left": -0.85542953,
+            "q2_left": 1.3705312,
+            "q1_right": -0.85542953,
+            "q2_right": 1.3705312,
             # "q1_left": 0.85542953/3,
             # "q2_left": -1.3705312/3,
             # "q1_right": 0.85542953/3,

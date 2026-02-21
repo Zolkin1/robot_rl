@@ -169,10 +169,10 @@ class AmberRoughEnvCfg(AmberEnvCfg):
         # self.rewards.track_ang_vel_z_exp.weight = 0.5
         self.rewards.lin_vel_z_l2.weight =  -.2 # TODO reduce this maybe?
         self.rewards.ang_vel_xy_l2.weight = -0.05
-        self.rewards.dof_torques_l2.weight = -1.0e-5
+        self.rewards.dof_torques_l2.weight = -1.0e-4
         self.rewards.dof_acc_l2.weight = -2.5e-7
         # self.rewards.dof_vel_l2.weight = -1.0e-3
-        self.rewards.action_rate_l2.weight = -0.01
+        self.rewards.action_rate_l2.weight = -0.05
         # self.rewards.feet_air_time.weight = 0.0
         self.rewards.feet_air_time = None
         self.rewards.flat_orientation_l2.weight = -1.0
@@ -195,7 +195,7 @@ class AmberRoughEnvCfg(AmberEnvCfg):
         # self.rewards.joint_symmetry_reward.params["diff_threshold"] = 5
         self.rewards.joint_symmetry_reward.params["debug"] = False
         # penalize asymmetric joints per cycle
-        self.rewards.stride_consistency.weight        =  10#10#
+        self.rewards.stride_consistency.weight        =  0#10#
         # self.rewards.joint_symmetry_reward.params["diff_threshold"] = 5
         self.rewards.stride_consistency.params["debug"] = False
         # Reward phase based contacts: stance and wing
@@ -207,7 +207,7 @@ class AmberRoughEnvCfg(AmberEnvCfg):
         # reward maintaining torso upright within window, penalize beyond threshold
         self.rewards.torso_orientation.weight             =    4#2.0  
         # reward alternating foot contacts vs repeats
-        self.rewards.alternation_contact.weight           =   10
+        self.rewards.alternation_contact.weight           =   0
         # reward progressive foot placement per cycle
         self.rewards.progressive_step.weight              =    3#15.0  
         # per‐cycle foot‐contact correctness (+5 for exactly one each, else penalty)
@@ -217,9 +217,9 @@ class AmberRoughEnvCfg(AmberEnvCfg):
         self.rewards.symmetric_foot_airtime.params["diff_threshold"] = 5
         self.rewards.symmetric_foot_airtime.params["reward_good"] = 8
         # penalize foot sliding (squared speed during contact)
-        self.rewards.feet_no_slip_condition.weight        =  -1.5#-10.0  
+        self.rewards.feet_no_slip_condition.weight        =  -15#-10.0  
         # cycle based reward
-        self.rewards.paper_cycle_reward.weight            = 4#5
+        self.rewards.paper_cycle_reward.weight            = 15#5
         self.rewards.paper_cycle_reward.params["debug"]   = False
         # Reward for contact step ahead of com
         self.rewards.com_step_reward.weight               = 0

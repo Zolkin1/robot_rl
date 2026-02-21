@@ -68,24 +68,7 @@ PERIOD = 0.8 #0.6 #0.8  # (0.4 s swing phase)
 WDES=0.0
 
 
-@configclass
-class CommandsCfg:
-    # base_velocity = mdp.UniformVelocityCommandCfg(
-    #     asset_name="robot",
-    #     resampling_time_range=(10.0, 10.0),
-    #     rel_standing_envs=0.02,
-    #     rel_heading_envs=0.0,
-    #     debug_vis=True,
-    #     ranges=mdp.UniformVelocityCommandCfg.Ranges(
-    #         lin_vel_x=(-1, -1), lin_vel_y=(0.0, 0.0), ang_vel_z=(-0., 0.)
-    #     ),
-    # )
-    base_velocity = mdp.LoopVelocityCommandCfg(
-        asset_name="robot",
-        sequence=[-0.1, -0.5, -1.0, -1.2, -0.7],    # your custom cycle
-        resampling_time_range=(5.0, 5.0),          # 3 seconds per value
-        debug_vis=True,
-    )
+
 
 @configclass
 class AmberObservationsCfg(ObservationsCfg):
@@ -119,13 +102,34 @@ class AmberObservationsCfg(ObservationsCfg):
         )
         # the commanded forward velocity (so the policy knows the target)
         velocity_commands = ObsTerm(
-            func=mdp.generated_commands,
+            func=mdp.generated_commands_x,
             params={"command_name": "base_velocity"},
             history_length=1,
             scale=2.0,
         )
 
         # joint velocities and joint positions (relative to default stance)
+        # joint_vel = ObsTerm(
+        #     func=mdp.joint_vel_rel_subset,
+        #     params={
+        #         "asset_cfg": SceneEntityCfg("robot"),
+        #         "keep_joint_names": ["q1_left","q2_left","q1_right","q2_right"],
+        #         # or: "keep_dof_indices": [i1,i2,i3,i4],
+        #     },
+        #     noise=Unoise(n_min=-0.5, n_max=0.5),
+        #     history_length=1,
+        #     scale=0.1,
+        # )
+
+        # joint_pos = ObsTerm(
+        #     func=mdp.joint_pos_rel_subset,
+        #     params={
+        #         "asset_cfg": SceneEntityCfg("robot"),
+        #         "keep_joint_names": ["q1_left","q2_left","q1_right","q2_right"],
+        #     },
+        #     noise=Unoise(n_min=-0.01, n_max=0.01),
+        #     history_length=1,
+        # )
         joint_vel = ObsTerm(
             func=mdp.joint_vel_rel,
             noise=Unoise(n_min=-0.5, n_max=0.5),
@@ -366,6 +370,27 @@ class AmberEventsCfg(EventCfg):
     #         "asset_cfg": SceneEntityCfg("robot"),
     #     },
     # )
+
+@configclass
+class CommandsCfg:
+    # base_velocity = mdp.UniformVelocityCommandCfg(
+    #     asset_name="robot",
+    #     resampling_time_range=(10.0, 10.0),
+    #     rel_standing_envs=0.02,
+    #     rel_heading_envs=0.0,
+    #     debug_vis=True,
+    #     ranges=mdp.UniformVelocityCommandCfg.Ranges(
+    #         lin_vel_x=(-1, -1), lin_vel_y=(0.0, 0.0), ang_vel_z=(-0., 0.)
+    #     ),
+    # )
+    base_velocity = mdp.LoopVelocityCommandCfg(
+        asset_name="robot",
+        sequence=[-0.1, -0.5, -1.0, -1.2, -0.7],    # your custom cycle
+        resampling_time_range=(5.0, 5.0),          # 3 seconds per value
+        debug_vis=True,
+    )
+
+
 @configclass
 class AmberEnvCfg(LocomotionVelocityRoughEnvCfg):
     """Environment config for planar Amber to track forward speed."""
@@ -376,11 +401,11 @@ class AmberEnvCfg(LocomotionVelocityRoughEnvCfg):
     observations: AmberObservationsCfg = AmberObservationsCfg()
     rewards: AmberRewardCfg = AmberRewardCfg()
     events: AmberEventsCfg = AmberEventsCfg()
-    commands: CommandsCfg =CommandsCfg()
+    # commands: CommandsCfg =CommandsCfg()
     def __post_init__(self):
         super().__post_init__()
         # set_torso_mass(10)
         ## uncomment the below code when commenting CommandsCfg
-        # self.commands.base_velocity.ranges.lin_vel_x = (-1.5, 1) # 0 - 1
-        # self.commands.base_velocity.ranges.lin_vel_y = (0,0) #(-1.0, 1.0)
-        # self.commands.base_velocity.ranges.ang_vel_z = (0, 0)
+        self.commands.base_velocity.ranges.lin_vel_x = (-1.5, 1.5) # 0 - 1
+        self.commands.base_velocity.ranges.lin_vel_y = (0,0) #(-1.0, 1.0)
+        self.commands.base_velocity.ranges.ang_vel_z = (0, 0)

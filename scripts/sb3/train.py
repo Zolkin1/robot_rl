@@ -58,7 +58,21 @@ from isaaclab.envs import (
     multi_agent_to_single_agent,
 )
 from isaaclab.utils.dict import print_dict
-from isaaclab.utils.io import dump_pickle, dump_yaml
+from isaaclab.utils.io import dump_yaml
+
+# Isaac Sim / Isaac Lab 5.1 removed dump_pickle from isaaclab.utils.io; keep backward compat
+try:
+    from isaaclab.utils.io import dump_pickle  # present in Isaac Sim <= 5.0
+except ImportError:  # fallback for Isaac Sim 5.1+
+    import os as _os
+    import pickle as _pickle
+
+    def dump_pickle(path: str, data):
+        dirpath = _os.path.dirname(path)
+        if dirpath:
+            _os.makedirs(dirpath, exist_ok=True)
+        with open(path, "wb") as f:
+            _pickle.dump(data, f, protocol=_pickle.HIGHEST_PROTOCOL)
 from isaaclab_rl.sb3 import Sb3VecEnvWrapper, process_sb3_cfg
 from isaaclab_tasks.utils.hydra import hydra_task_config
 from stable_baselines3 import PPO

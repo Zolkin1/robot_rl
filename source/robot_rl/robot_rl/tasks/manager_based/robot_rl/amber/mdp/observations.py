@@ -5,12 +5,33 @@ from typing import TYPE_CHECKING
 import math, time
 import numpy as np
 import csv
-from isaaclab.envs import ManagerBasedRLEnv
+from isaaclab.envs import ManagerBasedRLEnv, ManagerBasedEnv
 from isaaclab.managers import SceneEntityCfg
 from isaaclab.utils.math import euler_xyz_from_quat, wrap_to_pi, quat_rotate_inverse, yaw_quat, quat_rotate, quat_inv
 import omni.usd  
+from isaaclab.assets import Articulation, RigidObject
 import torch
 from pxr import Gf, UsdGeom
+
+def joint_vel_rel(env: ManagerBasedEnv, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")):
+    """The joint velocities of the asset w.r.t. the default joint velocities.
+
+    Note: Only the joints configured in :attr:`asset_cfg.joint_ids` will have their velocities returned.
+    """
+    # extract the used quantities (to enable type-hinting)
+    asset: Articulation = env.scene[asset_cfg.name]
+    return asset.data.joint_vel[:, asset_cfg.joint_ids] - asset.data.default_joint_vel[:, asset_cfg.joint_ids]
+
+
+def joint_pos_rel(env: ManagerBasedEnv, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")) -> torch.Tensor:
+    """The joint positions of the asset w.r.t. the default joint positions.
+
+    Note: Only the joints configured in :attr:`asset_cfg.joint_ids` will have their positions returned.
+    """
+    # extract the used quantities (to enable type-hinting)
+    asset: Articulation = env.scene[asset_cfg.name]
+    return asset.data.joint_pos[:, asset_cfg.joint_ids] - asset.data.default_joint_pos[:, asset_cfg.joint_ids]
+
 
 _G = 9.81
 
@@ -38,6 +59,79 @@ def is_ground_phase(env: ManagerBasedRLEnv, period: float) -> torch.Tensor:
 
 # gravity constant
 _G = 9.81
+
+
+@torch.no_grad()
+def generated_commands_x(
+    env: ManagerBasedRLEnv,
+    command_name: str = "base_velocity",
+) -> torch.Tensor:
+    """Return only the x command as [N, 1]."""
+    cmd = env.command_manager.get_command(command_name)  # [N, 3] e.g. (vx, vy, yaw)
+    return cmd[:, 0:1]  # keep shape [N,1] for the ObsTerm
+
+
+
+import torch
+from isaaclab.envs import ManagerBasedRLEnv
+from isaaclab.managers import SceneEntityCfg
+
+@torch.no_grad()
+def joint_pos_rel_subset(
+    env: ManagerBasedRLEnv,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+    keep_joint_names = ("q1_left","q2_left","q1_right","q2_right"),
+    keep_dof_indices = None,
+) -> torch.Tensor:
+    """
+    Returns [N, len(keep)] subset from mdp.joint_pos_rel in the robot's DOF order.
+    Prefer selecting by names; indices are supported too.
+    """
+    # get full relative joint positions from your existing pipeline
+    full = joint_pos_rel(env, asset_cfg=asset_cfg)  # [N, D]
+
+    # map names → indices if needed
+    if keep_dof_indices is None:
+        asset = env.scene[asset_cfg.name]
+        try:
+            dof_names = asset.dof_names
+        except AttributeError:
+            dof_names = list(asset.cfg.init_state.joint_pos.keys())
+        idx = [dof_names.index(n) for n in keep_joint_names]
+    else:
+        idx = list(keep_dof_indices)
+    # print(" final",full[:, idx].shape)
+    # print("orig",full)
+    # print(full[:, -4:])
+    return full[:, -4:]
+
+
+@torch.no_grad()
+def joint_vel_rel_subset(
+    env: ManagerBasedRLEnv,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+    keep_joint_names = ("q1_left","q2_left","q1_right","q2_right"),
+    keep_dof_indices = None,
+) -> torch.Tensor:
+    """
+    Returns [N, len(keep)] subset from mdp.joint_vel_rel in the robot's DOF order.
+    """
+    full = joint_vel_rel(env, asset_cfg=asset_cfg)  # [N, D]
+    # print(full.shape)
+    if keep_dof_indices is None:
+        asset = env.scene[asset_cfg.name]
+        try:
+            dof_names = asset.dof_names
+        except AttributeError:
+            dof_names = list(asset.cfg.init_state.joint_pos.keys())
+        # print(dof_names)
+
+        idx = [dof_names.index(n) for n in keep_joint_names]
+    else:
+        idx = list(keep_dof_indices)
+    
+    return full[:, -4:]
+
 
 
 def _phi_contact_scalar(phi: float) -> float:

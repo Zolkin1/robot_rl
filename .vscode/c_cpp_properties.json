@@ -1,0 +1,35 @@
+{
+  "configurations": [
+    {
+      "browse": {
+        "databaseFilename": "${default}",
+        "limitSymbolsToIncludedHeaders": false
+      },
+      "includePath": [
+        "/home/rycker/src/pegasus/install/autopilot_controllers/include/**",
+        "/home/rycker/src/pegasus/install/thrust_curves/include/**",
+        "/home/rycker/src/pegasus/install/static_trajectories/include/**",
+        "/home/rycker/src/pegasus/install/static_trajectory_manager/include/**",
+        "/home/rycker/src/pegasus/install/pid/include/**",
+        "/home/rycker/src/pegasus/install/pegasus_console/include/**",
+        "/home/rycker/src/pegasus/install/autopilot_modes/include/**",
+        "/home/rycker/src/pegasus/install/pegasus_utils/include/**",
+        "/home/rycker/src/pegasus/install/estimator_manager/include/**",
+        "/home/rycker/src/pegasus/install/box_geofencing/include/**",
+        "/home/rycker/src/pegasus/install/autopilot/include/**",
+        "/home/rycker/src/pegasus/install/pegasus_msgs/include/**",
+        "/home/rycker/pegasus_external/install/vrpn_vendor/include/**",
+        "/home/rycker/pegasus_external/install/mavsdk_vendor/include/**",
+        "/home/rycker/pegasus_external/install/casadi_vendor/include/**",
+        "/opt/ros/humble/include/**",
+        "/usr/include/**"
+      ],
+      "name": "ROS",
+      "intelliSenseMode": "gcc-x64",
+      "compilerPath": "/usr/bin/gcc",
+      "cStandard": "gnu11",
+      "cppStandard": "c++14"
+    }
+  ],
+  "version": 4
+}

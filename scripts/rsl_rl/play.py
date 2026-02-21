@@ -66,8 +66,7 @@ from isaaclab.envs import (
 )
 from isaaclab.utils.assets import retrieve_file_path
 from isaaclab.utils.dict import print_dict
-from isaaclab.utils.pretrained_checkpoint import get_published_pretrained_checkpoint
-
+from isaaclab_rl.utils.pretrained_checkpoint import get_published_pretrained_checkpoint
 from isaaclab_rl.rsl_rl import RslRlOnPolicyRunnerCfg, RslRlVecEnvWrapper, export_policy_as_jit, export_policy_as_onnx
 
 import isaaclab_tasks  # noqa: F401
@@ -162,15 +161,26 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
 
     # export policy to onnx/jit
     export_model_dir = os.path.join(os.path.dirname(resume_path), "exported")
-    export_policy_as_jit(policy_nn, ppo_runner.obs_normalizer, path=export_model_dir, filename="policy.pt")
-    export_policy_as_onnx(
-        policy_nn, normalizer=ppo_runner.obs_normalizer, path=export_model_dir, filename="policy.onnx"
+    # export_policy_as_jit(policy_nn, ppo_runner.obs_normalizer, path=export_model_dir, filename="policy.pt")
+    # export_policy_as_onnx(
+    #     policy_nn, normalizer=ppo_runner.obs_normalizer, path=export_model_dir, filename="policy.onnx"
+    # )
+    # --- robust normalizer lookup (handles rsl_rl versions) ---
+    normalizer = (
+        getattr(ppo_runner, "obs_normalizer", None) or
+        getattr(ppo_runner, "obs_rms", None) or
+        getattr(ppo_runner.alg, "obs_normalizer", None) or
+        getattr(ppo_runner.alg, "obs_rms", None)
     )
+
+    export_model_dir = os.path.join(os.path.dirname(resume_path), "exported")
+    export_policy_as_jit(policy_nn, normalizer, path=export_model_dir, filename="policy.pt")
+    export_policy_as_onnx(policy_nn, normalizer=normalizer, path=export_model_dir, filename="policy.onnx")
 
     dt = env.unwrapped.step_dt
 
     # reset environment
-    obs, _ = env.get_observations()
+    obs = env.get_observations()
     timestep = 0
     # simulate environment
     while simulation_app.is_running():
