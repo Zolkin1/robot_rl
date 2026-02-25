@@ -132,7 +132,7 @@ def holonomic_constraint_vel(
     # not_flight_mask = cmd.get_not_flight_envs()
     # return not_flight_mask * torch.exp(- (e_vel**2).sum(dim=-1) / sigma_vel**2)
 
-    return torch.exp(-(v.sum(dim=-1).sum(dim=-1)**2) / sigma_vel**2)
+    return torch.exp(-(v**2).sum(dim=-1) / sigma_vel**2)
 
 def holonomic_constraint(
     env: ManagerBasedRLEnv,
@@ -158,34 +158,12 @@ def holonomic_constraint(
     des_contact_poses = cmd.desired_contact_poses
     contact_poses = cmd.current_contact_poses
 
-    # Compute error
+    # Compute full pose error [B, 6]
     pose_err = contact_poses - des_contact_poses
 
-    # Wrap yaw error
-    pose_err = wrap_to_pi(pose_err[:, -1])
-
-    # # planar position error [B,2]
-    # p0_xy = cmd.stance_foot_pos_0[:, :2]
-    # p_xy = cmd.stance_foot_pos[:, :2]
-    # delta_xy = p_xy - p0_xy
-    #
-    # # vertical error to the floor plane [B,1]
-    # z_cur = cmd.stance_foot_pos[:, 2].unsqueeze(-1)
-    # delta_z = z_cur - cmd.stance_foot_pos_0[:, 2].unsqueeze(-1)
-    #
-    # # roll error [B,1]
-    # roll = cmd.stance_foot_ori[:, 0].unsqueeze(-1)
-    #
-    # # yaw error wrapped to [–π, π] [B,1]
-    # psi0 = cmd.stance_foot_ori_0[:, 2]
-    # psi = cmd.stance_foot_ori[:, 2]
-    # delta_psi = ((psi - psi0 + torch.pi) % (2 * torch.pi) - torch.pi).unsqueeze(-1)
-    #
-    # # stack into [B,5] error vector
-    # e_pose = torch.cat([delta_xy, delta_z, roll, delta_psi], dim=-1)
-    #
-    # not_flight_mask = cmd.get_not_flight_envs()
-    # return not_flight_mask * torch.exp(- (e_pose ** 2).sum(dim=-1) / sigma_pose ** 2)
+    # Wrap yaw error (last component) in-place
+    pose_err = pose_err.clone()
+    pose_err[:, -1] = wrap_to_pi(pose_err[:, -1])
 
     return torch.exp(-(pose_err**2).sum(dim=-1) / sigma_pose ** 2)
 

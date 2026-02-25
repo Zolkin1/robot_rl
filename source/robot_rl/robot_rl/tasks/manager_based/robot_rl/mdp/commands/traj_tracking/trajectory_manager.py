@@ -759,13 +759,20 @@ class TrajectoryManager(ManagerBase):
                 f"  Got joint_vels: {sorted(ref_joint_vels)}"
             )
 
-        # Build output names list and count outputs (preserving YAML order)
+        # Build output names list and count outputs (preserving YAML order).
+        # Only include frame axes that have corresponding velocity data in frame_vels.
+        # This handles formats where position uses quaternion (ori_w, ori_x, ori_y, ori_z)
+        # but velocity uses angular velocity (ori_x, ori_y, ori_z only).
         output_names = []
 
-        # Add frame outputs (in YAML order)
+        frame_vels_data = ref_bezier.get('frame_vels', {})
+
+        # Add frame outputs (in YAML order, restricted to axes with velocity data)
         for frame in ref_bezier['frames'].keys():
+            frame_vel_axes = set(frame_vels_data.get(frame, {}).keys())
             for axis in ref_bezier['frames'][frame].keys():
-                output_names.append(f"{frame}:{axis}")
+                if axis in frame_vel_axes:
+                    output_names.append(f"{frame}:{axis}")
 
         # Add joint outputs (in YAML order)
         for joint in ref_bezier['joints'].keys():

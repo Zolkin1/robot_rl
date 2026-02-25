@@ -15,35 +15,63 @@ class CLF:
         n_outputs: int,
         sim_dt: float,
         batch_size: int,
-        ordered_output_names: list[str],
+        ordered_output_names: list[str] | None = None,
         device: torch.device = None,
-        Q_weights: Dict = None,
-        R_weights: Dict = None,
+        Q_weights: Dict | np.ndarray | None = None,
+        R_weights: Dict | np.ndarray | None = None,
         num_domain: int = 1,
         domain_scalar: list[float]|None = None
     ):
+        """Initialize the CLF.
+
+        Args:
+            n_outputs: Number of output dimensions.
+            sim_dt: Simulation time step (s).
+            batch_size: Number of parallel environments.
+            ordered_output_names: Ordered list of output names used as keys into
+                ``Q_weights`` and ``R_weights`` when those are provided as dicts.
+                When ``None`` (or when ``Q_weights``/``R_weights`` are numpy
+                arrays), the weight arrays are used directly as the diagonal.
+            device: Torch device.
+            Q_weights: State cost weights – either a ``dict`` mapping output name
+                to ``[q_pos, q_vel]``, or a flat ``np.ndarray`` of length
+                ``2 * n_outputs`` (used directly as diagonal).
+            R_weights: Input cost weights – either a ``dict`` mapping output name
+                to ``[r]``, or a flat ``np.ndarray`` of length ``n_outputs``
+                (used directly as diagonal).
+            num_domain: Number of CLF domains.
+            domain_scalar: Per-domain Q/R scaling factors.
+        """
         # Initialize device and basic parameters
-        self.device = device 
+        self.device = device
         self.sim_dt = sim_dt
         self.n_outputs = n_outputs
         self.ordered_output_names = ordered_output_names
 
         # Set up default Q, R if not provided
-        # Q_weights should be length = n_states, R_weights length = n_inputs
         self.num_domain = num_domain
 
         n_states = 2 * n_outputs
         n_inputs = n_outputs
+
+        # Build Q diagonal -------------------------------------------------------
         if Q_weights is None:
             Q = np.ones(n_states)
+        elif isinstance(Q_weights, np.ndarray):
+            # Legacy: flat array of length n_states passed directly
+            Q = Q_weights.astype(float)
         else:
-            # Create the matrix using the dict
+            # Dict branch: requires ordered_output_names
             Q = np.ones(n_states)
             for i, name in enumerate(ordered_output_names):
                 Q[2*i] = Q_weights[name][0]
                 Q[2*i + 1] = Q_weights[name][1]
+
+        # Build R diagonal -------------------------------------------------------
         if R_weights is None:
             R = 0.1 * np.ones(n_inputs)
+        elif isinstance(R_weights, np.ndarray):
+            R = R_weights.astype(float)
         else:
             R = np.ones(n_inputs)
             for i, name in enumerate(ordered_output_names):

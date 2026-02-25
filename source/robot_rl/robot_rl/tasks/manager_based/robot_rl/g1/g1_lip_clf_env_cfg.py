@@ -205,7 +205,7 @@ class G1LipCLFEnvCfg(HumanoidEnvCfg):
         ##
         # Terminations
         ##
-        self.terminations.base_contact.params["sensor_cfg"].body_names = "waist_yaw_link"
+        # self.terminations.base_contact.params["sensor_cfg"].body_names = "waist_yaw_link"
 
         
         ##

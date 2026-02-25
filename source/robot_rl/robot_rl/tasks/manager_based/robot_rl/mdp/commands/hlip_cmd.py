@@ -9,7 +9,7 @@ import isaaclab.sim as sim_utils
 from isaaclab.utils.math import euler_xyz_from_quat, wrap_to_pi, quat_from_euler_xyz,quat_rotate_inverse, yaw_quat, quat_rotate, quat_inv, quat_apply
 
 from robot_rl.tasks.manager_based.robot_rl.mdp.commands.ref_gen import bezier_deg, calculate_cur_swing_foot_pos, HLIP
-from robot_rl.tasks.manager_based.robot_rl.mdp.commands.clf_cmd.clf import CLF
+from robot_rl.tasks.manager_based.robot_rl.mdp.commands.traj_tracking.clf import CLF
 # from isaaclab.utils.transforms import combine_frame_transforms, quat_from_euler_xyz
 
 from typing import TYPE_CHECKING
@@ -121,7 +121,53 @@ class HLIPCommandTerm(CommandTerm):
     @property
     def command(self):
         return self.foot_target
-    
+
+    @property
+    def y_des(self) -> torch.Tensor:
+        """Alias for y_out (desired/reference trajectory outputs)."""
+        return self.y_out
+
+    @property
+    def dy_des(self) -> torch.Tensor:
+        """Alias for dy_out (desired/reference trajectory output velocities)."""
+        return self.dy_out
+
+    @property
+    def current_contact_vels(self) -> torch.Tensor:
+        """Current stance-foot velocity: [vx, vy, vz, omega_z]. Shape [B, 4].
+
+        Returns zeros before the first stance assignment.
+        """
+        if self.stance_idx is None:
+            return torch.zeros((self.num_envs, 4), device=self.device)
+        lin_vel = self.robot.data.body_lin_vel_w[:, self.feet_bodies_idx[self.stance_idx], :]  # [B, 3]
+        ang_vel_z = self.robot.data.body_ang_vel_w[:, self.feet_bodies_idx[self.stance_idx], 2].unsqueeze(-1)  # [B, 1]
+        return torch.cat([lin_vel, ang_vel_z], dim=-1)  # [B, 4]
+
+    @property
+    def desired_contact_poses(self) -> torch.Tensor:
+        """Desired (initial) stance-foot pose: [pos_x, pos_y, pos_z, roll, pitch, yaw]. Shape [B, 6].
+
+        Returns the stance foot pose recorded at the moment the foot became the stance foot.
+        Returns zeros before the first stance assignment.
+        """
+        if not hasattr(self, "stance_foot_pos_0") or not hasattr(self, "stance_foot_ori_0"):
+            return torch.zeros((self.num_envs, 6), device=self.device)
+        return torch.cat([self.stance_foot_pos_0, self.stance_foot_ori_0], dim=-1)
+
+    @property
+    def current_contact_poses(self) -> torch.Tensor:
+        """Current stance-foot pose: [pos_x, pos_y, pos_z, roll, pitch, yaw]. Shape [B, 6].
+
+        Returns zeros before the first stance assignment.
+        """
+        if self.stance_idx is None:
+            return torch.zeros((self.num_envs, 6), device=self.device)
+        foot_pos_w = self.robot.data.body_pos_w[:, self.feet_bodies_idx, :]    # [B, 2, 3]
+        foot_ori_w = self.robot.data.body_quat_w[:, self.feet_bodies_idx, :]   # [B, 2, 4]
+        stance_pos = foot_pos_w[:, self.stance_idx, :]                          # [B, 3]
+        stance_ori = get_euler_from_quat(foot_ori_w[:, self.stance_idx, :])     # [B, 3]
+        return torch.cat([stance_pos, stance_ori], dim=-1)                      # [B, 6]
 
     def _resample_command(self, env_ids):
         self._update_command()
