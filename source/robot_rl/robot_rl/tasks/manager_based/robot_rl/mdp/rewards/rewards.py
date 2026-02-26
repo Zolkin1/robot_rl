@@ -119,7 +119,7 @@ def holonomic_constraint_vel(
     """
     cmd = env.command_manager.get_term(command_name)
 
-    # Get the velocities
+    # Get the velocities: shape [B, num_bodies, 6]
     v = cmd.current_contact_vels
 
     # # linear velocity [B,3] and yaw rate [B,1]
@@ -132,7 +132,8 @@ def holonomic_constraint_vel(
     # not_flight_mask = cmd.get_not_flight_envs()
     # return not_flight_mask * torch.exp(- (e_vel**2).sum(dim=-1) / sigma_vel**2)
 
-    return torch.exp(-(v**2).sum(dim=-1) / sigma_vel**2)
+    # Sum over both the 6-dim velocity vector and the num_bodies dimension → [B]
+    return torch.exp(-(v**2).sum(dim=(-2, -1)) / sigma_vel**2)
 
 def holonomic_constraint(
     env: ManagerBasedRLEnv,
@@ -154,18 +155,19 @@ def holonomic_constraint(
 
     # TODO: Re-write to handle arbitrary contacts
 
-    # Get the current pose
+    # Get the current pose: shape [B, num_bodies, 6]
     des_contact_poses = cmd.desired_contact_poses
     contact_poses = cmd.current_contact_poses
 
-    # Compute full pose error [B, 6]
+    # Compute full pose error [B, num_bodies, 6]
     pose_err = contact_poses - des_contact_poses
 
-    # Wrap yaw error (last component) in-place
+    # Wrap yaw error (last component of the 6-dim pose) in-place
     pose_err = pose_err.clone()
-    pose_err[:, -1] = wrap_to_pi(pose_err[:, -1])
+    pose_err[..., -1] = wrap_to_pi(pose_err[..., -1])
 
-    return torch.exp(-(pose_err**2).sum(dim=-1) / sigma_pose ** 2)
+    # Sum over both the 6-dim pose vector and the num_bodies dimension → [B]
+    return torch.exp(-(pose_err**2).sum(dim=(-2, -1)) / sigma_pose ** 2)
 
 def reference_tracking(
     env: ManagerBasedRLEnv,
