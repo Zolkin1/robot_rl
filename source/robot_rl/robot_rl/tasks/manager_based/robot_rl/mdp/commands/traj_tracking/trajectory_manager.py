@@ -82,10 +82,15 @@ class TrajectoryManager(ManagerBase):
             self.domain_boundaries = torch.cumsum(torch.cat([torch.tensor([0.0], device=self.device), self.T, self.T]), dim=0)
 
         # Pre-compute relabeling matrices as tensors (separate for pos and vel)
-        R_pos_numpy = self.relable_ee_stance_coeffs(self.traj_data.pos_output_names)
-        R_vel_numpy = self.relable_ee_stance_coeffs(self.traj_data.vel_output_names)
-        self.R_relabel_pos = torch.from_numpy(R_pos_numpy).to(device=self.device, dtype=self.bezier_coeffs_pos.dtype)
-        self.R_relabel_vel = torch.from_numpy(R_vel_numpy).to(device=self.device, dtype=self.bezier_coeffs_vel.dtype)
+        # Only needed for half-periodic trajectories (used by remap_trajectory)
+        if self.traj_data.trajectory_type == TrajectoryType.HALF_PERIODIC:
+            R_pos_numpy = self.relable_ee_stance_coeffs(self.traj_data.pos_output_names)
+            R_vel_numpy = self.relable_ee_stance_coeffs(self.traj_data.vel_output_names)
+            self.R_relabel_pos = torch.from_numpy(R_pos_numpy).to(device=self.device, dtype=self.bezier_coeffs_pos.dtype)
+            self.R_relabel_vel = torch.from_numpy(R_vel_numpy).to(device=self.device, dtype=self.bezier_coeffs_vel.dtype)
+        else:
+            self.R_relabel_pos = torch.eye(self.traj_data.num_pos_outputs, device=self.device, dtype=self.bezier_coeffs_pos.dtype)
+            self.R_relabel_vel = torch.eye(self.traj_data.num_vel_outputs, device=self.device, dtype=self.bezier_coeffs_vel.dtype)
 
         # TODO: Fix the trajectory manager so that the bezier coefficient use the same order as the measured states
         # TODO: Make the R to remap programatic instead of hard-coded
@@ -309,7 +314,7 @@ class TrajectoryManager(ManagerBase):
     def get_trajectory_type(self) -> TrajectoryType:
         return self.traj_data.trajectory_type
 
-    def get_phasing_var(self, t: torch.Tensor) -> torch.Tensor:
+    def get_phasing_var(self, t: torch.Tensor, env_ids: torch.Tensor = None) -> torch.Tensor:
         """
         Compute the phasing variable which is a number in [0,1] that tells how far through the trajectory we are.
 
@@ -447,7 +452,7 @@ class TrajectoryManager(ManagerBase):
             result = torch.einsum('nd,nod->no', weights, cp_diff)
             return result / T.unsqueeze(1)
 
-    def get_output(self, t: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    def get_output(self, t: torch.Tensor, env_ids: torch.Tensor = None) -> tuple[torch.Tensor, torch.Tensor]:
         """Compute the bezier values at a given time using batched operations.
 
         Args:
@@ -562,6 +567,7 @@ class TrajectoryManager(ManagerBase):
 
     def get_contact_state(self, t: torch.Tensor,    # [N]
                            contact_frames: list[str],
+                           env_ids: torch.Tensor = None,
                            ) -> torch.Tensor:
         """
         Return the contact state of each contact point at the given time.
@@ -589,9 +595,12 @@ class TrajectoryManager(ManagerBase):
                                self._contact_table[domain_indices],
                                self._contact_table_reflected[domain_indices])
 
-    def get_current_domains(self, t: torch.Tensor) -> torch.Tensor:
-        """
-        Determine what domain each env is in given the time.
+    def get_current_domains(self, t: torch.Tensor, env_ids: torch.Tensor = None) -> torch.Tensor:
+        """Determine what domain each env is in given the time.
+
+        Args:
+            t: Shape [N] where N is the number of environments.
+            env_ids: Optional environment indices of shape [N].
         """
         # Determine the domain for each time
         T = self.traj_data.total_time
@@ -632,7 +641,7 @@ class TrajectoryManager(ManagerBase):
         self._ref_frame_mapping = domain_to_ref_frame_idx
         self._ref_frame_mapping_key = tuple(ref_frames)
 
-    def get_ref_frames_in_use(self, t: torch.Tensor, ref_frames: list[str]) -> torch.Tensor:
+    def get_ref_frames_in_use(self, t: torch.Tensor, ref_frames: list[str], env_ids: torch.Tensor = None) -> torch.Tensor:
         """
         Determine the reference frame in use.
 
@@ -702,11 +711,15 @@ class TrajectoryManager(ManagerBase):
             self.bezier_coeffs_pos[i, :, :] = self.traj_data.domain_data[domain].bezier_tensor_pos
             self.bezier_coeffs_vel[i, :, :] = self.traj_data.domain_data[domain].bezier_tensor_vel
 
-        # Regenerate the relabeling matrices for pos and vel
-        R_pos_numpy = self.relable_ee_stance_coeffs(ordered_pos_output_names)
-        R_vel_numpy = self.relable_ee_stance_coeffs(ordered_vel_output_names)
-        self.R_relabel_pos = torch.from_numpy(R_pos_numpy).to(device=self.device, dtype=self.bezier_coeffs_pos.dtype)
-        self.R_relabel_vel = torch.from_numpy(R_vel_numpy).to(device=self.device, dtype=self.bezier_coeffs_vel.dtype)
+        # Regenerate the relabeling matrices for pos and vel (only for half-periodic)
+        if self.traj_data.trajectory_type == TrajectoryType.HALF_PERIODIC:
+            R_pos_numpy = self.relable_ee_stance_coeffs(ordered_pos_output_names)
+            R_vel_numpy = self.relable_ee_stance_coeffs(ordered_vel_output_names)
+            self.R_relabel_pos = torch.from_numpy(R_pos_numpy).to(device=self.device, dtype=self.bezier_coeffs_pos.dtype)
+            self.R_relabel_vel = torch.from_numpy(R_vel_numpy).to(device=self.device, dtype=self.bezier_coeffs_vel.dtype)
+        else:
+            self.R_relabel_pos = torch.eye(self.traj_data.num_pos_outputs, device=self.device, dtype=self.bezier_coeffs_pos.dtype)
+            self.R_relabel_vel = torch.eye(self.traj_data.num_vel_outputs, device=self.device, dtype=self.bezier_coeffs_vel.dtype)
 
         # Regenerate precomputed coefficients for batched operations
         self._update_precomputed_coefficients()
@@ -1222,6 +1235,14 @@ class TrajectoryManager(ManagerBase):
 
     def get_v_log(self):
         return self.v_log, self.phi_keys
+
+    def get_v_log_avg(self) -> torch.Tensor:
+        """Compute the average V value across all phi keys.
+
+        Returns:
+            A single-element tensor with the mean of v_log.
+        """
+        return torch.mean(self.v_log).unsqueeze(0)
 
 def _ncr(n, r):
     return math.comb(n, r)

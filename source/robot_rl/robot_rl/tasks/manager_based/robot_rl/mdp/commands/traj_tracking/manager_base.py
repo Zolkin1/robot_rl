@@ -23,11 +23,12 @@ class ManagerBase(ABC):
         pass
 
     @abstractmethod
-    def get_output(self, t: torch.Tensor) -> torch.Tensor:
+    def get_output(self, t: torch.Tensor, env_ids: torch.Tensor = None) -> torch.Tensor:
         """Compute the trajectory output (bezier values) at a given time.
 
         Args:
             t: Shape [N] where N is the number of environments.
+            env_ids: Optional environment indices of shape [N].
 
         Returns:
             Outputs of shape [N, 2, num_outputs] where the second dimension contains
@@ -45,11 +46,12 @@ class ManagerBase(ABC):
         pass
 
     @abstractmethod
-    def get_current_domains(self, t: torch.Tensor) -> torch.Tensor:
+    def get_current_domains(self, t: torch.Tensor, env_ids: torch.Tensor = None) -> torch.Tensor:
         """Determine which domain each environment is in given the time.
 
         Args:
             t: Shape [N] where N is the number of environments.
+            env_ids: Optional environment indices of shape [N].
 
         Returns:
             Domain indices of shape [N] for each environment.
@@ -67,12 +69,13 @@ class ManagerBase(ABC):
         pass
 
     @abstractmethod
-    def get_ref_frames_in_use(self, t: torch.Tensor, ref_frames: list[str]) -> torch.Tensor:
+    def get_ref_frames_in_use(self, t: torch.Tensor, ref_frames: list[str], env_ids: torch.Tensor = None) -> torch.Tensor:
         """Determine the reference frame in use for each environment.
 
         Args:
             t: Shape [N] where N is the number of environments.
             ref_frames: A list of reference frame names.
+            env_ids: Optional environment indices of shape [N].
 
         Returns:
             Frame indices of shape [N] where each value is the index into
@@ -81,12 +84,13 @@ class ManagerBase(ABC):
         pass
 
     @abstractmethod
-    def get_contact_state(self, t: torch.Tensor, contact_frames: list[str]) -> torch.Tensor:
+    def get_contact_state(self, t: torch.Tensor, contact_frames: list[str], env_ids: torch.Tensor = None) -> torch.Tensor:
         """Return the contact state of each contact point at the given time.
 
         Args:
             t: Shape [N] where N is the number of environments.
             contact_frames: List of contact frame names to check the state for.
+            env_ids: Optional environment indices of shape [N].
 
         Returns:
             Contact states of shape [N, num_contacts] where num_contacts is

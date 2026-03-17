@@ -69,7 +69,7 @@ class MultiSkillManager(ManagerBase):
     # def get_reference_frames(self) -> list[str]:
     #     """Get the reference frames corresponding to the trajectory used by those envs."""
 
-    def get_output(self, t: torch.Tensor) -> torch.Tensor:
+    def get_output(self, t: torch.Tensor, env_ids: torch.Tensor = None) -> torch.Tensor:
         """
         Compute the bezier values at a given time for all the managers.
         """
@@ -85,7 +85,7 @@ class MultiSkillManager(ManagerBase):
         """Get the total number of outputs."""
         # TODO
 
-    def get_current_domains(self, t: torch.Tensor) -> torch.Tensor:
+    def get_current_domains(self, t: torch.Tensor, env_ids: torch.Tensor = None) -> torch.Tensor:
         """
         Determine which domain each env is in.
         """
@@ -105,7 +105,7 @@ class MultiSkillManager(ManagerBase):
 
         return num_domains
 
-    def get_ref_frames_in_use(self, t: torch.Tensor, ref_frames: list[str]) -> torch.Tensor:
+    def get_ref_frames_in_use(self, t: torch.Tensor, ref_frames: list[str], env_ids: torch.Tensor = None) -> torch.Tensor:
         """
                 Determine the reference frame in use.
 
@@ -122,7 +122,7 @@ class MultiSkillManager(ManagerBase):
 
         return frame_indices
 
-    def get_contact_state(self, t: torch.Tensor, contact_frames: list[str]) -> torch.Tensor:
+    def get_contact_state(self, t: torch.Tensor, contact_frames: list[str], env_ids: torch.Tensor = None) -> torch.Tensor:
         contact_states = torch.zeros(self.num_envs, len(contact_frames), device=self.device)
 
         for i in self.manager_indices.keys():

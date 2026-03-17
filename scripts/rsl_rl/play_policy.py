@@ -31,6 +31,8 @@ SIM_ENVIRONMENTS = {
     "bow_forward_clf_sym": "G1-bow_forward-clf-symmetric",    # TODO: make this a play
 
     "bend_up_clf_sym": "G1-bend_up-clf-play",
+
+    "double_integrator": "double-integrator",
 }
 
 class DataLogger:
@@ -141,6 +143,13 @@ def parse_args():
         action="store_true",
         default=False,
         help="Log data during playback."
+    )
+
+    parser.add_argument(
+        "--gamma",
+        type=float,
+        default=0.99,
+        help="Discount factor for computing discounted return plots (default: 0.99)."
     )
     # append RSL-RL cli arguments
     cli_args.add_rsl_rl_args(parser)
@@ -268,7 +277,7 @@ def main():
         args_cli.task, device=args_cli.device, num_envs=args_cli.num_envs
     )
 
-    if args_cli.sim_speed is not None:
+    if args_cli.sim_speed is not None and env_cfg.commands is not None:
         env_cfg.commands.base_velocity.ranges.lin_vel_x = (args_cli.sim_speed[0], args_cli.sim_speed[0])
         env_cfg.commands.base_velocity.ranges.lin_vel_y = (args_cli.sim_speed[1], args_cli.sim_speed[1])
         env_cfg.commands.base_velocity.ranges.ang_vel_z = (args_cli.sim_speed[2], args_cli.sim_speed[2])
@@ -381,37 +390,42 @@ def main():
     dt = env.unwrapped.step_dt
 
     # Dynamically generate log variables based on the command type
-    log_vars = [
-        'y_des',
-        'dy_des',
-        'base_velocity',
-        'y_act',
-        'dy_act',
-        'v',
-        'vdot',
-        'ordered_pos_output_names', # TODO: Use these
-        'ordered_vel_output_names',
-        'current_domain',
-        'phasing_var',
-        # 'v_log',
-        # 'phi_keys',
-        # 'CLF_EMA_0',
-        # 'CLF_EMA_1',
-        # 'CLF_EMA_2',
-        # 'CLF_EMA_3',
-        # 'CLF_EMA_4',
-        # 'CLF_EMA_5',
-        # 'CLF_EMA_6',
-        # 'CLF_EMA_7',
-        # 'CLF_EMA_8',
-        # 'CLF_EMA_9',
-        # 'CLF_EMA_10',
-        # 'domain_durations',
-        # 'gait_indices',
-    ]
-    
+    if args_cli.env_type == "double_integrator":
+        log_vars = []
+    else:
+        log_vars = [
+            'y_des',
+            'dy_des',
+            'base_velocity',
+            'y_act',
+            'dy_act',
+            'v',
+            'vdot',
+            'ordered_pos_output_names', # TODO: Use these
+            'ordered_vel_output_names',
+            'current_domain',
+            'phasing_var',
+            # 'v_log',
+            # 'phi_keys',
+            # 'CLF_EMA_0',
+            # 'CLF_EMA_1',
+            # 'CLF_EMA_2',
+            # 'CLF_EMA_3',
+            # 'CLF_EMA_4',
+            # 'CLF_EMA_5',
+            # 'CLF_EMA_6',
+            # 'CLF_EMA_7',
+            # 'CLF_EMA_8',
+            # 'CLF_EMA_9',
+            # 'CLF_EMA_10',
+            # 'domain_durations',
+            # 'gait_indices',
+        ]
+
     # Get the command term to determine what type of trajectory we're using
-    if "lip" in args_cli.env_type:
+    if args_cli.env_type == "double_integrator":
+        command_name = None
+    elif "lip" in args_cli.env_type:
         command_name = "hlip_ref"
     elif "clf" in args_cli.env_type:
         command_name = "traj_ref"
@@ -421,7 +435,10 @@ def main():
         raise ValueError(f"No valid command name for {args_cli.env_type}")
 
     # Setup logging (include actions/joint_names separately since they don't come from extract_reference_trajectory)
-    logger = DataLogger(enabled=True, log_dir=play_log_dir, variables=log_vars + ['action_targets', 'joint_pos', 'applied_torque', 'joint_names'])
+    extra_vars = ['reward', 'action_targets', 'joint_pos', 'applied_torque', 'joint_names']
+    if args_cli.env_type == "double_integrator":
+        extra_vars.append('joint_vel')
+    logger = DataLogger(enabled=True, log_dir=play_log_dir, variables=log_vars + extra_vars)
 
     # reset environment
     obs = env.get_observations()
@@ -447,13 +464,21 @@ def main():
             
             # Log data
             if args_cli.log_data:
-                data = extract_reference_trajectory(env, log_vars, command_name)
-                action_term = env.unwrapped.action_manager.get_term("joint_pos")
+                if command_name is not None:
+                    data = extract_reference_trajectory(env, log_vars, command_name)
+                else:
+                    data = {}
                 robot = env.unwrapped.scene.articulations["robot"]
+                data['reward'] = reward.clone()
+                # Use the appropriate action term name
+                action_term_name = "force" if args_cli.env_type == "double_integrator" else "joint_pos"
+                action_term = env.unwrapped.action_manager.get_term(action_term_name)
                 data['action_targets'] = action_term._processed_actions.clone()
                 data['joint_pos'] = robot.data.joint_pos.clone()
                 data['applied_torque'] = robot.data.applied_torque.clone()
                 data['joint_names'] = list(robot.data.joint_names)
+                if args_cli.env_type == "double_integrator":
+                    data['joint_vel'] = robot.data.joint_vel.clone()
                 logger.log_from_dict(data)
 
         timestep += 1
@@ -482,8 +507,12 @@ def main():
         print(f"[DEBUG] Generating plots in directory: {plot_dir}")
         
         # Determine trajectory type based on command type
-        plot_trajectories(logger.data, save_dir=plot_dir, trajectory_type="end_effector")
-        compute_and_save_stats(logger.data, save_dir=plot_dir)
+        if args_cli.env_type == "double_integrator":
+            from plot_double_integrator import plot_double_integrator
+            plot_double_integrator(logger.data, save_dir=plot_dir, dt=dt, gamma=args_cli.gamma)
+        else:
+            plot_trajectories(logger.data, save_dir=plot_dir, trajectory_type="end_effector")
+            compute_and_save_stats(logger.data, save_dir=plot_dir)
 
     # Ensure simulation app is closed
     if simulation_app is not None:

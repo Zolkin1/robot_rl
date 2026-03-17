@@ -472,6 +472,7 @@ def plot_trajectories(data, save_dir=None, trajectory_type=None):
                 plt.savefig(os.path.join(save_dir, f'v_and_vdot_env{env_id}.png'), dpi=300, bbox_inches='tight')
             plt.close(fig)
 
+
         # --- Error Metrics ---
         error_metrics = [key for key in processed_data.keys() if key.startswith('error_')]
         if error_metrics:

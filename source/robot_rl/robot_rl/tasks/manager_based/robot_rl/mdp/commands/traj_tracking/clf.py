@@ -293,7 +293,7 @@ class CLF:
             (vdot, v_curr): tuple of Vdot and V values, each shape [B].
         """
         # Compute errors
-        y_err = y_act - y_nom
+        y_err = self.compute_y_err(y_act, y_nom)
         dy_err = dy_act - dy_nom
         ddy_err = ddy_act - ddy_nom
 
