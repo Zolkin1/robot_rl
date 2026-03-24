@@ -182,32 +182,43 @@ Sometimes you will want to updated the version of IsaacLab you are using. To do 
 (where you cloned it). Then pull the version you want from git.
 Then in that folder run `./isaaclab.sh --install`.
 
-## Troubleshooting
 
-### Pylance Missing Indexing of Extensions
+## Citing
+If you use this repo in any publications, please consider citing the relevant paper (see below).
 
-In some VsCode versions, the indexing of part of the extensions is missing.
-In this case, add the path to your extension in `.vscode/settings.json` under the key `"python.analysis.extraPaths"`.
-
-```json
-{
-    "python.analysis.extraPaths": [
-        "<path-to-ext-repo>/source/robot_rl"
-    ]
+For the original CLF-RL idea and basic walking:
+```
+@article{li_clf-rl_2026,
+  author={Li, Kejun and Olkin, Zachary and Yue, Yisong and Ames, Aaron D.},
+  journal={IEEE Robotics and Automation Letters}, 
+  title={CLF-RL: Control Lyapunov Function Guided Reinforcement Learning}, 
+  year={2026},
+  volume={11},
+  number={3},
+  pages={3230-3237},
+  doi={10.1109/LRA.2026.3653329}}
+```
+For the running:
+```
+@misc{olkin_chasing_2025,
+      title={Chasing Stability: Humanoid Running via Control Lyapunov Function Guided Reinforcement Learning}, 
+      author={Zachary Olkin and Kejun Li and William D. Compton and Aaron D. Ames},
+      year={2025},
+      eprint={2509.19573},
+      archivePrefix={arXiv},
+      primaryClass={cs.RO},
+      url={https://arxiv.org/abs/2509.19573}, 
 }
 ```
-
-### Pylance Crash
-
-If you encounter a crash in `pylance`, it is probable that too many files are indexed and you run out of memory.
-A possible solution is to exclude some of omniverse packages that are not used in your project.
-To do so, modify `.vscode/settings.json` and comment out packages under the key `"python.analysis.extraPaths"`
-Some examples of packages that can likely be excluded are:
-
-```json
-"<path-to-isaac-sim>/extscache/omni.anim.*"         // Animation packages
-"<path-to-isaac-sim>/extscache/omni.kit.*"          // Kit UI tools
-"<path-to-isaac-sim>/extscache/omni.graph.*"        // Graph UI tools
-"<path-to-isaac-sim>/extscache/omni.services.*"     // Services tools
-...
+For the stepping stones:
+```
+@misc{dai_walk_2026,
+      title={Walk the PLANC: Physics-Guided RL for Agile Humanoid Locomotion on Constrained Footholds}, 
+      author={Min Dai and William D. Compton and Junheng Li and Lizhi Yang and Aaron D. Ames},
+      year={2026},
+      eprint={2601.06286},
+      archivePrefix={arXiv},
+      primaryClass={cs.RO},
+      url={https://arxiv.org/abs/2601.06286}, 
+}
 ```
