@@ -842,17 +842,21 @@ class TrajectoryCommand(CommandTerm):
         self.get_desired_output_time = (end - start) * torch.ones(self.num_envs, device=self.device)
 
         start = time.perf_counter()
-        # vdot, vcur = self.clf.compute_vdot(self.y_act, self.y_des, self.dy_act, self.dy_des)
+        vdot, vcur = self.clf.compute_vdot(self.y_act, self.y_des, self.dy_act, self.dy_des)
 
-        # TODO: Test
-        ddy_act = self.compute_measured_acceleration(self.ref_poses[:, 3:])
-        ddy_nom = self.manager.get_acceleration(t)
-        vdot, vcur = self.clf.compute_vdot_analytic(self.y_act, self.y_des, self.dy_act, self.dy_des, ddy_act, ddy_nom)
+        # # TODO: Test
+        # ddy_act = self.compute_measured_acceleration(self.ref_poses[:, 3:])
+        # ddy_nom = self.manager.get_acceleration(t)
+        # vdot, vcur = self.clf.compute_vdot_analytic(self.y_act, self.y_des, self.dy_act, self.dy_des, ddy_act, ddy_nom)
         end = time.perf_counter()
         self.vdot_time = (end - start) * torch.ones(self.num_envs, device=self.device)
 
         self.vdot = vdot
         self.v = vcur
+
+        # print("[Traj cmd] "
+        #       f"V={self.v.mean().item():.6f} | "
+        #       f"v dot={self.vdot.mean().item():.6f}")
 
         self.manager.log_v_on_phasing_var(self.get_phasing_var(), self.v)
 

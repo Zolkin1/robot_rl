@@ -52,8 +52,8 @@ def format_joint_name(joint_name):
     return formatted
 
 
-def plot_trajectories(data, save_dir=None, trajectory_type=None):
-    """Plot all trajectories with proper labels and units"""
+def plot_trajectories(data, save_dir=None, trajectory_type=None, paper=False):
+    """Plot all trajectories with proper labels and units."""
     # Convert lists to numpy arrays and handle torch tensors
     processed_data = {}
     for key, values in data.items():
@@ -528,6 +528,124 @@ def plot_trajectories(data, save_dir=None, trajectory_type=None):
 
     # # Generate focused COM and ankle plot
     # plot_focused_com_ankle(data, save_dir=save_dir, trajectory_type=trajectory_type)
+
+    if paper:
+        plot_paper_figure(data, save_dir=save_dir)
+
+
+def _find_name_index(names_array: np.ndarray, target: str) -> int | None:
+    """Find the index of a target name in an ordered output names array.
+
+    Args:
+        names_array: 2-D array of shape [1, num_dims] from ordered_pos/vel_output_names.
+        target: The name string to search for (e.g. ``"pelvis_link:pos_x"``).
+
+    Returns:
+        The column index, or ``None`` if not found.
+    """
+    for i in range(names_array.shape[1]):
+        if str(names_array[0, i]) == target:
+            return i
+    return None
+
+
+def plot_paper_figure(data: dict, save_dir: str | None = None) -> None:
+    """Generate a 2x2 paper-ready figure with LaTeX fonts.
+
+    Plots pelvis x position, pelvis x velocity, left hip pitch angle,
+    and left hip pitch angular velocity (reference vs actual).
+
+    Args:
+        data: Raw logged data dict (values are lists of torch tensors).
+        save_dir: Directory to save the figure. If ``None``, only displays.
+    """
+    plt.rcParams.update({
+        "text.usetex": True,
+        "font.family": "serif",
+    })
+
+    # Convert torch tensors to numpy
+    processed: dict[str, np.ndarray] = {}
+    for key, values in data.items():
+        if isinstance(values[0], torch.Tensor):
+            processed[key] = np.array([v.cpu().numpy() for v in values])
+        else:
+            processed[key] = np.array(values)
+
+    for required in ('y_des', 'y_act', 'dy_des', 'dy_act',
+                     'ordered_pos_output_names', 'ordered_vel_output_names'):
+        if required not in processed:
+            print(f"[paper] Missing required data key '{required}'. Skipping paper figure.")
+            return
+
+    # Time axis (assume 50 Hz)
+    n_steps = len(processed['y_des'])
+    time = np.arange(n_steps) * 0.02
+
+    env_id = 0
+
+    # Look up indices
+    pos_names = processed['ordered_pos_output_names']
+    vel_names = processed['ordered_vel_output_names']
+
+    pelvis_pos_idx = _find_name_index(pos_names, "pelvis_link:pos_x")
+    pelvis_vel_idx = _find_name_index(vel_names, "pelvis_link:pos_x")
+    hip_pos_idx = _find_name_index(pos_names, "joint:left_hip_pitch_joint")
+    hip_vel_idx = _find_name_index(vel_names, "joint:left_hip_pitch_joint")
+
+    if any(idx is None for idx in (pelvis_pos_idx, pelvis_vel_idx, hip_pos_idx, hip_vel_idx)):
+        print(f"[paper] Could not find all required indices:")
+        print(f"  pelvis pos: {pelvis_pos_idx}, pelvis vel: {pelvis_vel_idx}")
+        print(f"  hip pos: {hip_pos_idx}, hip vel: {hip_vel_idx}")
+        print(f"  Available pos names: {[str(pos_names[0, i]) for i in range(pos_names.shape[1])]}")
+        print(f"  Available vel names: {[str(vel_names[0, i]) for i in range(vel_names.shape[1])]}")
+        return
+
+    fig, axes = plt.subplots(2, 2, figsize=(10, 6))
+
+    # Shared plot helper
+    def _plot_panel(ax, idx_pos, y_key, dy_key, title, ylabel):
+        ax.plot(time, processed[y_key][:, env_id, idx_pos], '--', linewidth=2, label='Reference')
+        ax.plot(time, processed[dy_key][:, env_id, idx_pos], linewidth=2, label='Actual')
+        ax.set_title(title, fontsize=16)
+        ax.set_xlabel(r'Time (s)', fontsize=13)
+        ax.set_ylabel(ylabel, fontsize=13)
+        ax.tick_params(axis='both', which='major', labelsize=11)
+        ax.grid(True, alpha=0.3)
+        ax.legend(fontsize=11)
+
+    # (0,0) Pelvis x position
+    _plot_panel(axes[0, 0], pelvis_pos_idx, 'y_des', 'y_act',
+                r'Pelvis $x$ Position', r'Position (m)')
+
+    # (0,1) Pelvis x velocity
+    _plot_panel(axes[0, 1], pelvis_vel_idx, 'dy_des', 'dy_act',
+                r'Pelvis $x$ Velocity', r'Velocity (m/s)')
+
+    # (1,0) Left hip pitch angle
+    _plot_panel(axes[1, 0], hip_pos_idx, 'y_des', 'y_act',
+                r'Left Hip Pitch Angle', r'Angle (rad)')
+
+    # (1,1) Left hip pitch angular velocity
+    _plot_panel(axes[1, 1], hip_vel_idx, 'dy_des', 'dy_act',
+                r'Left Hip Pitch Angular Velocity', r'Angular Velocity (rad/s)')
+
+    plt.tight_layout()
+
+    if save_dir:
+        svg_path = os.path.join(save_dir, 'paper_figure.svg')
+        plt.savefig(svg_path, format='svg', bbox_inches='tight')
+        print(f"[paper] Saved SVG to {svg_path}")
+
+        png_path = os.path.join(save_dir, 'paper_figure.png')
+        plt.savefig(png_path, dpi=300, bbox_inches='tight')
+        print(f"[paper] Saved PNG to {png_path}")
+
+        pdf_path = os.path.join(save_dir, 'paper_figure.pdf')
+        plt.savefig(pdf_path, format='pdf', bbox_inches='tight')
+        print(f"[paper] Saved PDF to {pdf_path}")
+
+    plt.close(fig)
 
 
 def plot_focused_com_ankle(data, save_dir=None, trajectory_type=None):

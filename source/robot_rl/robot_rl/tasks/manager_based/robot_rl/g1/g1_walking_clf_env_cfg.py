@@ -640,11 +640,12 @@ class G1WalkingRewardCfg(G1TrajOptCLFRewards):
         weight=-5.0,
         params={
             "command_name": "traj_ref",
-            "alpha": 0.5,
+            "alpha": 0.2, #0.02, 0.5
             "eta_max": 6,
             "eta_dot_max": 12,
         }
     )
+    # clf_decreasing_condition = None # TODO: Try making it so this can penalize or reward, i.e. don't clip to 0, go to -1
 
     # Holonomic constraints
     # self.rewards.holonomic_constraint.params["command_name"] = "traj_ref"
@@ -803,6 +804,7 @@ class G1WalkingCLFEnvCfg_PLAY(G1WalkingCLFEnvCfg):
         self.commands.base_velocity.ranges.lin_vel_x = (1.0, 1.0) #(0.75, 1.0)  # Allow full range
         self.commands.base_velocity.ranges.lin_vel_y = (0, 0)
         self.commands.base_velocity.ranges.ang_vel_z = (0, 0)
+        self.commands.base_velocity.debug_vis = False
 
         # self.events.reset_base.params["pose_range"]["yaw"] = (-3.14,3.14)
         # self.events.reset_base.params["pose_range"]["x"] = (-3,3)

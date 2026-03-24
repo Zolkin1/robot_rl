@@ -21,16 +21,22 @@ def _to_numpy(tensor_list: list) -> np.ndarray:
 
 
 def plot_double_integrator(data: dict, save_dir: str, dt: float,
-                           gamma: float = 0.99, horizon: int = 24) -> None:
-    """Plot position, velocity, force, and discounted return for the double integrator.
+                           gamma: float = 0.99, horizon: int = 100,
+                           alpha: float = 0.02, a: float = 0.99,
+                           b: float = 1.0) -> None:
+    """Plot position, velocity, force, discounted return, and CLF metrics for the double integrator.
 
     Args:
-        data: Dictionary with keys 'joint_pos', 'joint_vel', 'applied_torque', 'reward'.
-              Each value is a list of tensors (one per timestep).
+        data: Dictionary with keys 'joint_pos', 'joint_vel', 'applied_torque', 'reward',
+              and optionally 'v', 'vdot', 'clf_reward'. Each value is a list of tensors
+              (one per timestep).
         save_dir: Directory to save plots.
         dt: Environment step dt (seconds per logged step).
         gamma: Discount factor for computing discounted return.
         horizon: Number of future steps for finite-horizon return. Negative for infinite horizon.
+        alpha: CLF decay rate for computing the decay condition (vdot + alpha * v).
+        a: Base for the exponential decay reference line b * a^k * ||x_0|| on the state norm plot.
+        b: Constant multiplier for the exponential decay reference line.
     """
     os.makedirs(save_dir, exist_ok=True)
 
@@ -74,6 +80,42 @@ def plot_double_integrator(data: dict, save_dir: str, dt: float,
     fig.savefig(path, dpi=150)
     plt.close(fig)
     print(f"[INFO] Saved double integrator plot to {path}")
+
+    # --- State Norm ---
+    state_norm = np.sqrt(pos ** 2 + vel ** 2)  # [T, N]
+    x0_norm = state_norm[0].max()
+    steps = np.arange(num_steps)
+    decay_line = b * (a ** (steps / 2)) * x0_norm
+
+    # Use LaTeX rendering for this figure
+    rc = {
+        "text.usetex": True,
+        "font.family": "serif",
+        "axes.titlesize": 28,
+        "axes.labelsize": 32,
+        "xtick.labelsize": 26,
+        "ytick.labelsize": 26,
+        "legend.fontsize": 24,
+        "lines.linewidth": 6,
+    }
+    with plt.rc_context(rc):
+        fig, ax = plt.subplots(figsize=(13, 4))
+        ax.plot(time, state_norm, alpha=0.15, color="C0", linewidth=0.5)
+        ax.plot(time, decay_line, color="k", linestyle="--",
+                label=(r"$\sqrt{\frac{(\zeta_+ + c_{\mathrm{reg}})c_2}"
+                       r"{\zeta_{-}(\bar{c})\, c_1 (1 - \delta (1 - \lambda))}}"
+                       r"\; q_{\bar{c}}^{\,k/2} \|x_0\|$"))
+        ax.set_ylabel(r"$\|x\|$")
+        ax.set_xlabel(r"Time (s)")
+        ax.legend(loc="upper right")
+        ax.grid(True, alpha=0.3)
+        plt.tight_layout()
+        path_png = os.path.join(save_dir, "state_norm.png")
+        path_svg = os.path.join(save_dir, "state_norm.svg")
+        fig.savefig(path_png, dpi=150)
+        fig.savefig(path_svg)
+        plt.close(fig)
+    print(f"[INFO] Saved state norm plot to {path_png} and {path_svg}")
 
     # --- Reward ---
     if "reward" in data:
@@ -140,3 +182,91 @@ def plot_double_integrator(data: dict, save_dir: str, dt: float,
         fig.savefig(path, dpi=150)
         plt.close(fig)
         print(f"[INFO] Saved discounted return plot to {path}")
+
+    # --- V and Vdot ---
+    if "v" in data and "vdot" in data:
+        v = _to_numpy(data["v"])        # [T, N]
+        vdot = _to_numpy(data["vdot"])  # [T, N]
+
+        fig, axes = plt.subplots(3, 1, figsize=(10, 8), sharex=True)
+
+        # V
+        ax = axes[0]
+        ax.plot(time, v, alpha=0.15, color="C0", linewidth=0.5)
+        ax.plot(time, v.mean(axis=1), color="C0", linewidth=2, label="mean")
+        ax.set_ylabel("V")
+        ax.set_title("CLF (V)")
+        ax.legend(loc="upper right")
+        ax.grid(True, alpha=0.3)
+
+        # Vdot
+        ax = axes[1]
+        ax.plot(time, vdot, alpha=0.15, color="C1", linewidth=0.5)
+        ax.plot(time, vdot.mean(axis=1), color="C1", linewidth=2, label="mean")
+        ax.set_ylabel(r"$\Delta V$")
+        ax.set_title(r"CLF ($\Delta V$)")
+        ax.legend(loc="upper right")
+        ax.grid(True, alpha=0.3)
+
+        # CLF Decay: vdot + alpha * v
+        ax = axes[2]
+        decay = vdot + alpha * v
+        ax.plot(time, decay, alpha=0.15, color="C2", linewidth=0.5)
+        ax.plot(time, decay.mean(axis=1), color="C2", linewidth=2, label="mean")
+        ax.axhline(0.0, color="k", linestyle="--", linewidth=0.8)
+        ax.set_ylabel("Decay Rate")
+        ax.set_title(rf"CLF Decay ($\Delta V + \alpha V$, $\alpha$={alpha})")
+        ax.set_xlabel("Time (s)")
+        ax.legend(loc="upper right")
+        ax.grid(True, alpha=0.3)
+
+        plt.tight_layout()
+        path = os.path.join(save_dir, "v_and_vdot.png")
+        fig.savefig(path, dpi=150)
+        plt.close(fig)
+        print(f"[INFO] Saved V and Vdot plot to {path}")
+
+    # --- Discounted CLF Reward ---
+    if "clf_reward" in data:
+        clf_reward = _to_numpy(data["clf_reward"])  # [T, N]
+        n_steps, n_envs = clf_reward.shape
+        use_finite = horizon > 0
+
+        # Forward loop: for each starting time t, sum discounted rewards
+        # over the horizon. If the horizon extends past the trajectory,
+        # use the last available reward value.
+        H = horizon if use_finite else n_steps
+        disc_clf = np.zeros_like(clf_reward)
+        for t in range(n_steps):
+            for k in range(H):
+                idx = min(t + k, n_steps - 1)
+                disc_clf[t] += (gamma ** k) * clf_reward[idx]
+
+        fig, ax = plt.subplots(figsize=(10, 4))
+
+        title_suffix = f"H={horizon}" if use_finite else "infinite"
+        ax.plot(time, disc_clf, alpha=0.15, color="C6", linewidth=0.5)
+        ax.plot(time, disc_clf.mean(axis=1), color="C6", linewidth=2, label="mean")
+        ax.set_title(f"Discounted CLF Reward (\u03b3={gamma}, {title_suffix})")
+
+        ax.set_ylabel("Discounted CLF Reward")
+        ax.set_xlabel("Time (s)")
+        ax.legend(loc="lower right")
+        ax.grid(True, alpha=0.3)
+        plt.tight_layout()
+        path = os.path.join(save_dir, "discounted_clf_reward.png")
+        fig.savefig(path, dpi=150)
+        plt.close(fig)
+        print(f"[INFO] Saved discounted CLF reward plot to {path}")
+
+    # --- Save trajectory data as npz ---
+    npz_data = {"time": time, "pos": pos, "vel": vel, "force": force}
+    if "v" in data:
+        npz_data["v"] = _to_numpy(data["v"])
+    if "vdot" in data:
+        npz_data["vdot"] = _to_numpy(data["vdot"])
+    if "clf_reward" in data:
+        npz_data["clf_reward"] = _to_numpy(data["clf_reward"])
+    path = os.path.join(save_dir, "trajectory_data.npz")
+    np.savez(path, **npz_data)
+    print(f"[INFO] Saved trajectory data to {path}")

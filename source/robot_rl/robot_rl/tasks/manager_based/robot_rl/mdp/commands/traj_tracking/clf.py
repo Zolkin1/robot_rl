@@ -62,6 +62,7 @@ class CLF:
         # Cache as torch tensors
         self.P = torch.from_numpy(P_np).to(self.device).to(torch.float32)
         self.lambda_max = torch.linalg.eigvalsh(self.P)[-1]
+        self.lambda_min = torch.linalg.eigvalsh(self.P)[0]
         self.norm_P = torch.linalg.norm(self.P, ord=2)
 
 
@@ -234,26 +235,27 @@ class CLF:
         """
         v_curr = self.compute_v(y_act, y_nom, dy_act, dy_nom,)# yaw_idx)
        
-        dt = self.sim_dt
+        dt = self.sim_dt    # TODO: This dt is wrong - should probably be more like sim_dt*decimation
+        # print(f"dt={dt}")
         B = v_curr.shape[0]
 
-        if self.step_count >= 3:
-            # We have [V_k, V_{k−1}, V_{k−2}] → 3‐point backward difference
-            V_k  = self.v_buffer[:, 0]   # V_k
-            V_k1 = self.v_buffer[:, 1]   # V_{k−1}
-            V_k2 = self.v_buffer[:, 2]   # V_{k−2}
-            # Formula: (3 V_k − 4 V_{k−1} + V_{k−2}) / (2 Δt)
-            vdot_raw = (3.0 * V_k - 4.0 * V_k1 + V_k2) / (2.0 * dt)
+        # if self.step_count >= 3:
+        #     # We have [V_k, V_{k−1}, V_{k−2}] → 3‐point backward difference
+        #     V_k  = self.v_buffer[:, 0]   # V_k
+        #     V_k1 = self.v_buffer[:, 1]   # V_{k−1}
+        #     V_k2 = self.v_buffer[:, 2]   # V_{k−2}
+        #     # Formula: (3 V_k − 4 V_{k−1} + V_{k−2}) / (2 Δt)
+        #     vdot_raw = (3.0 * V_k - 4.0 * V_k1 + V_k2) / (2.0 * dt)
 
-        elif self.step_count == 2:
-            # We only have [V_k, V_{k−1}] → 2‐point fallback
-            V_k  = self.v_buffer[:, 0]
-            V_k1 = self.v_buffer[:, 1]
-            vdot_raw = (V_k - V_k1) / dt
+        # if self.step_count >= 2:
+        # We only have [V_k, V_{k−1}] → 2‐point fallback
+        V_k  = self.v_buffer[:, 0]
+        V_k1 = self.v_buffer[:, 1]
+        vdot_raw = (V_k - V_k1) #/ dt
 
-        else:
-            # step_count == 1 → no previous sample; just return zero
-            vdot_raw = torch.zeros((B,), device=self.device)
+        # else:
+        #     # step_count == 1 → no previous sample; just return zero
+        #     vdot_raw = torch.zeros((B,), device=self.device)
 
         # Clamp unreasonably large vdot values (e.g., after resets)
         vdot_raw = torch.where(torch.abs(vdot_raw) > 10000, torch.zeros_like(vdot_raw), vdot_raw)

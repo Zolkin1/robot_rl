@@ -17,7 +17,7 @@ class PPORunnerCfg(RslRlOnPolicyRunnerCfg):
 
     num_steps_per_env = 24
     max_iterations = 3000
-    save_interval = 200
+    save_interval = 15
     experiment_name = "double_integrator"
     empirical_normalization = False
     policy = RslRlPpoActorCriticCfg(

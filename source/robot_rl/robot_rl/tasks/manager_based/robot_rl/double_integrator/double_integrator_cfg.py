@@ -101,7 +101,7 @@ class DITerminationCfg:
     time_out = DoneTerm(func=mdp.time_out, time_out=True)
     out_of_bounds = DoneTerm(
         func=mdp.di_out_of_bounds,
-        params={"max_distance": 10.0},
+        params={"max_distance": 10000.0},
     )
 
 
@@ -118,6 +118,16 @@ class DIEventsCfg:
             "velocity_range": (-2.0, 2.0),
         },
     )
+
+    # add_base_mass = EventTerm(
+    #     func=mdp.randomize_rigid_body_mass,
+    #     mode="startup",
+    #     params={
+    #         "asset_cfg": SceneEntityCfg("robot", body_names="ball"),
+    #         "mass_distribution_params": (5.0, 5.0),
+    #         "operation": "add",
+    #     },
+    # )
 
 DI_Q_weights = {}
 DI_Q_weights["joint:slide_joint"] = [1.0, 1.0]
@@ -150,7 +160,7 @@ class DIRewardCfg:
         weight=10.0,
         params={
             "command_name": "traj_ref",
-            "max_eta_err": 6.0,
+            "max_eta_err": 0.5,
         }
     )
 
@@ -159,9 +169,9 @@ class DIRewardCfg:
         weight=-5.0,
         params={
             "command_name": "traj_ref",
-            "alpha": 0.5,
-            "eta_max": 6,
-            "eta_dot_max": 12,
+            "alpha": 0.02, #0.5,
+            "eta_max": 0.5,
+            "eta_dot_max": 0.75,
         }
     )
 
@@ -185,6 +195,6 @@ class DIEnvCfg(ManagerBasedRLEnvCfg):
     def __post_init__(self):
         """Post initialization."""
         self.decimation = 4
-        self.episode_length_s = 10.0
+        self.episode_length_s = 4.0
         self.sim.dt = 0.005
         self.sim.render_interval = self.decimation

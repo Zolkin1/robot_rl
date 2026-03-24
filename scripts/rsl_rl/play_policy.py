@@ -4,6 +4,7 @@ import sys
 import time
 import pickle
 import glob
+import numpy as np
 
 from isaaclab.app import AppLauncher
 import cli_args
@@ -146,10 +147,23 @@ def parse_args():
     )
 
     parser.add_argument(
+        "--paper",
+        action="store_true",
+        default=False,
+        help="Generate paper-ready figures with LaTeX fonts."
+    )
+
+    parser.add_argument(
         "--gamma",
         type=float,
         default=0.99,
         help="Discount factor for computing discounted return plots (default: 0.99)."
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=None,
+        help="Seed for reproducibility. Use -1 for a random seed.",
     )
     # append RSL-RL cli arguments
     cli_args.add_rsl_rl_args(parser)
@@ -283,6 +297,7 @@ def main():
         env_cfg.commands.base_velocity.ranges.ang_vel_z = (args_cli.sim_speed[2], args_cli.sim_speed[2])
 
     agent_cfg: RslRlOnPolicyRunnerCfg = cli_args.parse_rsl_rl_cfg(args_cli.task, args_cli)
+    env_cfg.seed = agent_cfg.seed
     print("[DEBUG] Configurations parsed")
 
     # specify directory for logging experiments
@@ -305,13 +320,26 @@ def main():
             print("[ERROR] No checkpoints found in the specified directory")
             sys.exit(1)
     
+    # Anchor the checkpoint regex to avoid partial matches (e.g. model_15 matching model_150)
+    if isinstance(agent_cfg.load_checkpoint, int):
+        agent_cfg.load_checkpoint = rf"model_{agent_cfg.load_checkpoint}\.pt$"
+    elif isinstance(agent_cfg.load_checkpoint, str) and not agent_cfg.load_checkpoint.endswith("$"):
+        if not agent_cfg.load_checkpoint.endswith(".pt"):
+            agent_cfg.load_checkpoint = agent_cfg.load_checkpoint + r"\.pt$"
+        else:
+            agent_cfg.load_checkpoint = agent_cfg.load_checkpoint + r"$"
+
     # Get checkpoint path from the training directory
     resume_path = get_checkpoint_path(log_root_path, agent_cfg.load_run, agent_cfg.load_checkpoint)
     print(f"[DEBUG] Checkpoint path: {resume_path}")
     
     # Use the checkpoint directory for saving results
     if not args_cli.play_log_dir:
-        play_log_dir = os.path.dirname(resume_path)
+        ckpt_name = os.path.basename(resume_path).replace('.pt', '')
+        if args_cli.env_type == "double_integrator":
+            play_log_dir = os.path.join(os.path.dirname(resume_path), ckpt_name)
+        else:
+            play_log_dir = os.path.dirname(resume_path)
     else:
         play_log_dir = args_cli.play_log_dir
     
@@ -391,7 +419,7 @@ def main():
 
     # Dynamically generate log variables based on the command type
     if args_cli.env_type == "double_integrator":
-        log_vars = []
+        log_vars = ['v', 'vdot']
     else:
         log_vars = [
             'y_des',
@@ -424,7 +452,7 @@ def main():
 
     # Get the command term to determine what type of trajectory we're using
     if args_cli.env_type == "double_integrator":
-        command_name = None
+        command_name = "traj_ref"
     elif "lip" in args_cli.env_type:
         command_name = "hlip_ref"
     elif "clf" in args_cli.env_type:
@@ -437,7 +465,7 @@ def main():
     # Setup logging (include actions/joint_names separately since they don't come from extract_reference_trajectory)
     extra_vars = ['reward', 'action_targets', 'joint_pos', 'applied_torque', 'joint_names']
     if args_cli.env_type == "double_integrator":
-        extra_vars.append('joint_vel')
+        extra_vars.extend(['joint_vel', 'clf_reward'])
     logger = DataLogger(enabled=True, log_dir=play_log_dir, variables=log_vars + extra_vars)
 
     # reset environment
@@ -464,10 +492,7 @@ def main():
             
             # Log data
             if args_cli.log_data:
-                if command_name is not None:
-                    data = extract_reference_trajectory(env, log_vars, command_name)
-                else:
-                    data = {}
+                data = extract_reference_trajectory(env, log_vars, command_name)
                 robot = env.unwrapped.scene.articulations["robot"]
                 data['reward'] = reward.clone()
                 # Use the appropriate action term name
@@ -479,6 +504,9 @@ def main():
                 data['joint_names'] = list(robot.data.joint_names)
                 if args_cli.env_type == "double_integrator":
                     data['joint_vel'] = robot.data.joint_vel.clone()
+                    reward_mgr = env.unwrapped.reward_manager
+                    clf_idx = reward_mgr.active_terms.index("clf_reward")
+                    data['clf_reward'] = reward_mgr._step_reward[:, clf_idx].clone()
                 logger.log_from_dict(data)
 
         timestep += 1
@@ -509,9 +537,23 @@ def main():
         # Determine trajectory type based on command type
         if args_cli.env_type == "double_integrator":
             from plot_double_integrator import plot_double_integrator
-            plot_double_integrator(logger.data, save_dir=plot_dir, dt=dt, gamma=args_cli.gamma)
+            eta = 10
+            delta = 0.99
+            lam = 0.02
+            c2 = 2.732050657272339
+            c1 = 0.7320508360862732
+            creg = 0
+            sigma = 0.6830136775970459
+            cbar = 0.1    # TODO: Fix
+            zetap = eta/(sigma**2)
+            zetam = np.exp(-cbar/sigma**2) * eta/sigma**2
+            print(f"[DEBUG] zetam = {zetam}")
+            b = np.sqrt( (zetap + creg)*c2/(zetam * c1 * (1 - delta*(1-lam))) )
+            qc = (1/delta)*(1 - (1 - delta * (1-lam))*zetam/(zetap + creg) )
+            print(f"[DEBUG] qc = {qc}")
+            plot_double_integrator(logger.data, save_dir=plot_dir, dt=dt, gamma=args_cli.gamma, a=qc, b=b)
         else:
-            plot_trajectories(logger.data, save_dir=plot_dir, trajectory_type="end_effector")
+            plot_trajectories(logger.data, save_dir=plot_dir, trajectory_type="end_effector", paper=args_cli.paper)
             compute_and_save_stats(logger.data, save_dir=plot_dir)
 
     # Ensure simulation app is closed
