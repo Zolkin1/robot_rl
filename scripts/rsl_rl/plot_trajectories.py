@@ -607,12 +607,12 @@ def plot_paper_figure(data: dict, save_dir: str | None = None) -> None:
     def _plot_panel(ax, idx_pos, y_key, dy_key, title, ylabel):
         ax.plot(time, processed[y_key][:, env_id, idx_pos], '--', linewidth=2, label='Reference')
         ax.plot(time, processed[dy_key][:, env_id, idx_pos], linewidth=2, label='Actual')
-        ax.set_title(title, fontsize=16)
-        ax.set_xlabel(r'Time (s)', fontsize=13)
-        ax.set_ylabel(ylabel, fontsize=13)
-        ax.tick_params(axis='both', which='major', labelsize=11)
+        ax.set_title(title, fontsize=20)
+        ax.set_xlabel(r'Time (s)', fontsize=16)
+        ax.set_ylabel(ylabel, fontsize=16)
+        ax.tick_params(axis='both', which='major', labelsize=14)
         ax.grid(True, alpha=0.3)
-        ax.legend(fontsize=11)
+        ax.legend(fontsize=14)
 
     # (0,0) Pelvis x position
     _plot_panel(axes[0, 0], pelvis_pos_idx, 'y_des', 'y_act',
