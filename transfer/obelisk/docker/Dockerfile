@@ -74,13 +74,21 @@ RUN rm requirements.txt
 # Stage 2: Hardware (adds lidar stack)
 # ============================================
 FROM sim as hardware
+ENV ROS_DISTRO=humble
+
 # Lidar odometry
 # Install PCL and other dependencies for the lidar
 RUN sudo apt-get update && sudo apt-get install -y \
     libpcl-dev \
     pcl-tools \
     ros-humble-pcl-ros \
-    ros-humble-pcl-conversions
+    ros-humble-pcl-conversions \
+    ros-humble-ament-cmake-auto \
+    ros-humble-ament-lint-auto \
+    ros-humble-ament-lint-common \
+    ros-humble-rclcpp-components \
+    ros-humble-rosbag2 \
+    python3-rosdep
 
 # Livox SDK
 WORKDIR /home/${USER}
@@ -89,19 +97,32 @@ RUN git clone https://github.com/Livox-SDK/Livox-SDK2.git && \
  mkdir build && cd build && \
  cmake .. && \
  make -j && \
- sudo make install && \
- cd /home/${USER} && \
- mkdir -p livox_driver_ws/src && \
- cd livox_driver_ws/src && \
- git clone https://github.com/Livox-SDK/livox_ros_driver2.git && cd livox_ros_driver2
+ sudo make install
 
-RUN cd /home/${USER}/livox_driver_ws/src/livox_ros_driver2 && \
-    source /opt/ros/humble/setup.sh && ./build.sh humble && source ../../install/setup.sh && \
-    cd /home/${USER} && mkdir -p lidar_odom_ws/src && cd lidar_odom_ws/src && \
-    git clone -b ROS2 https://github.com/hku-mars/FAST_LIO.git --recursive && cd .. && \
+# Clone all ROS packages, then use rosdep to install all dependencies at once
+RUN mkdir -p /home/${USER}/livox_driver_ws/src && \
+    cd /home/${USER}/livox_driver_ws/src && \
+    git clone https://github.com/Livox-SDK/livox_ros_driver2.git && \
+    mkdir -p /home/${USER}/lidar_odom_ws/src && \
+    cd /home/${USER}/lidar_odom_ws/src && \
+    git clone -b ROS2 https://github.com/hku-mars/FAST_LIO.git --recursive
+
+# Pin empy to 3.x (ROS 2 Humble's rosidl_adapter is incompatible with empy 4.x)
+RUN pip install "empy<4"
+
+# Install all ROS dependencies via rosdep, then build
+RUN export PATH="/home/${USER}/.local/bin:$PATH" && \
+    source /opt/ros/humble/setup.bash && \
     sudo rosdep init && \
     rosdep update && \
-    rosdep install --from-paths src --ignore-src -r -y && \
+    rosdep install --from-paths \
+        /home/${USER}/livox_driver_ws/src \
+        /home/${USER}/lidar_odom_ws/src \
+        --ignore-src -r -y && \
+    cd /home/${USER}/livox_driver_ws/src/livox_ros_driver2 && \
+    ./build.sh humble && \
+    source /home/${USER}/livox_driver_ws/install/setup.bash && \
+    cd /home/${USER}/lidar_odom_ws && \
     colcon build --symlink-install && \
     echo "source /home/${USER}/lidar_odom_ws/install/setup.bash" >> /home/${USER}/.bashrc
 
