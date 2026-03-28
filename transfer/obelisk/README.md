@@ -168,6 +168,16 @@ At `low_level_ctrl`, the output from the controller node will be applied to robo
 
 E-STOP is right trigger.
 
+
+A: Activate policy
+Right Bumper: Zero
+Right Dpad: integrated joystick
+Left Dpad: MPC
+Top Dpad: Normal Joystick
+Right Bumper + Y/A: Increment/decrement speed
+
+
+
 # Setting up the Xbox remote
 You can now run the script:
 ```
