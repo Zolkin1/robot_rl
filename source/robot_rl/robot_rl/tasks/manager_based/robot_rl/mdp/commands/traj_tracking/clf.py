@@ -191,9 +191,12 @@ class CLF:
         dy_act: torch.Tensor,
         dy_nom: torch.Tensor,
         domain_idx: int = 0,
-    ) -> torch.Tensor:
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Evaluate V = (y_act - y_nom)^T P (y_act - y_nom).
+
+        Returns:
+            (V, eta): Lyapunov value [B] and the interleaved error state [B, n_outputs].
         """
 
         y_err = self.compute_y_err(y_act, y_nom)
@@ -220,7 +223,7 @@ class CLF:
         self.v_buffer[:, 0] = V.detach()
 
         self.step_count += 1
-        return V
+        return V, eta
 
     def compute_vdot(
         self,
@@ -229,11 +232,14 @@ class CLF:
         dy_act: torch.Tensor,
         dy_nom: torch.Tensor,
         # yaw_idx: list[int],
-    ) -> tuple[torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
-        Compute V_dot = (V_curr - V_prev) / sim_dt, returns (vdot, V_curr).
+        Compute V_dot = (V_curr - V_prev) / sim_dt.
+
+        Returns:
+            (vdot, V_curr, eta): Vdot [B], Lyapunov value [B], and error state [B, n_outputs].
         """
-        v_curr = self.compute_v(y_act, y_nom, dy_act, dy_nom,)# yaw_idx)
+        v_curr, eta = self.compute_v(y_act, y_nom, dy_act, dy_nom,)# yaw_idx)
        
         dt = self.sim_dt    # TODO: This dt is wrong - should probably be more like sim_dt*decimation
         # print(f"dt={dt}")
@@ -260,7 +266,7 @@ class CLF:
         # Clamp unreasonably large vdot values (e.g., after resets)
         vdot_raw = torch.where(torch.abs(vdot_raw) > 10000, torch.zeros_like(vdot_raw), vdot_raw)
 
-        return vdot_raw, v_curr
+        return vdot_raw, v_curr, eta
 
 
     def compute_vdot_analytic(
@@ -271,7 +277,7 @@ class CLF:
         dy_nom: torch.Tensor,
         ddy_act: torch.Tensor,
         ddy_nom: torch.Tensor,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Compute V_dot analytically using acceleration information.
 
@@ -292,7 +298,7 @@ class CLF:
             domain_idx: domain index for multi-domain P matrices.
 
         Returns:
-            (vdot, v_curr): tuple of Vdot and V values, each shape [B].
+            (vdot, v_curr, eta): Vdot [B], V [B], and error state [B, n_outputs].
         """
         # Compute errors
         y_err = self.compute_y_err(y_act, y_nom)
@@ -348,7 +354,7 @@ class CLF:
         self.v_buffer[:, 0] = V.detach()
         self.step_count += 1
 
-        return vdot, V
+        return vdot, V, eta
 
     def compute_y_err(self, y_act, y_des):
         """

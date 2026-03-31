@@ -472,8 +472,9 @@ class G1WalkingEventsCfg(HumanoidEventsCfg):
         params={"command_name": "traj_ref",
                 "base_frame_name": "pelvis_link",
                 "conditioner_command_name": "base_velocity",
-                "special_val": 1.0, #1.2,     # Sometimes start on the running traj
+                "special_val": 0.0, #1.2,     # Sometimes start on the running traj
                 "rel_envs_on_ref": 1.0, #0.5,
+                "rel_envs_on_special": 1.0,
                 }
                 # "joint_add_range": [-0.1, 0.1]}
     )

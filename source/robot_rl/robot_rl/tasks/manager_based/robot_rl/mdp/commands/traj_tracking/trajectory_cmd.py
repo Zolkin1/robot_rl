@@ -842,12 +842,14 @@ class TrajectoryCommand(CommandTerm):
         self.get_desired_output_time = (end - start) * torch.ones(self.num_envs, device=self.device)
 
         start = time.perf_counter()
-        vdot, vcur = self.clf.compute_vdot(self.y_act, self.y_des, self.dy_act, self.dy_des)
+        vdot, vcur, eta = self.clf.compute_vdot(self.y_act, self.y_des, self.dy_act, self.dy_des)
+        self.eta_norm = torch.linalg.norm(eta, dim=1)
 
         # # TODO: Test
         # ddy_act = self.compute_measured_acceleration(self.ref_poses[:, 3:])
         # ddy_nom = self.manager.get_acceleration(t)
-        # vdot, vcur = self.clf.compute_vdot_analytic(self.y_act, self.y_des, self.dy_act, self.dy_des, ddy_act, ddy_nom)
+        # vdot, vcur, eta = self.clf.compute_vdot_analytic(self.y_act, self.y_des, self.dy_act, self.dy_des, ddy_act, ddy_nom)
+        # self.eta_norm = torch.linalg.norm(eta, dim=1)
         end = time.perf_counter()
         self.vdot_time = (end - start) * torch.ones(self.num_envs, device=self.device)
 
@@ -872,6 +874,7 @@ class TrajectoryCommand(CommandTerm):
         """
         self.metrics["v"] = self.v
         self.metrics["vdot"] = self.vdot
+        self.metrics["eta_norm"] = self.eta_norm
 
         # Log position tracking errors (using pos output names)
         for i, output in enumerate(self.ordered_pos_output_names):

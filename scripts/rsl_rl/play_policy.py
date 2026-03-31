@@ -165,6 +165,13 @@ def parse_args():
         default=None,
         help="Seed for reproducibility. Use -1 for a random seed.",
     )
+    parser.add_argument(
+        "--camera_angle",
+        type=str,
+        choices=["side", "front", "top", "default"],
+        default="default",
+        help="Camera angle preset for video recording (side/front/top/default).",
+    )
     # append RSL-RL cli arguments
     cli_args.add_rsl_rl_args(parser)
     # append AppLauncher cli args
@@ -345,6 +352,19 @@ def main():
     
     print(f"[DEBUG] Play log directory: {play_log_dir}")
 
+    # Configure camera angle for video recording
+    CAMERA_PRESETS = {
+        "side": {"eye": (1.4, 4.0, 1.0), "lookat": (1.4, 0.0, 0.5)},
+        "front": {"eye": (3.0, 0.0, 1.0), "lookat": (0.0, 0.0, 0.5)},
+        "top": {"eye": (0.0, 0.0, 5.0), "lookat": (0.0, 0.0, 0.0)},
+    }
+    if args_cli.camera_angle != "default":
+        preset = CAMERA_PRESETS[args_cli.camera_angle]
+        env_cfg.viewer.eye = preset["eye"]
+        env_cfg.viewer.lookat = preset["lookat"]
+        env_cfg.viewer.origin_type = "env"
+        print(f"[DEBUG] Camera angle: {args_cli.camera_angle}, eye={preset['eye']}, lookat={preset['lookat']}")
+
     # create isaac environment
     env = gym.make(args_cli.task, cfg=env_cfg, render_mode="rgb_array" if args_cli.video else None)
 
@@ -429,6 +449,7 @@ def main():
             'dy_act',
             'v',
             'vdot',
+            'eta_norm',
             'ordered_pos_output_names', # TODO: Use these
             'ordered_vel_output_names',
             'current_domain',
@@ -463,7 +484,7 @@ def main():
         raise ValueError(f"No valid command name for {args_cli.env_type}")
 
     # Setup logging (include actions/joint_names separately since they don't come from extract_reference_trajectory)
-    extra_vars = ['reward', 'action_targets', 'joint_pos', 'applied_torque', 'joint_names']
+    extra_vars = ['reward', 'action_targets', 'joint_pos', 'applied_torque', 'joint_names', 'foot_contact', 'clf_reward_raw', 'clf_decreasing_raw']
     if args_cli.env_type == "double_integrator":
         extra_vars.extend(['joint_vel', 'clf_reward'])
     logger = DataLogger(enabled=True, log_dir=play_log_dir, variables=log_vars + extra_vars)
@@ -494,7 +515,17 @@ def main():
             if args_cli.log_data:
                 data = extract_reference_trajectory(env, log_vars, command_name)
                 robot = env.unwrapped.scene.articulations["robot"]
-                data['reward'] = reward.clone()
+                # Manually compute weighted CLF reward terms
+                reward_mgr = env.unwrapped.reward_manager
+                rew_terms = list(reward_mgr.active_terms)
+                manual_reward = torch.zeros(env.unwrapped.num_envs, device=env.unwrapped.device)
+                for term_name in rew_terms:
+                    if term_name in reward_mgr.active_terms:
+                        idx = reward_mgr.active_terms.index(term_name)
+                        cfg = reward_mgr._term_cfgs[idx]
+                        raw = reward_mgr._step_reward[:, idx]
+                        manual_reward += raw #* cfg.weight * dt
+                data['reward'] = manual_reward.clone()
                 # Use the appropriate action term name
                 action_term_name = "force" if args_cli.env_type == "double_integrator" else "joint_pos"
                 action_term = env.unwrapped.action_manager.get_term(action_term_name)
@@ -502,9 +533,23 @@ def main():
                 data['joint_pos'] = robot.data.joint_pos.clone()
                 data['applied_torque'] = robot.data.applied_torque.clone()
                 data['joint_names'] = list(robot.data.joint_names)
+                # Log foot contact flags from contact sensor
+                if "contact_forces" in env.unwrapped.scene.sensors:
+                    contact_sensor = env.unwrapped.scene.sensors["contact_forces"]
+                    # net_forces_w_history shape: [num_envs, history, num_bodies, 3]
+                    net_forces = contact_sensor.data.net_forces_w_history[:, -1, :, :]
+                    # Per-foot contact: norm across xyz, shape [num_envs, num_bodies]
+                    foot_contact = (net_forces.norm(dim=-1) > 1.0).float()
+                    data['foot_contact'] = foot_contact.clone()
+                # Log raw clf reward terms (func * weight, no dt)
+                if "clf_reward" in reward_mgr.active_terms:
+                    clf_idx = reward_mgr.active_terms.index("clf_reward")
+                    data['clf_reward_raw'] = reward_mgr._step_reward[:, clf_idx].clone()
+                if "clf_decreasing_condition" in reward_mgr.active_terms:
+                    dec_idx = reward_mgr.active_terms.index("clf_decreasing_condition")
+                    data['clf_decreasing_raw'] = reward_mgr._step_reward[:, dec_idx].clone()
                 if args_cli.env_type == "double_integrator":
                     data['joint_vel'] = robot.data.joint_vel.clone()
-                    reward_mgr = env.unwrapped.reward_manager
                     clf_idx = reward_mgr.active_terms.index("clf_reward")
                     data['clf_reward'] = reward_mgr._step_reward[:, clf_idx].clone()
                 logger.log_from_dict(data)
@@ -553,7 +598,7 @@ def main():
             print(f"[DEBUG] qc = {qc}")
             plot_double_integrator(logger.data, save_dir=plot_dir, dt=dt, gamma=args_cli.gamma, a=qc, b=b)
         else:
-            plot_trajectories(logger.data, save_dir=plot_dir, trajectory_type="end_effector", paper=args_cli.paper)
+            plot_trajectories(logger.data, save_dir=plot_dir, trajectory_type="end_effector", paper=args_cli.paper, gamma=args_cli.gamma)
             compute_and_save_stats(logger.data, save_dir=plot_dir)
 
     # Ensure simulation app is closed
