@@ -32,13 +32,13 @@ class G1RunningCLFEnvCfg(G1ClfTrackingEnvCfg):  #G1RunningGaitLibraryEnvCfg
         ##
 
         ## CLF Based
-        self.rewards.clf_reward.params.max_eta_err = 12.0
-        self.rewards.clf_decreasing_condition.params.eta_max = 12.0
-        self.rewards.clf_decreasing_condition.params.eta_dot_max = 24.0
+        self.rewards.clf_reward.params["max_eta_err"] = 12.0
+        self.rewards.clf_decreasing_condition.params["eta_max"] = 12.0
+        self.rewards.clf_decreasing_condition.params["eta_dot_max"] = 24.0
 
         # Velocity Tracking
-        self.rewards.xy_vel.params.std = 0.75
-        self.rewards.yaw_vel.params.std = 0.75
+        self.rewards.xy_vel.params["std"] = 0.75
+        self.rewards.yaw_vel.params["std"] = 0.75
 
         ##
         # Events
