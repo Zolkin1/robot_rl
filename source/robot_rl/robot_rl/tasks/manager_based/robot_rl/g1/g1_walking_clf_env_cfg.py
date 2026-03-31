@@ -14,10 +14,14 @@ class G1WalkingCLFEnvCfg(G1ClfTrackingEnvCfg):
         ##
         # Commands
         ##
-        self.commands.traj_ref.path = "trajectories/retargeted/2026-03-27_09-43-45_walk_forward_retargeted_config"
+        # Partial speed from fast (0.8-1.4)
+        # self.commands.traj_ref.path = "trajectories/retargeted/2026-03-27_09-43-45_walk_forward_retargeted_config"
+
+        # Full speed from fast (0.0-1.4)
+        self.commands.traj_ref.path = "trajectories/retargeted/2026-03-31_14-47-00_walk_forward_retargeted_config_full_walking_speed"
 
         # Configure velocity ranges for different gaits
-        self.commands.base_velocity.ranges.lin_vel_x = (0.8, 1.4)  # Allow full range
+        self.commands.base_velocity.ranges.lin_vel_x = (0.0, 1.4)  # Allow full range
         self.commands.base_velocity.ranges.lin_vel_y = (0, 0) #(-0.5, 0.5)
         self.commands.base_velocity.ranges.ang_vel_z = (0, 0) #(-0.75, 0.75)
         self.commands.base_velocity.ranges.heading = (-3.14,3.14)
