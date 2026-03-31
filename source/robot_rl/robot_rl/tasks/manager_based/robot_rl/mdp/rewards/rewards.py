@@ -22,21 +22,6 @@ KAPPA = 0.5
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedRLEnv
 
-def vdot_tanh(env: ManagerBasedRLEnv, command_name: str, alpha: float = 1.0) -> torch.Tensor:
-    # Retrieve the CLF-related quantities: V and its time derivative
-    ref_term = env.command_manager.get_term(command_name)  # [B]
-    vdot = ref_term.vdot  # [B]
-    v = ref_term.v        # [B]
-
-    # Compute the CLF decay condition violation
-    clf_decay_violation = vdot + alpha * v  # [B]
-
-    # Reward is higher when this violation is negative (i.e., condition is satisfied)
-    vdot_reward = torch.tanh(-clf_decay_violation)  # [B]
-
-    return vdot_reward
-
-
 def clf_reward(env: ManagerBasedRLEnv, command_name: str, max_eta_err: float = 0.15, eps: float = 1e-6) -> torch.Tensor:
     """CLF-based reward: r = exp(-V(η) / V_max), clipped to [0, 1]."""
 
@@ -45,9 +30,40 @@ def clf_reward(env: ManagerBasedRLEnv, command_name: str, max_eta_err: float = 0
     max_clf = ref_term.clf.lambda_max * max_eta_err ** 2 + eps # principled normalization; lambda_max(P) * eta**2
 
     reward = torch.exp(-v / max_clf)
-    # reward = torch.exp(-torch.clamp(v, max=5.0 * max_clf) / max_clf)
-    # reward = torch.exp(-torch.clamp(v, max=200 * max_clf) / (10*max_clf))    # 200, 100   # NOTE: Used for bend over (10*max_clf is normal)
     return reward
+
+def clf_decreasing_condition(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    alpha: float = 1.0,
+    eta_max: float = 0.15,
+    eta_dot_max: float = 0.5,
+    eps: float = 1e-6,
+) -> torch.Tensor:
+    """
+    Penalty for violating CLF decrease condition: 𝑟 = clip((ΔV + αV) / max_violation, [0, 1])
+    where:
+        max_violation ≈ 2‖P‖ η_max η̇_max + α λ_max(P) η_max²
+    """
+
+    ref_term = env.command_manager.get_term(command_name)
+    v = ref_term.v        # [B]
+    vdot = ref_term.vdot  # [B]
+
+    lambda_max = ref_term.clf.lambda_max
+    norm_P = ref_term.clf.norm_P
+
+    # Theoretical upper bound on violation
+    dt = 0.02
+    max_violation = (
+        dt * eta_dot_max * norm_P + alpha * lambda_max * eta_max ** 2 + eps
+    )
+    # Only penalize when violation is positive
+    # violation = torch.clamp(vdot + alpha * v, min=0.0)
+    violation = vdot + alpha * v
+    penalty = violation / max_violation
+    penalty = torch.clamp(penalty, min=0.0, max=1.0)
+    return penalty
 
 def base_pos_reward(env: ManagerBasedRLEnv, command_name: str, sigma: float) -> torch.Tensor:
     cmd_term = env.command_manager.get_term(command_name)
@@ -108,37 +124,6 @@ def body_ang_vel_reward(env: ManagerBasedRLEnv, command_name: str, sigma: float)
     v_body_ang_vel = cmd_term.clf.v_subgroups["other_body_ang_vel"]
 
     return torch.exp(-KAPPA * v_body_ang_vel / sigma)
-
-def clf_decreasing_condition(
-    env: ManagerBasedRLEnv,
-    command_name: str,
-    alpha: float = 1.0,
-    eta_max: float = 0.15,
-    eta_dot_max: float = 0.5,
-    eps: float = 1e-6,
-) -> torch.Tensor:
-    """
-    Penalty for violating CLF decrease condition: 𝑟 = clip((ΔV + αV) / max_violation, [0, 1])
-    where:
-        max_violation ≈ 2‖P‖ η_max η̇_max + α λ_max(P) η_max²
-    """
-
-    ref_term = env.command_manager.get_term(command_name)
-    v = ref_term.v        # [B]
-    vdot = ref_term.vdot  # [B]
-
-    lambda_max = ref_term.clf.lambda_max
-    norm_P = ref_term.clf.norm_P
-
-    # Theoretical upper bound on violation
-    max_violation = (
-        2.0 * norm_P * eta_max * eta_dot_max + alpha * lambda_max * eta_max ** 2 + eps
-    )
-    # Only penalize when violation is positive
-    violation = torch.clamp(vdot + alpha * v, min=0.0)
-    penalty = violation / max_violation
-    penalty = torch.clamp(penalty, min=0.0, max=1.0)
-    return penalty
 
 
 def v_dot_penalty(env: ManagerBasedRLEnv, command_name: str,eta_max: float = 0.15,

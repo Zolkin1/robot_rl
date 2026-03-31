@@ -873,17 +873,18 @@ class TrajectoryCommand(CommandTerm):
         for i, output in enumerate(self.ordered_vel_output_names):
             self.metrics[output + "_vel"] = torch.abs(self.dy_des[:, i] - self.dy_act[:, i])
 
-        # Log times
-        self.metrics["get_measured_output_time"] = self.get_measured_output_time
-        self.metrics["get_desired_output_time"] = self.get_desired_output_time
-        self.metrics["vdot_time"] = self.vdot_time
+        # TODO: Delete these lines
+        # # Log times
+        # self.metrics["get_measured_output_time"] = self.get_measured_output_time
+        # self.metrics["get_desired_output_time"] = self.get_desired_output_time
+        # self.metrics["vdot_time"] = self.vdot_time
 
-        # Log per-reference tracking
-        v_mean = self.manager.get_v_log_avg().squeeze(-1)
-        for i in range(len(v_mean)):
-            # Use repeat() instead of expand() to create a contiguous tensor that
-            # can be safely modified in-place by the command manager
-            self.metrics[f"CLF_EMA_{i}"] = v_mean[i].repeat(self.num_envs)
+        # # Log per-reference tracking
+        # v_mean = self.manager.get_v_log_avg().squeeze(-1)
+        # for i in range(len(v_mean)):
+        #     # Use repeat() instead of expand() to create a contiguous tensor that
+        #     # can be safely modified in-place by the command manager
+        #     self.metrics[f"CLF_EMA_{i}"] = v_mean[i].repeat(self.num_envs)
 
     def _parse_outputs(self, pos_output_names: list[str]) -> tuple[list[int], list[int], bool, list[str], list[str], list[int]]:
         """

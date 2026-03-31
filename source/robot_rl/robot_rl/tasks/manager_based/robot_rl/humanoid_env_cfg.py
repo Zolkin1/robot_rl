@@ -34,18 +34,6 @@ class HumanoidActionsCfg:
 
 
 @configclass
-class HumanoidCommandsCfg(CommandsCfg):
-    """Command specifications for the MDP."""
-
-    # Command for the set period
-    gait_period = mdp.commands.GaitPeriodCfg(gait_period_range=(0.8, 0.8), resampling_time_range=(10.0, 10.0))
-
-# @configclass
-# class HumanoidSceneCfg(MySceneCfg):
-#     """Scene specifications for the MDP."""
-#     pass
-
-@configclass
 class HumanoidTerminationCfg:
     """Handle the terminations."""
     time_out = DoneTerm(func=mdp.time_out, time_out=True)
@@ -236,7 +224,7 @@ class HumanoidEnvCfg(LocomotionVelocityRoughEnvCfg):
     observations: HumanoidObservationsCfg = HumanoidObservationsCfg()
     events: HumanoidEventsCfg = HumanoidEventsCfg()
     actions: HumanoidActionsCfg = HumanoidActionsCfg()
-    commands: HumanoidCommandsCfg = HumanoidCommandsCfg()
+    commands: CommandsCfg = CommandsCfg()
     terminations: HumanoidTerminationCfg = HumanoidTerminationCfg()
 
     # def __post_init__(self):

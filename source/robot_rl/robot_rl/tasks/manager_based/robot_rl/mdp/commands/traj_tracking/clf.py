@@ -227,33 +227,21 @@ class CLF:
         y_nom: torch.Tensor,
         dy_act: torch.Tensor,
         dy_nom: torch.Tensor,
-        # yaw_idx: list[int],
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Compute V_dot = (V_curr - V_prev) / sim_dt, returns (vdot, V_curr).
         """
         v_curr = self.compute_v(y_act, y_nom, dy_act, dy_nom,)# yaw_idx)
        
-        dt = self.sim_dt
         B = v_curr.shape[0]
 
-        if self.step_count >= 3:
-            # We have [V_k, V_{k−1}, V_{k−2}] → 3‐point backward difference
-            V_k  = self.v_buffer[:, 0]   # V_k
-            V_k1 = self.v_buffer[:, 1]   # V_{k−1}
-            V_k2 = self.v_buffer[:, 2]   # V_{k−2}
-            # Formula: (3 V_k − 4 V_{k−1} + V_{k−2}) / (2 Δt)
-            vdot_raw = (3.0 * V_k - 4.0 * V_k1 + V_k2) / (2.0 * dt)
-
-        elif self.step_count == 2:
-            # We only have [V_k, V_{k−1}] → 2‐point fallback
-            V_k  = self.v_buffer[:, 0]
-            V_k1 = self.v_buffer[:, 1]
-            vdot_raw = (V_k - V_k1) / dt
-
-        else:
-            # step_count == 1 → no previous sample; just return zero
+        if self.step_count == 0:
             vdot_raw = torch.zeros((B,), device=self.device)
+        else:
+            # Discrete time CLF computation
+            V_k = self.v_buffer[:, 0]
+            V_k1 = self.v_buffer[:, 1]
+            vdot_raw = (V_k - V_k1)
 
         # Clamp unreasonably large vdot values (e.g., after resets)
         vdot_raw = torch.where(torch.abs(vdot_raw) > 10000, torch.zeros_like(vdot_raw), vdot_raw)
