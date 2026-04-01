@@ -335,6 +335,22 @@ class G1ClfTrackingRewardCfg:
         weight=-1.0,
     )
 
+    ##
+    # Undesired Contacts
+    ##
+    undesired_contacts = RewTerm(
+        func=mdp.undesired_contacts,
+        weight=-0.1,
+        params={
+            "sensor_cfg": SceneEntityCfg(
+                "contact_forces",
+                body_names=[
+                    r"^(?!left_ankle_roll_link$)(?!right_ankle_roll_link$)(?!left_wrist_yaw_link$)(?!right_wrist_yaw_link$).+$"
+                ],
+            ),
+            "threshold": 1.0,
+        },
+    )
 
     ##
     # Action rate
