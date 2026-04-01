@@ -20,6 +20,9 @@ class G1WalkingCLFEnvCfg(G1ClfTrackingEnvCfg):
         # Full speed from fast (0.0-1.4)
         self.commands.traj_ref.path = "trajectories/retargeted/2026-03-31_14-47-00_walk_forward_retargeted_config_full_walking_speed"
 
+        # TODO: Try next
+        # self.commands.traj_ref.path = "trajectories/retargeted/2026-04-01_10-48-18_walk_forward_retargeted_config_full_speed_wider_stance"
+
         # Configure velocity ranges for different gaits
         self.commands.base_velocity.ranges.lin_vel_x = (0.0, 1.4)  # Allow full range
         self.commands.base_velocity.ranges.lin_vel_y = (0, 0) #(-0.5, 0.5)

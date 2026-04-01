@@ -27,6 +27,8 @@ ENVIRONMENTS = {
     "bow_forward_clf_sym": "G1-bow_forward-clf-symmetric",
 
     "bend_up_clf_sym": "G1-bend_up-clf-symmetric",
+
+    "walk_run_clf_sym": "G1-walk-run-clf-symmetric"
 }
 
 EXPERIMENT_NAMES = {
@@ -51,6 +53,8 @@ EXPERIMENT_NAMES = {
     "bow_forward_clf_sym": "bow_forward-clf-symmetric",
 
     "bend_up_clf_sym": "bend_up-clf-symmetric",
+
+    "walk_run_clf_sym": "walk_run_clf_sym",
 }
 
 
