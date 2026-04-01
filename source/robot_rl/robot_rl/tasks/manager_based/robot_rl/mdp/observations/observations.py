@@ -136,20 +136,16 @@ def domain_flag(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
 
     return domain.unsqueeze(-1)
 
-def multiskill_phase(env: ManagerBasedRLEnv, command_name: str) -> tuple[torch.Tensor, torch.Tensor]:
-    """
-    Create a number of phasing variables at different frequencies to cover a range.
-    """
+def multiskill_phase(env: ManagerBasedRLEnv) -> torch.Tensor:
+    """Create phasing variables at different frequencies to cover a range.
 
+    Returns a tensor of shape (num_envs, 2 * num_frequencies) with sin and cos
+    values interleaved: [sin_f0, cos_f0, sin_f1, cos_f1, ...].
+    """
     frequencies = torch.tensor([0.01, 0.1, 1, 10, 100], device=env.device)   # Hz
     num_freq = len(frequencies)
 
-    cmd = env.command_manager.get_term(command_name)
-
     t = env.episode_length_buf * env.step_dt
-
-    episodic = cmd.is_episodic()
-    phasing_var = cmd.get_phasing_var()
 
     sp = torch.zeros(env.num_envs, num_freq, device=env.device)
     cp = torch.zeros(env.num_envs, num_freq, device=env.device)
@@ -158,11 +154,8 @@ def multiskill_phase(env: ManagerBasedRLEnv, command_name: str) -> tuple[torch.T
         sp[:, i] = torch.sin(2 * torch.pi * frequencies[i] * t)
         cp[:, i] = torch.cos(2 * torch.pi * frequencies[i] * t)
 
-        # Overwrite the episodic envs to go from phase 0 to 1
-        sp[episodic, i] = torch.sin(2 * torch.pi * phasing_var[episodic])
-        cp[episodic, i] = torch.cos(2 * torch.pi * phasing_var[episodic])
+    return torch.cat([sp, cp], dim=-1)
 
-    return sp, cp
 
 def skill_selector(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
     """

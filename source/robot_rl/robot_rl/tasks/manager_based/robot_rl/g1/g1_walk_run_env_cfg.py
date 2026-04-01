@@ -14,14 +14,17 @@ class G1WalkRunObservationCfg(G1ClfTrackingObservationsCfg):
         sin_phase = None
         cos_phase = None
 
-        multiskill_phases = ObsTerm(func=mdp.multiskill_phase, params={"command_name": "traj_ref"})
+        multiskill_phases = ObsTerm(func=mdp.multiskill_phase, )
 
     @configclass
     class CriticCfg(G1ClfTrackingObservationsCfg.CriticCfg):
         sin_phase = None
         cos_phase = None
 
-        multiskill_phases = ObsTerm(func=mdp.multiskill_phase, params={"command_name": "traj_ref"})
+        multiskill_phases = ObsTerm(func=mdp.multiskill_phase, )
+
+    policy: PolicyCfg = PolicyCfg()
+    critic: CriticCfg = CriticCfg()
 
 @configclass
 class G1WalkRunCLFEnvCfg(G1ClfTrackingEnvCfg):
