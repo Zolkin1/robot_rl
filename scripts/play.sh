@@ -41,7 +41,7 @@ for ckpt_path in $checkpoints; do
 
     python scripts/rsl_rl/play_policy.py \
         --env_type="${env_type}" \
-        --headless \
+        --viz none \
         --num_env="${num_env}" \
         --sim_speed="${sim_speed}" \
         --play_log_dir="${play_dir}" \

@@ -3,10 +3,10 @@ from __future__ import annotations
 
 import torch
 from typing import TYPE_CHECKING
-from isaaclab.assets import Articulation, RigidObject
 from isaaclab.managers import SceneEntityCfg
 
 if TYPE_CHECKING:
+    from isaaclab.assets import Articulation, RigidObject
     from isaaclab.envs import ManagerBasedEnv
 
 def reset_init_config(
@@ -30,9 +30,10 @@ def reset_init_config(
     base_vel = 0.0 * base_vel
 #     joint_vel = cmd.init_joint_vel.unsqueeze(0).expand(num_env, -1)
 
-     #quat order wxyz
+     #quat order xyzw
     # set into the physics simulation
-    asset.write_root_pose_to_sim(base_pos, env_ids=env_ids)
-    asset.write_root_velocity_to_sim(base_vel, env_ids=env_ids)
+    asset.write_root_pose_to_sim_index(root_pose=base_pos, env_ids=env_ids)
+    asset.write_root_velocity_to_sim_index(root_velocity=base_vel, env_ids=env_ids)
     # set into the physics simulation
-    asset.write_joint_state_to_sim(joint_pos, joint_vel, env_ids=env_ids)
+    asset.write_joint_position_to_sim_index(joint_pos=joint_pos, env_ids=env_ids)
+    asset.write_joint_velocity_to_sim_index(joint_vel=joint_vel, env_ids=env_ids)

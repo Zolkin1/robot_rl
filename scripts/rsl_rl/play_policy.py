@@ -8,6 +8,7 @@ import glob
 from isaaclab.app import AppLauncher
 import cli_args
 import torch
+import warp as wp
 
 # Import plot_trajectories functions
 from plot_trajectories import plot_trajectories, compute_and_save_stats
@@ -245,16 +246,14 @@ def main():
     import gymnasium as gym
     import torch
     from rsl_rl.runners import OnPolicyRunner, DistillationRunner
-    # from robot_rl.network.custom_policy_runner import CustomOnPolicyRunner
 
     from isaaclab.envs import (
         DirectMARLEnv,
         multi_agent_to_single_agent,
     )
     from isaaclab.utils.dict import print_dict
-    from isaaclab_rl.rsl_rl import RslRlOnPolicyRunnerCfg, RslRlVecEnvWrapper
+    from isaaclab_rl.rsl_rl import RslRlOnPolicyRunnerCfg, RslRlVecEnvWrapper, handle_deprecated_rsl_rl_cfg
     from isaaclab_tasks.utils import get_checkpoint_path, parse_env_cfg
-    from isaaclab_rl.rsl_rl import export_policy_as_jit, export_policy_as_onnx
     import robot_rl.tasks  # noqa: F401
     print("[DEBUG] Modules imported successfully")
 
@@ -276,6 +275,9 @@ def main():
         env_cfg.commands.base_velocity.ranges.ang_vel_z = (args_cli.sim_speed[2], args_cli.sim_speed[2])
 
     agent_cfg: RslRlOnPolicyRunnerCfg = cli_args.parse_rsl_rl_cfg(args_cli.task, args_cli)
+    import importlib.metadata as metadata
+    installed_version = metadata.version("rsl-rl-lib")
+    agent_cfg = handle_deprecated_rsl_rl_cfg(agent_cfg, installed_version)
     print("[DEBUG] Configurations parsed")
 
     # specify directory for logging experiments
@@ -351,33 +353,11 @@ def main():
 
     # Export policy if requested
     if args_cli.export_policy:
-        if runner.alg.policy.__class__.__name__ == "ActorCriticCNN":
-            from robot_rl.network.exporter import export_policy_as_jit, export_policy_as_onnx
-          
-
-        print("[DEBUG] Exporting policy to ONNX and JIT formats")
-        try:
-            # version 2.3 onwards
-            policy_nn = runner.alg.policy
-        except AttributeError:
-            # version 2.2 and below
-            policy_nn = runner.alg.actor_critic
-
-        # extract the normalizer
-        if hasattr(policy_nn, "actor_obs_normalizer"):
-            normalizer = policy_nn.actor_obs_normalizer
-        elif hasattr(policy_nn, "student_obs_normalizer"):
-            normalizer = policy_nn.student_obs_normalizer
-        else:
-            normalizer = None
-
-        # export policy to onnx/jit
         export_model_dir = os.path.join(os.path.dirname(resume_path), "exported")
         os.makedirs(export_model_dir, exist_ok=True)
-        export_policy_as_jit(policy_nn, normalizer=normalizer, path=export_model_dir, filename="policy.pt")
-        export_policy_as_onnx(
-            policy_nn, normalizer=normalizer, path=export_model_dir, filename="policy.onnx"
-        )
+        print("[DEBUG] Exporting policy to JIT and ONNX formats")
+        runner.export_policy_to_jit(path=export_model_dir, filename="policy.pt")
+        runner.export_policy_to_onnx(path=export_model_dir, filename="policy.onnx")
         print(f"[DEBUG] Policy exported to {export_model_dir}")
 
     dt = env.unwrapped.step_dt
@@ -453,8 +433,8 @@ def main():
                 action_term = env.unwrapped.action_manager.get_term("joint_pos")
                 robot = env.unwrapped.scene.articulations["robot"]
                 data['action_targets'] = action_term._processed_actions.clone()
-                data['joint_pos'] = robot.data.joint_pos.clone()
-                data['applied_torque'] = robot.data.applied_torque.clone()
+                data['joint_pos'] = wp.to_torch(robot.data.joint_pos).clone()
+                data['applied_torque'] = wp.to_torch(robot.data.applied_torque).clone()
                 data['joint_names'] = list(robot.data.joint_names)
                 logger.log_from_dict(data)
 

@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import torch
+import warp as wp
 from typing import TYPE_CHECKING
 
-from isaaclab.assets import Articulation
 from isaaclab.managers import SceneEntityCfg
 from isaaclab.utils.math import quat_from_euler_xyz, quat_apply, quat_inv
 
 if TYPE_CHECKING:
+    from isaaclab.assets import Articulation
     from isaaclab.envs import ManagerBasedEnv
 
 # TODO: Break the key parts of this into another function that can be called from the play script easily.
@@ -171,9 +172,10 @@ def reset_on_reference(
     cmd.init_time_offset[ref_ids] = random_times
 
     # Write states to simulation
-    asset.write_root_pose_to_sim(base_pose, env_ids=ref_ids)
-    asset.write_root_link_velocity_to_sim(base_vel, env_ids=ref_ids)
-    asset.write_joint_state_to_sim(joint_pos, joint_vel, env_ids=ref_ids)
+    asset.write_root_pose_to_sim_index(root_pose=base_pose, env_ids=ref_ids)
+    asset.write_root_link_velocity_to_sim_index(root_velocity=base_vel, env_ids=ref_ids)
+    asset.write_joint_position_to_sim_index(position=joint_pos, env_ids=ref_ids)
+    asset.write_joint_velocity_to_sim_index(velocity=joint_vel, env_ids=ref_ids)
 
     # Restore command
     env.command_manager.get_term(conditioner_command_name).command[:] = command_clone
@@ -210,24 +212,25 @@ def reset_on_reference(
 
     if num_nonref_envs != 0:
         # Non reference resets
-        root_states = asset.data.default_root_state[nonref_ids].clone()
+        root_states = wp.to_torch(asset.data.default_root_state)[nonref_ids].clone()
 
         base_pose = root_states[:, 0:7]
         base_pose[:, :3] += env.scene.env_origins[nonref_ids]
         base_vel = root_states[:, 7:]
 
         # get default joint state
-        joint_pos = asset.data.default_joint_pos[nonref_ids, asset_cfg.joint_ids].clone()
-        joint_vel = asset.data.default_joint_vel[nonref_ids, asset_cfg.joint_ids].clone()
+        joint_pos = wp.to_torch(asset.data.default_joint_pos)[nonref_ids, asset_cfg.joint_ids].clone()
+        joint_vel = wp.to_torch(asset.data.default_joint_vel)[nonref_ids, asset_cfg.joint_ids].clone()
 
         # Add noise
         r = torch.empty(num_nonref_envs, len(asset.joint_names), device=env.device)
         r.uniform_(joint_add_range[0], joint_add_range[1])
         joint_pos += r
 
-        asset.write_root_pose_to_sim(base_pose, env_ids=nonref_ids)
-        asset.write_root_velocity_to_sim(base_vel, env_ids=nonref_ids)
-        asset.write_joint_state_to_sim(joint_pos, joint_vel, env_ids=nonref_ids)
+        asset.write_root_pose_to_sim_index(root_pose=base_pose, env_ids=nonref_ids)
+        asset.write_root_velocity_to_sim_index(root_velocity=base_vel, env_ids=nonref_ids)
+        asset.write_joint_position_to_sim_index(position=joint_pos, env_ids=nonref_ids)
+        asset.write_joint_velocity_to_sim_index(velocity=joint_vel, env_ids=nonref_ids)
 
         # Reset the time offset
         cmd.init_time_offset[nonref_ids] = 0.0

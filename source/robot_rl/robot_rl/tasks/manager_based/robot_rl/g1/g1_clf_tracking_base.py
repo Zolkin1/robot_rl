@@ -9,10 +9,11 @@ from isaaclab.managers import EventTermCfg as EventTerm
 from isaaclab.managers import RewardTermCfg as RewTerm
 from isaaclab.managers import SceneEntityCfg
 from isaaclab.managers import ObservationTermCfg as ObsTerm
-from isaaclab.utils.noise import AdditiveUniformNoiseCfg as Unoise
+from isaaclab.utils.noise import UniformNoiseCfg as Unoise
 from isaaclab.managers import ObservationGroupCfg as ObsGroup
 from isaaclab_tasks.manager_based.navigation.config.anymal_c.navigation_env_cfg import ActionsCfg
 from isaaclab.scene import InteractiveSceneCfg
+from isaaclab_physx.physics import PhysxCfg
 from isaaclab.terrains import TerrainImporterCfg
 from isaaclab.assets import ArticulationCfg, AssetBaseCfg
 import isaaclab.sim as sim_utils
@@ -30,7 +31,7 @@ from isaaclab.terrains.config.rough import ROUGH_TERRAINS_CFG  # isort: skip
 from robot_rl.tasks.manager_based.robot_rl.mdp.commands.traj_tracking.trajectory_cmd_cfg import TrajectoryCommandCfg
 from robot_rl.tasks.manager_based.robot_rl import mdp
 from robot_rl.assets.robots import G1_ACTION_SCALE
-from robot_rl.assets.robots.g1_21j import G1_MINIMAL_CFG  # isort: skip
+from robot_rl.assets.robots.g1_21j import G1_CFG  # isort: skip
 
 from .clf_weights import WALKING_Q_weights, WALKING_R_weights
 from ..mdp.commands.velocity_commands_cfg import VelocityTrackingCommandCfg
@@ -83,7 +84,7 @@ class G1ClfTrackingSceneCfg(InteractiveSceneCfg):
     #     mesh_prim_paths=["/World/ground"],
     # )
 
-    contact_forces = ContactSensorCfg(prim_path="{ENV_REGEX_NS}/Robot/.*", history_length=3, track_air_time=True)
+    contact_forces = ContactSensorCfg(prim_path="{ENV_REGEX_NS}/Robot/Geometry/.*", history_length=3, track_air_time=True)
 
     # lights
     sky_light = AssetBaseCfg(
@@ -187,11 +188,6 @@ class G1ClfTrackingObservationsCfg:
         sin_phase = ObsTerm(func=mdp.ref_sin_phase, params={"command_name": "traj_ref"})
         cos_phase = ObsTerm(func=mdp.ref_cos_phase, params={"command_name": "traj_ref"})
 
-        contact_state = ObsTerm(
-            func=mdp.contact_state,
-            params={"sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*_ankle_roll_link")},
-        )
-
         ref_traj = ObsTerm(func=mdp.ref_traj, params={"command_name": "traj_ref"})
         act_traj = ObsTerm(func=mdp.act_traj, params={"command_name": "traj_ref"})
         ref_traj_vel = ObsTerm(func=mdp.ref_traj_vel, params={"command_name": "traj_ref"}, clip=(-20.0, 20.0,))
@@ -205,6 +201,7 @@ class G1ClfTrackingObservationsCfg:
 
 @configclass
 class G1ClfTrackingEventsCfg:
+    # pass
     reset_on_ref = EventTerm(
         func=mdp.reset_on_reference,
         mode="reset",
@@ -218,25 +215,27 @@ class G1ClfTrackingEventsCfg:
 
     #TODO: Consider moving the common stuff to another cfg
 
-    # Randomize joint friction
-    joint_friction_params = EventTerm(
-        func=mdp.randomize_joint_parameters_multi_friction,
-        mode="startup",
-        params={"asset_cfg": SceneEntityCfg("robot", joint_names=[".*"]),
-                "static_friction_distribution_params": (0.3, 1.6),
-                "dynamic_friction_distribution_params": (0.3, 1.2),
-                "viscous_friction_distribution_params": (0.01, 0.1),
-                "operation": "add"},
-    )
+    # TODO: I think there is a bug in this function with the new version of Isaac.
+    # # Randomize joint friction
+    # joint_friction_params = EventTerm(
+    #     func=mdp.randomize_joint_parameters_multi_friction,
+    #     mode="startup",
+    #     params={"asset_cfg": SceneEntityCfg("robot", joint_names=[".*"]),
+    #             "static_friction_distribution_params": (0.3, 1.6),
+    #             "dynamic_friction_distribution_params": (0.3, 1.2),
+    #             "viscous_friction_distribution_params": (0.01, 0.1),
+    #             "operation": "add"},
+    # )
 
-    # Randomize armature
-    joint_armature_params = EventTerm(
-        func=mdp.randomize_joint_parameters_multi_friction,
-        mode="startup",
-        params={"asset_cfg": SceneEntityCfg("robot", joint_names=[".*"]),
-                "armature_distribution_params": (0.95, 1.05),
-                "operation": "scale"},
-    )
+    # TODO: I think there is a bug in this function with the new version of Isaac.
+    # # Randomize armature
+    # joint_armature_params = EventTerm(
+    #     func=mdp.randomize_joint_parameters_multi_friction,
+    #     mode="startup",
+    #     params={"asset_cfg": SceneEntityCfg("robot", joint_names=[".*"]),
+    #             "armature_distribution_params": (0.95, 1.05),
+    #             "operation": "scale"},
+    # )
 
     # PD Gain randomization
     gain_randomization = EventTerm(
@@ -438,17 +437,21 @@ class G1ClfTrackingEnvCfg(ManagerBasedRLEnvCfg):
         # Post init of parent
         super().__post_init__()
 
+        ##
+        # Scene
+        ##
+        self.scene.robot = G1_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
+
         self.decimation = 4
         self.episode_length_s = 20.0
         self.sim.dt = 0.005
         self.sim.render_interval = self.decimation
         self.sim.physics_material = self.scene.terrain.physics_material
-        self.sim.physx.gpu_max_rigid_patch_count = 10 * 2**15
+        self.sim.physics = PhysxCfg(
+            gpu_max_rigid_patch_count=10 * 2**15,
+            gpu_total_aggregate_pairs_capacity=2**22,
+        )
 
-        ##
-        # Scene
-        ##
-        self.scene.robot = G1_MINIMAL_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
 
 ##
 #

@@ -1,6 +1,7 @@
 import numpy as np
 import re
 import torch
+import warp as wp
 import time
 from isaaclab.managers import CommandTerm
 
@@ -111,8 +112,10 @@ class TrajectoryCommand(CommandTerm):
         for i, ref_frame in enumerate(self.ref_frames):
             self.ref_to_contact_idx[i] = self.contact_bodies.index(ref_frame)
 
-        # Current reference frame poses
-        self.ref_poses = torch.zeros((self.num_envs, 7), device=self.device)    # [N, [position, quat]]
+        # Current reference frame poses — [N, [pos_x, pos_y, pos_z, qx, qy, qz, qw]]
+        # Initialize quaternion to identity so quat_inv doesn't produce NaN before first update.
+        self.ref_poses = torch.zeros((self.num_envs, 7), device=self.device)
+        self.ref_poses[:, 6] = 1.0  # qw=1 identity quaternion
 
         # Create CLF using velocity output names (which exclude ori_w)
         self.clf = CLF(
@@ -140,6 +143,8 @@ class TrajectoryCommand(CommandTerm):
         self.vdot_time = 0.0
 
         self.init_time_offset = torch.zeros(self.num_envs, device=self.device)
+
+        print(f"Body names: {self.robot.body_names}")
 
     def update_phasing_var(self, t: torch.Tensor, env_ids: torch.Tensor = None):
         """Get the phasing variable for the current trajectory.
@@ -334,8 +339,8 @@ class TrajectoryCommand(CommandTerm):
         """
         poses = torch.zeros(self.num_envs, len(self.ref_frame_indices), 7, device=self.device)
 
-        poses[:, :, :3] = self.robot.data.body_pos_w[:, self.ref_frame_indices]
-        poses[:, :, 3:] = self.robot.data.body_quat_w[:, self.ref_frame_indices]
+        poses[:, :, :3] = wp.to_torch(self.robot.data.body_pos_w)[:, self.ref_frame_indices]
+        poses[:, :, 3:] = wp.to_torch(self.robot.data.body_quat_w)[:, self.ref_frame_indices]
 
         return poses
 
@@ -357,12 +362,12 @@ class TrajectoryCommand(CommandTerm):
         not_in_contact = contact_state == 0
 
         # Get the poses of all the possible contact bodies
-        poses[:, :, :3] = self.robot.data.body_pos_w[:, self.contact_frame_indices, :]
+        poses[:, :, :3] = wp.to_torch(self.robot.data.body_pos_w)[:, self.contact_frame_indices, :]
 
         # Batch euler conversion for all contact bodies at once
         N = self.num_envs
         C = len(self.contact_bodies)
-        all_quats = self.robot.data.body_quat_w[:, self.contact_frame_indices, :]  # [N, C, 4]
+        all_quats = wp.to_torch(self.robot.data.body_quat_w)[:, self.contact_frame_indices, :]  # [N, C, 4]
         poses[:, :, 3:] = get_euler_from_quat(all_quats.reshape(N * C, 4)).reshape(N, C, 3)
 
         # Now mask
@@ -399,8 +404,8 @@ class TrajectoryCommand(CommandTerm):
 
         not_in_contact = contact_state == 0
 
-        vels[:, :, :3] = self.robot.data.body_lin_vel_w[:, self.contact_frame_indices, :]
-        vels[:, :, 3:] = self.robot.data.body_ang_vel_w[:, self.contact_frame_indices, :]
+        vels[:, :, :3] = wp.to_torch(self.robot.data.body_lin_vel_w)[:, self.contact_frame_indices, :]
+        vels[:, :, 3:] = wp.to_torch(self.robot.data.body_ang_vel_w)[:, self.contact_frame_indices, :]
 
         # Now mask
         vels[not_in_contact, :] *= 0
@@ -521,8 +526,8 @@ class TrajectoryCommand(CommandTerm):
         # Get the relevant end effector positions (in global frame)
         if self.use_com:
             # Deal with CoM as a special case
-            com_pos_w = self.robot.data.root_com_pos_w
-            com_vel_w = self.robot.data.root_com_vel_w[:, :3]
+            com_pos_w = wp.to_torch(self.robot.data.root_com_pos_w)
+            com_vel_w = wp.to_torch(self.robot.data.root_com_vel_w)[:, :3]
 
             # Put into the reference frame
             com_pos_local = _align_yaw(com_pos_w - ref_frame_pos_w, ref_frame_quat)
@@ -572,12 +577,13 @@ class TrajectoryCommand(CommandTerm):
 
         # Bodies
         if self.body_idx is not None:
-            frame_pos = self.robot.data.body_pos_w[:, self.body_idx, :]
-            frame_quat = self.robot.data.body_quat_w[:, self.body_idx, :]
+            frame_pos = wp.to_torch(self.robot.data.body_pos_w)[:, self.body_idx, :]
+            frame_quat = wp.to_torch(self.robot.data.body_quat_w)[:, self.body_idx, :]
 
             # Get the frame vels, not the COM vels
-            frame_lin_vel_w = self.robot.data.body_link_vel_w[:, self.body_idx, :3]
-            frame_ang_vel_w = self.robot.data.body_link_vel_w[:, self.body_idx, 3:]
+            body_link_vel = wp.to_torch(self.robot.data.body_link_vel_w)
+            frame_lin_vel_w = body_link_vel[:, self.body_idx, :3]
+            frame_ang_vel_w = body_link_vel[:, self.body_idx, 3:]
 
             # These pull the COM velocities in the world frame - want the frame velocities
             # frame_lin_vel_w = self.robot.data.body_lin_vel_w[:, self.body_idx, :]
@@ -611,8 +617,8 @@ class TrajectoryCommand(CommandTerm):
 
         # Get the relevant joint angles
         if self.joint_idx is not None:
-            joint_pos = self.robot.data.joint_pos[:, self.joint_idx]
-            joint_vel = self.robot.data.joint_vel[:, self.joint_idx]
+            joint_pos = wp.to_torch(self.robot.data.joint_pos)[:, self.joint_idx]
+            joint_vel = wp.to_torch(self.robot.data.joint_vel)[:, self.joint_idx]
 
             self.y_act[:, pos_output_idx:pos_output_idx+(joint_pos.shape[1])] = joint_pos
             self.dy_act[:, vel_output_idx:vel_output_idx+(joint_vel.shape[1])] = joint_vel
@@ -642,7 +648,7 @@ class TrajectoryCommand(CommandTerm):
         # COM accelerations
         if self.use_com:
             # Get COM acceleration in world frame (linear acceleration only)
-            com_acc_w = self.robot.data.root_com_acc_w[:, :3]
+            com_acc_w = wp.to_torch(self.robot.data.root_com_acc_w)[:, :3]
 
             # Transform to local frame
             com_acc_local = _align_yaw(com_acc_w, ref_frame_quat)
@@ -654,8 +660,9 @@ class TrajectoryCommand(CommandTerm):
         if self.body_idx is not None:
             # Get body accelerations in world frame
             # body_acc_w contains [linear_acc (3), angular_acc (3)] per body
-            body_lin_acc_w = self.robot.data.body_acc_w[:, self.body_idx, :3]
-            body_ang_acc_w = self.robot.data.body_acc_w[:, self.body_idx, 3:]
+            body_acc = wp.to_torch(self.robot.data.body_acc_w)
+            body_lin_acc_w = body_acc[:, self.body_idx, :3]
+            body_ang_acc_w = body_acc[:, self.body_idx, 3:]
 
             # Transform to local frame (batched over all bodies)
             body_lin_acc_local = _align_yaw_batched(body_lin_acc_w, ref_frame_quat)
@@ -680,7 +687,7 @@ class TrajectoryCommand(CommandTerm):
 
         # Joint accelerations
         if self.joint_idx is not None:
-            joint_acc = self.robot.data.joint_acc[:, self.joint_idx]
+            joint_acc = wp.to_torch(self.robot.data.joint_acc)[:, self.joint_idx]
             ddy_act[:, output_idx:output_idx + joint_acc.shape[1]] = joint_acc
             output_idx += joint_acc.shape[1]
 

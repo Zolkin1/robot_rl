@@ -1,4 +1,5 @@
 import torch
+import warp as wp
 import math
 from isaaclab.utils import configclass
 import numpy as np
@@ -101,7 +102,7 @@ class HLIPCommandTerm(CommandTerm):
         grav = torch.abs(torch.tensor(self.env.cfg.sim.gravity[2], device=self.device))
         self.hlip_controller = HLIP(grav, self.z0, self.T_ds, self.T, self.y_nom)
 
-        self.mass = sum(self.robot.data.default_mass.T)[0]
+        self.mass = sum(wp.to_torch(self.robot.data.default_mass).T)[0]
 
 
         self.clf = CLF(n_output, self.env.cfg.sim.dt*self.env.cfg.sim.render_interval,
@@ -170,8 +171,8 @@ class HLIPCommandTerm(CommandTerm):
             if self.stance_idx is None:
                 self.stance_idx = new_stance_idx
             #update stance foot pos, ori
-            foot_pos_w = self.robot.data.body_pos_w[:, self.feet_bodies_idx, :]
-            foot_ori_w = self.robot.data.body_quat_w[:, self.feet_bodies_idx, :]
+            foot_pos_w = wp.to_torch(self.robot.data.body_pos_w)[:, self.feet_bodies_idx, :]
+            foot_ori_w = wp.to_torch(self.robot.data.body_quat_w)[:, self.feet_bodies_idx, :]
             self.stance_foot_pos_0 = foot_pos_w[:, new_stance_idx, :]
             self.stance_foot_ori_quat_0 = foot_ori_w[:,new_stance_idx,:]
             self.stance_foot_ori_0 = get_euler_from_quat(foot_ori_w[:,new_stance_idx,:])
@@ -384,7 +385,7 @@ class HLIPCommandTerm(CommandTerm):
         ], device=self.device)
 
         # joint offsets: [B,9]
-        joint_offset = self.robot.data.default_joint_pos[:, self.upper_body_joint_idx]
+        joint_offset = wp.to_torch(self.robot.data.default_joint_pos)[:, self.upper_body_joint_idx]
 
         # refs: everything now broadcast to [B,9]
         offset = offset.unsqueeze(0).expand(N, -1)
@@ -404,11 +405,11 @@ class HLIPCommandTerm(CommandTerm):
         """Populate actual state and its time derivative in the robot's local (yaw-aligned) frame."""
         # Convenience
         data = self.robot.data
-        root_quat = data.root_quat_w
+        root_quat = wp.to_torch(data.root_quat_w)
 
         # 1. Foot positions and orientations (world frame)
-        foot_pos_w = data.body_pos_w[:, self.feet_bodies_idx, :]
-        foot_ori_w = data.body_quat_w[:, self.feet_bodies_idx, :]
+        foot_pos_w = wp.to_torch(data.body_pos_w)[:, self.feet_bodies_idx, :]
+        foot_ori_w = wp.to_torch(data.body_quat_w)[:, self.feet_bodies_idx, :]
 
 
         # Store raw foot positions
@@ -422,7 +423,7 @@ class HLIPCommandTerm(CommandTerm):
         )
 
         # Center of mass to stance foot vector in local frame
-        com_w = data.root_com_pos_w
+        com_w = wp.to_torch(data.root_com_pos_w)
         com2stance_local = _transfer_to_local_frame(
             com_w - self.stance_foot_pos_0, self.stance_foot_ori_quat_0
         )
@@ -435,10 +436,10 @@ class HLIPCommandTerm(CommandTerm):
         swing_foot_ori = get_euler_from_quat(foot_ori_w[:,self.swing_idx,:])
 
         # 2. Velocities (world frame)
-        com_vel_w = data.root_com_vel_w[:,0:3]
+        com_vel_w = wp.to_torch(data.root_com_vel_w)[:,0:3]
 
-        foot_lin_vel_w = data.body_lin_vel_w[:, self.feet_bodies_idx, :]
-        foot_ang_vel_w = data.body_ang_vel_w[:, self.feet_bodies_idx, :]
+        foot_lin_vel_w = wp.to_torch(data.body_lin_vel_w)[:, self.feet_bodies_idx, :]
+        foot_ang_vel_w = wp.to_torch(data.body_ang_vel_w)[:, self.feet_bodies_idx, :]
 
         self.stance_foot_vel = foot_lin_vel_w[:,self.stance_idx,:]
         self.stance_foot_ang_vel = foot_ang_vel_w[:,self.stance_idx,:]
@@ -446,7 +447,7 @@ class HLIPCommandTerm(CommandTerm):
 
         com_vel_local = _transfer_to_local_frame(com_vel_w, self.stance_foot_ori_quat_0)
       
-        pelvis_omega_local = data.root_ang_vel_b
+        pelvis_omega_local = wp.to_torch(data.root_ang_vel_b)
 
         foot_lin_vel_local_swing = _transfer_to_local_frame(
             foot_lin_vel_w[:,self.swing_idx,:], self.stance_foot_ori_quat_0
@@ -458,8 +459,8 @@ class HLIPCommandTerm(CommandTerm):
 
         swing2stance_vel = foot_lin_vel_local_swing 
     
-        upper_body_joint_pos = self.robot.data.joint_pos[:, self.upper_body_joint_idx]
-        upper_body_joint_vel = self.robot.data.joint_vel[:, self.upper_body_joint_idx]
+        upper_body_joint_pos = wp.to_torch(self.robot.data.joint_pos)[:, self.upper_body_joint_idx]
+        upper_body_joint_vel = wp.to_torch(self.robot.data.joint_vel)[:, self.upper_body_joint_idx]
         # 4. Assemble state vectors
         self.y_act = torch.cat([
             com2stance_local,

@@ -66,10 +66,6 @@ class HumanoidObservationsCfg(ObservationsCfg):
         joint_vel = ObsTerm(func=mdp.joint_vel_rel, noise=Unoise(n_min=-1.5, n_max=1.5), history_length=1, scale=0.05)
         joint_pos = ObsTerm(func=mdp.joint_pos_rel, noise=Unoise(n_min=-0.01, n_max=0.01), history_length=1)
 
-        # Phase clock
-        sin_phase = ObsTerm(func=mdp.sin_phase, params={"command_name": "step_period"})
-        cos_phase = ObsTerm(func=mdp.cos_phase, params={"command_name": "step_period"})
-
     @configclass
     class CriticCfg(PolicyCfg):
         """Observations for critic group."""

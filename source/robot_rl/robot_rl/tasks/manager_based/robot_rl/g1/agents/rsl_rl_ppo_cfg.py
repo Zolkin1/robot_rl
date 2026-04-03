@@ -7,7 +7,7 @@ from typing import Literal
 from isaaclab.utils import configclass
 from isaaclab_rl.rsl_rl import (
     RslRlOnPolicyRunnerCfg,
-    RslRlPpoActorCriticCfg,
+    RslRlMLPModelCfg,
     RslRlPpoAlgorithmCfg,
     RslRlSymmetryCfg,
 )
@@ -15,31 +15,6 @@ from .symmetry_functions import (
     symmetric_data_augmentation_episodic,
     symmetric_data_augmentation_half_periodic
 )
-
-@configclass
-class CustomPPOActorCriticCfg:
-    """Configuration for the PPO actor-critic networks."""
-
-    class_name: str = "ActorCriticCNN"
-    """The policy class name. Default is ActorCritic."""
-
-    init_noise_std: float = MISSING
-    """The initial noise standard deviation for the policy."""
-
-    noise_std_type: Literal["scalar", "log"] = "scalar"
-    """The type of noise standard deviation for the policy. Default is scalar."""
-
-    actor_hidden_dims: list[int] = MISSING
-    """The hidden dimensions of the actor network."""
-
-    critic_hidden_dims: list[int] = MISSING
-    """The hidden dimensions of the critic network."""
-
-    activation: str = MISSING
-    """The activation function for the actor and critic networks."""
-
-    height_map_shape: tuple[int, int, int] = (1, 16,16)
-    """The shape of the height map (C, H, W)."""
 
 
 @configclass
@@ -49,10 +24,14 @@ class PPORunnerCfg(RslRlOnPolicyRunnerCfg):
     save_interval = 200
     experiment_name = "g1"
     empirical_normalization = False
-    policy = RslRlPpoActorCriticCfg(
-        init_noise_std=1.0,
-        actor_hidden_dims=[512, 256, 128],
-        critic_hidden_dims=[512, 256, 128],
+    # check_for_nan = False
+    actor = RslRlMLPModelCfg(
+        hidden_dims=[512, 256, 128],
+        activation="elu",
+        distribution_cfg=RslRlMLPModelCfg.GaussianDistributionCfg(init_std=1.0),
+    )
+    critic = RslRlMLPModelCfg(
+        hidden_dims=[512, 256, 128],
         activation="elu",
     )
     algorithm = RslRlPpoAlgorithmCfg(
@@ -115,4 +94,3 @@ class SymmetricHalfPeriodicPPORunnerCfg(PPORunnerCfg):
             use_data_augmentation=True, data_augmentation_func=symmetric_data_augmentation_half_periodic
         )
     )
-

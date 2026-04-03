@@ -4,22 +4,10 @@ from isaaclab.utils import configclass
 
 from isaaclab.envs.mdp.commands.commands_cfg import UniformVelocityCommandCfg
 
-from .velocity_commands import VelocityTrackingCommand
-
-
-# @configclass
-# class TreadmillVelocityCommandCfg(UniformVelocityCommandCfg):
-#     class_type: type = TreadmillVelocityCommand
-#
-#     y_pos_kp: float = 0.0
-#
-#     y_pos_kd: float = 0.0
-#
-#     rel_y_envs: float = 0.0
 
 @configclass
 class VelocityTrackingCommandCfg(UniformVelocityCommandCfg):
-    class_type: type = VelocityTrackingCommand
+    class_type: type | str = "{DIR}.velocity_commands:VelocityTrackingCommand"
 
     rel_closed_loop: float = MISSING
 

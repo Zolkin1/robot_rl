@@ -4,6 +4,15 @@ Since we actively develop on this repo we may push major/breaking changes.
 We do not guarantee any kind of API/environment stability right now, although this could come in the future.
 That being said, we attempt to keep the repo as usable and documented as possible given its developmental status.
 
+## TODO Items for the port
+- Double check/fix everything with the USD. It looks pretty good right now, but still there are some warning.
+- Clean up the paths with the USDs and delete old ones that are no longer in use.
+- Fix the number of self collisions in the USD
+- Fix the parameter randomization's that no longer work with the new APIs
+- Consider deleting the old envs that won't be in use anymore (vanilla RL, LIP stuff, the base humanoid env class)
+- Test walking and running
+- Then start the update to new networks w/ RSL-RL 5.0.1
+
 ## Overview
 
 This project is a set of tools for end-to-end development of RL for robots. Specifically, we support:
@@ -35,22 +44,17 @@ When you clone this repo, please use **Git Large File System (lfs)**.
         # use 'FULL_PATH_TO_isaaclab.sh|bat -p' instead of 'python' if Isaac Lab is not installed in Python venv or conda
         python scripts/<RL_LIBRARY>/train.py --task=<TASK_NAME>
         ```
-
-### Set up IDE (Optional)
-
-To setup the IDE, please follow these instructions:
-
-- Run VSCode Tasks, by pressing `Ctrl+Shift+P`, selecting `Tasks: Run Task` and running the `setup_python_env` in the drop down menu.
-  When running this task, you will be prompted to add the absolute path to your Isaac Sim installation.
-
-If everything executes correctly, it should create a file .python.env in the `.vscode` directory.
-The file contains the python paths to all the extensions provided by Isaac Sim and Omniverse.
-This helps in indexing all the python modules for intelligent suggestions while writing code.
-
+      
 ## Running Tasks
+Get a list of available tasks:
+```
+python scripts/list_envs.py --keyword clf
+```
+or you could use `G1` as the keyword.
+
 To train a policy run:
 ```bash
-python scripts/rsl_rl/train_policy.py --env_type=<ENV_NAME> --headless
+python scripts/rsl_rl/train_policy.py --env_type=<ENV_NAME> --viz none
 ```
 
 To add a run name add `--run_name=my_run_name`. This will add the name after the date on the folder with the run name.
@@ -59,7 +63,7 @@ Note that right now the only RL library that is tested in `RSL_RL`.
 
 To play the most recently trained policy for a given task run:
 ```bash
-python scripts/rsl_rl/play_policy.py --env_type=<ENV_NAME> --log_data --export_policy --headless
+python scripts/rsl_rl/play_policy.py --env_type=<ENV_NAME> --log_data --export_policy --viz none
 ```
 
 for a specific run you can pass in additional config such as `--load_run=<run_dir>`
@@ -96,6 +100,13 @@ RL Task list:
 | `bend_up_clf_sym`     | G1 |     :white_check_mark:     | Robot bends back up then holds in the standing position. Uses symmetry.              |
 
 You can also append "_ec" to any of the above tasks to run them on the robot model that has the additional weight from the extra compute (EC).
+
+## Generating the USD
+Now we use the default IsaacLab built in urdf to usd converter:
+```
+./isaaclab.sh -p scripts/tools/convert_urdf.py robot_rl/robot_assets/g1/g1_21j/g1_21j_merged.urdf robot_rl/robot_assets/g1/g1_21j/isaac_converter
+```
+TODO: Update this to not have different paths
 
 ## Copying checkpoints from remote server 
 First mount the server to your local desktop

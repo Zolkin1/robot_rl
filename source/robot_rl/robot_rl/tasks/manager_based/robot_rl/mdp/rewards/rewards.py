@@ -6,20 +6,19 @@
 from __future__ import annotations
 
 import torch
+import warp as wp
 import math
 import re
 from typing import TYPE_CHECKING
 
-from isaaclab.assets import Articulation
 from isaaclab.managers import SceneEntityCfg
-from isaaclab.utils.math import wrap_to_pi
 from isaaclab.sensors import ContactSensor
-from isaaclab.markers import VisualizationMarkers
 from isaaclab.utils.math import euler_xyz_from_quat, wrap_to_pi, quat_rotate_inverse, yaw_quat, quat_rotate, quat_inv
 
 KAPPA = 0.5
 
 if TYPE_CHECKING:
+    from isaaclab.assets import Articulation
     from isaaclab.envs import ManagerBasedRLEnv
 
 def clf_reward(env: ManagerBasedRLEnv, command_name: str, max_eta_err: float = 0.15, eps: float = 1e-6) -> torch.Tensor:
@@ -145,9 +144,9 @@ def contact_no_vel(env, sensor_cfg: SceneEntityCfg, asset_cfg: SceneEntityCfg = 
     """Reward feet contact with zero velocity."""
     # extract the used quantities (to enable type-hinting)
     contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
-    contacts = contact_sensor.data.net_forces_w_history[:, :, sensor_cfg.body_ids, :].norm(dim=-1).max(dim=1)[0] > 1.0
+    contacts = wp.to_torch(contact_sensor.data.net_forces_w_history)[:, :, sensor_cfg.body_ids, :].norm(dim=-1).max(dim=1)[0] > 1.0
     asset = env.scene[asset_cfg.name]
-    body_vel = asset.data.body_lin_vel_w[:, asset_cfg.body_ids] * contacts.unsqueeze(-1)
+    body_vel = wp.to_torch(asset.data.body_lin_vel_w)[:, asset_cfg.body_ids] * contacts.unsqueeze(-1)
     # shape [B, num_feet, 3]
     penalize = torch.square(body_vel[:,:,:3])
     return torch.sum(penalize, dim=(1,2))
@@ -293,16 +292,16 @@ def foot_clearance(env: ManagerBasedRLEnv,
     contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
 
     # Get contact state
-    contacts = contact_sensor.data.net_forces_w_history[:, :, sensor_cfg.body_ids, :].norm(dim=-1).max(dim=1)[0] > 1.0
+    contacts = wp.to_torch(contact_sensor.data.net_forces_w_history)[:, :, sensor_cfg.body_ids, :].norm(dim=-1).max(dim=1)[0] > 1.0
 
     if height_sensor_cfg is not None:
         sensor: RayCaster = env.scene[height_sensor_cfg.name]
-        adjusted_target_height = target_height + torch.mean(sensor.data.ray_hits_w[...,2],dim=1).unsqueeze(-1)
+        adjusted_target_height = target_height + torch.mean(wp.to_torch(sensor.data.ray_hits_w)[...,2],dim=1).unsqueeze(-1)
     else:
         adjusted_target_height = target_height
 
     # Calculate foot heights
-    feet_z_err = asset.data.body_pos_w[:, asset_cfg.body_ids, 2] - adjusted_target_height
+    feet_z_err = wp.to_torch(asset.data.body_pos_w)[:, asset_cfg.body_ids, 2] - adjusted_target_height
     pos_error = torch.square(feet_z_err) * ~contacts
 
     return torch.sum(pos_error, dim=(1))
@@ -336,14 +335,14 @@ def phase_contact(
             is_stance = stance_i == i
             # set is_stance to be true if the command is small
             is_stance = is_stance | is_small_command
-            contact = contact_sensor.data.net_forces_w_history[:, :, sensor_cfg.body_ids[i], :].norm(dim=-1).max(dim=1)[0] > 1.0
+            contact = wp.to_torch(contact_sensor.data.net_forces_w_history)[:, :, sensor_cfg.body_ids[i], :].norm(dim=-1).max(dim=1)[0] > 1.0
             res += ~(contact ^ is_stance)
     else:
         for i in range(2):
             is_stance = stance_i == i
             # set is_stance to be true if the command is small
             is_stance = is_stance
-            contact = contact_sensor.data.net_forces_w_history[:, :, sensor_cfg.body_ids[i], :].norm(dim=-1).max(dim=1)[0] > 1.0
+            contact = wp.to_torch(contact_sensor.data.net_forces_w_history)[:, :, sensor_cfg.body_ids[i], :].norm(dim=-1).max(dim=1)[0] > 1.0
             res += ~(contact ^ is_stance)
     return res
 
@@ -366,7 +365,7 @@ def contact_schedule_penalty(env: ManagerBasedRLEnv, command_name: str,
         contact_mask = contact_states[:, i] == 1
         indices = torch.tensor([i for i, v in enumerate(sensor_cfg.body_names) if v == body_name])
         body_id = sensor_cfg.body_ids[indices]
-        contact_forces[contact_mask] += contact_sensor.data.net_forces_w[contact_mask, body_id, :].norm(dim=-1)  # Gets the most recent force only
+        contact_forces[contact_mask] += wp.to_torch(contact_sensor.data.net_forces_w)[contact_mask, body_id, :].norm(dim=-1)  # Gets the most recent force only
 
     penalty = weight_scalar * torch.tanh(contact_forces / 0.5)  # TODO: Think about if this is what I want
     return penalty
@@ -378,7 +377,7 @@ def track_lin_vel_y_exp(
     # extract the used quantities (to enable type-hinting)
     asset: RigidObject = env.scene[asset_cfg.name]
     # compute the error
-    lin_vel_error =  torch.square(env.command_manager.get_command(command_name)[:, 1] - asset.data.root_lin_vel_b[:, 1])
+    lin_vel_error =  torch.square(env.command_manager.get_command(command_name)[:, 1] - wp.to_torch(asset.data.root_lin_vel_b)[:, 1])
     return torch.exp(-lin_vel_error / std**2)
 
 
@@ -396,7 +395,7 @@ def ankle_roll_zero(
     ankle_roll_indices = [19, 20]  # left and right ankle roll joints
     
     # Get current ankle roll joint positions
-    ankle_roll_positions = asset.data.joint_pos[:, ankle_roll_indices]  # [B, 2]
+    ankle_roll_positions = wp.to_torch(asset.data.joint_pos)[:, ankle_roll_indices]  # [B, 2]
     
     # Compute squared error from zero position
     ankle_roll_error = torch.square(ankle_roll_positions)  # [B, 2]
@@ -417,12 +416,12 @@ def torque_limits(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg = SceneEntit
     asset: Articulation = env.scene[asset_cfg.name]
     
     # Manually compute PD controller torques for implicit actuators
-    computed_torque = torch.zeros_like(asset.data.joint_pos)
-    
+    computed_torque = torch.zeros_like(wp.to_torch(asset.data.joint_pos))
+
     # Get current joint positions, velocities, and desired positions
-    current_pos = asset.data.joint_pos
-    current_vel = asset.data.joint_vel
-    desired_pos = asset.data.joint_pos_target
+    current_pos = wp.to_torch(asset.data.joint_pos)
+    current_vel = wp.to_torch(asset.data.joint_vel)
+    desired_pos = wp.to_torch(asset.data.joint_pos_target)
     
     # Access actuator configurations from the asset
     actuator_groups = asset.cfg.actuators
@@ -468,7 +467,7 @@ def torque_limits(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg = SceneEntit
         computed_torque[:, joint_indices] = pd_torque
     
     # Compute torque limit violations
-    torque_limits_upper = asset.data.joint_effort_limits[0, asset_cfg.joint_ids]  # Upper limits
+    torque_limits_upper = wp.to_torch(asset.data.joint_effort_limits)[0, asset_cfg.joint_ids]  # Upper limits
 
     # Get computed torques for the specified joints
     joint_torques = computed_torque[:, asset_cfg.joint_ids]

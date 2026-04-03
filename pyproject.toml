@@ -8,7 +8,7 @@ name = "robot-rl"
 version = "0.1.0"
 description = "RL tools for robots."
 readme = "README.md"
-requires-python = "=3.10" # Specify required Python version
+requires-python = ">=3.10" # Specify required Python version
 license = { file = "LICENSE" }
 keywords = ["robots", "rl"]
 authors = [

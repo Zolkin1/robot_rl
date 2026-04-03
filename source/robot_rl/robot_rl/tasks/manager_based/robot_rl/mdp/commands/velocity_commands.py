@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import torch
+import warp as wp
 from typing import Sequence
 from typing import TYPE_CHECKING
 
@@ -109,7 +110,7 @@ class VelocityTrackingCommand(UniformVelocityCommand):
         self.heading_target[env_ids] = r.uniform_(*self.cfg.ranges.heading)
 
         # y position target
-        self.y_target[env_ids] = r.uniform_(*self.cfg.ranges.y_pos_offset) + self.robot.data.root_pos_w[env_ids, 1]
+        self.y_target[env_ids] = r.uniform_(*self.cfg.ranges.y_pos_offset) + wp.to_torch(self.robot.data.root_pos_w)[env_ids, 1]
 
         # y gains
         self.y_kp[env_ids] = r.uniform_(*self.cfg.ranges.y_kp)
@@ -124,7 +125,7 @@ class VelocityTrackingCommand(UniformVelocityCommand):
         self.vel_command_b = self.vel_target_b
 
         # yaw only envs
-        heading_error = math_utils.wrap_to_pi(self.heading_target[yaw_env_ids] - self.robot.data.heading_w[yaw_env_ids])
+        heading_error = math_utils.wrap_to_pi(self.heading_target[yaw_env_ids] - wp.to_torch(self.robot.data.heading_w)[yaw_env_ids])
         self.vel_command_b[yaw_env_ids, 2] = torch.clip(
             self.cfg.heading_control_stiffness * heading_error,     # TODO: Consider adding a D term
             min=self.cfg.ranges.ang_vel_z[0],
@@ -132,9 +133,9 @@ class VelocityTrackingCommand(UniformVelocityCommand):
         )
 
         # cl envs
-        y_error = self.y_target[cl_env_ids] - self.robot.data.root_pos_w[cl_env_ids, 1]
-        heading_error = math_utils.wrap_to_pi(self.heading_target[cl_env_ids] - self.robot.data.heading_w[cl_env_ids])
-        y_vel_error = -self.robot.data.root_vel_w[cl_env_ids, 1]     #  TODO: Consider moving average filter here
+        y_error = self.y_target[cl_env_ids] - wp.to_torch(self.robot.data.root_pos_w)[cl_env_ids, 1]
+        heading_error = math_utils.wrap_to_pi(self.heading_target[cl_env_ids] - wp.to_torch(self.robot.data.heading_w)[cl_env_ids])
+        y_vel_error = -wp.to_torch(self.robot.data.root_vel_w)[cl_env_ids, 1]     #  TODO: Consider moving average filter here
         self.vel_command_b[cl_env_ids, 1] = torch.clip(
             self.y_kp[cl_env_ids] * y_error + self.y_kd[cl_env_ids] * y_vel_error,
             min=self.cfg.ranges.lin_vel_y[0],

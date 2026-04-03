@@ -8,7 +8,3 @@
 from .gaitPeriodCfg import GaitPeriodCfg
 
 from .velocity_commands_cfg import VelocityTrackingCommandCfg
-
-from .velocity_commands import VelocityTrackingCommand
-
-# __all__ = ["GaitPeriodCfg"]

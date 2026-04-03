@@ -4,6 +4,7 @@ Export policy parameters and environment configuration to YAML files.
 import os
 import yaml
 import torch
+import warp as wp
 import numpy as np
 
 
@@ -89,16 +90,16 @@ def export_policy_parameters(env, obs, actions, save_dir):
         pass
 
     # Add robot joint information
-    params["default_joint_angles"] = robot.data.default_joint_pos[0].detach().cpu().numpy()
+    params["default_joint_angles"] = wp.to_torch(robot.data.default_joint_pos)[0].detach().cpu().numpy()
     params["joint_names_isaac"] = robot.data.joint_names
 
     # Build valid initial condition vectors (base first, then joints in joint_names order)
-    root_pos = robot.data.root_pos_w[0]        # (3,)
-    root_quat = robot.data.root_quat_w[0]      # (4,) w,x,y,z
-    root_lin_vel = robot.data.root_lin_vel_w[0] # (3,)
-    root_ang_vel = robot.data.root_ang_vel_w[0] # (3,)
-    joint_pos = robot.data.joint_pos[0]         # (num_joints,)
-    joint_vel = robot.data.joint_vel[0]         # (num_joints,)
+    root_pos = wp.to_torch(robot.data.root_pos_w)[0]        # (3,)
+    root_quat = wp.to_torch(robot.data.root_quat_w)[0]      # (4,) x,y,z,w
+    root_lin_vel = wp.to_torch(robot.data.root_lin_vel_w)[0] # (3,)
+    root_ang_vel = wp.to_torch(robot.data.root_ang_vel_w)[0] # (3,)
+    joint_pos = wp.to_torch(robot.data.joint_pos)[0]         # (num_joints,)
+    joint_vel = wp.to_torch(robot.data.joint_vel)[0]         # (num_joints,)
 
     params["valid_ic_pos"] = torch.cat([root_pos, root_quat, joint_pos]).detach().cpu().numpy()
     params["valid_ic_vel"] = torch.cat([root_lin_vel, root_ang_vel, joint_vel]).detach().cpu().numpy()
@@ -162,11 +163,11 @@ def export_policy_parameters(env, obs, actions, save_dir):
         except (AttributeError, KeyError, ValueError) as e:
             print(f"[WARNING] Could not extract base gains from config: {e}")
             # Fall back to current values if config extraction fails
-            params["kp"] = robot.data.joint_stiffness[0].detach().cpu().numpy()
-            params["kd"] = robot.data.joint_damping[0].detach().cpu().numpy()
+            params["kp"] = wp.to_torch(robot.data.joint_stiffness)[0].detach().cpu().numpy()
+            params["kd"] = wp.to_torch(robot.data.joint_damping)[0].detach().cpu().numpy()
     else:
-        params["kp"] = robot.data.joint_stiffness[0].detach().cpu().numpy()
-        params["kd"] = robot.data.joint_damping[0].detach().cpu().numpy()
+        params["kp"] = wp.to_torch(robot.data.joint_stiffness)[0].detach().cpu().numpy()
+        params["kd"] = wp.to_torch(robot.data.joint_damping)[0].detach().cpu().numpy()
 
     # Custom YAML representer for lists to use flow style for numerical lists
     class FlowStyleList(list):

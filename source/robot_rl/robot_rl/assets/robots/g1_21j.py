@@ -25,7 +25,9 @@ ROBOT_ASSETS = "robot_assets/g1"
 # TODO: Fix warnings about waist_roll_link and yaw_link inertia and mass
 G1_CFG = ArticulationCfg(
     spawn=sim_utils.UsdFileCfg(
-        usd_path=f"{ROBOT_ASSETS}/g1_21j/g1_21j_default.usd",
+        usd_path="/home/zolkin/AmberLab/Project-Isaac-RL/robot-rl/robot_rl/robot_assets/g1/g1_21j/g1_21j_merged/g1_21j_merged.usda",
+        # usd_path=f"/home/zolkin/AmberLab/Project-Isaac-RL/robot-rl/robot_rl/robot_assets/g1/g1_21j/isaac_converter/g1_21j_merged/g1_21j_merged.usda",
+        # usd_path=f"{ROBOT_ASSETS}/g1_21j/g1_21j_merged/g1_21j_merged_flat.usda",
         activate_contact_sensors=True,
         rigid_props=sim_utils.RigidBodyPropertiesCfg(
             disable_gravity=False,
@@ -38,7 +40,6 @@ G1_CFG = ArticulationCfg(
         ),
         articulation_props=sim_utils.ArticulationRootPropertiesCfg(
             enabled_self_collisions=True,
-            # enabled_self_collisions=False,
             solver_position_iteration_count=8, solver_velocity_iteration_count=4
         ),
         collision_props=sim_utils.CollisionPropertiesCfg(contact_offset=0.01, rest_offset=0.0),
@@ -46,7 +47,7 @@ G1_CFG = ArticulationCfg(
     init_state=ArticulationCfg.InitialStateCfg(
         # Bend up
         # pos=(0.0, 0.0, 0.62), #0.63),
-        # rot=(0.73, 0.0, 0.67, 0.0),
+        # rot=(0.0, 0.67, 0.0, 0.73),  # XYZW format
 
         # Standing
         pos=(0.0, 0.0, 0.785),

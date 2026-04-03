@@ -1,16 +1,14 @@
 from isaaclab.managers import CommandTermCfg
 from isaaclab.utils import configclass
 
-from .trajectory_cmd import TrajectoryCommand
-
 
 @configclass
 class TrajectoryCommandCfg(CommandTermCfg):
-    """
-    Configuration for trajectory commands.
-    """
+    """Configuration for trajectory commands."""
 
-    class_type: type = TrajectoryCommand
+    class_type: type | str = (
+        "robot_rl.tasks.manager_based.robot_rl.mdp.commands.traj_tracking.trajectory_cmd:TrajectoryCommand"
+    )
     asset_name: str = "robot"
     contact_bodies: list[str] = None
     manager_type: str = ""

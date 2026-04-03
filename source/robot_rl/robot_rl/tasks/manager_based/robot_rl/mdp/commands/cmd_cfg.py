@@ -1,4 +1,3 @@
-from .hlip_cmd import HLIPCommandTerm
 from isaaclab.utils import configclass
 from isaaclab.managers import CommandTermCfg
 from isaaclab.markers import VisualizationMarkersCfg
@@ -45,7 +44,7 @@ class HLIPCommandCfg(CommandTermCfg):
     """
     Configuration for the HLIPCommandTerm.
     """
-    class_type: type = HLIPCommandTerm
+    class_type: type | str = "{DIR}.hlip_cmd:HLIPCommandTerm"
     asset_name: str = "robot"
     yaw_idx: list[int] = [5,11]
     T_ds: float = 0.0          # double support duration (s)

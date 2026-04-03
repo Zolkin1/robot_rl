@@ -1,7 +1,14 @@
+from __future__ import annotations
+
 import torch
-from isaaclab.assets import Articulation
+import warp as wp
+from typing import TYPE_CHECKING
+
 from isaaclab.managers import SceneEntityCfg
 from isaaclab.utils.math import euler_xyz_from_quat, wrap_to_pi
+
+if TYPE_CHECKING:
+    from isaaclab.assets import Articulation
 
 def no_progress(env, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")) -> torch.Tensor:
     """
@@ -12,7 +19,7 @@ def no_progress(env, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")) -> tor
     command = env.command_manager.get_command("base_velocity")
 
     # Distance traveled from starting point
-    root_pos = asset.data.root_pos_w[:, :2]
+    root_pos = wp.to_torch(asset.data.root_pos_w)[:, :2]
     origin = env.scene.env_origins[:, :2]
     distance = torch.norm(root_pos - origin, dim=1)
 
@@ -45,7 +52,7 @@ def base_orientation(env, cmd_name: str, roll_limit_deg: float = 30.0, pitch_lim
     roll_idx = output_names.index(f"{base_link}:ori_x")
 
     # Get base orientation in Euler angles
-    root_quat = asset.data.root_quat_w  # [num_envs, 4]
+    root_quat = wp.to_torch(asset.data.root_quat_w)  # [num_envs, 4]
     root_euler = euler_xyz_from_quat(root_quat, wrap_to_2pi=False)  # [num_envs, 3]
 
     roll_error = root_euler[0][:] - ref_traj[:, roll_idx]

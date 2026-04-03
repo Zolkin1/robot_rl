@@ -3,12 +3,14 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Literal
 
 import torch
+import warp as wp
 
-from isaaclab.assets import Articulation, RigidObject
 from isaaclab.managers import EventTermCfg, ManagerTermBase, SceneEntityCfg
 from isaaclab.envs.mdp.events import _validate_scale_range, _randomize_prop_by_op
+from isaaclab.envs.mdp.events import randomize_rigid_body_material as _randomize_rigid_body_material_base
 
 if TYPE_CHECKING:
+    from isaaclab.assets import Articulation, RigidObject
     from isaaclab.envs import ManagerBasedEnv
 
 class randomize_joint_parameters_multi_friction(ManagerTermBase):
@@ -85,7 +87,7 @@ class randomize_joint_parameters_multi_friction(ManagerTermBase):
         # joint friction coefficient
         if static_friction_distribution_params and dynamic_friction_distribution_params and viscous_friction_distribution_params is not None:
             friction_coeff = _randomize_prop_by_op(
-                self.asset.data.default_joint_friction_coeff.clone(),
+                wp.to_torch(self.asset.data.default_joint_friction_coeff).clone(),
                 static_friction_distribution_params,
                 env_ids,
                 joint_ids,
@@ -100,44 +102,40 @@ class randomize_joint_parameters_multi_friction(ManagerTermBase):
             static_friction_coeff = friction_coeff[env_ids[:, None], joint_ids]
 
             # if isaacsim version is lower than 5.0.0 we can set only the static friction coefficient
-            major_version = int(env.sim.get_version()[0])
-            if major_version >= 5:
-                # Randomize raw tensors
-                dynamic_friction_coeff = _randomize_prop_by_op(
-                    self.asset.data.default_joint_dynamic_friction_coeff.clone(),
-                    dynamic_friction_distribution_params,
-                    env_ids,
-                    joint_ids,
-                    operation=operation,
-                    distribution=distribution,
-                )
 
-                viscous_friction_coeff = _randomize_prop_by_op(
-                    self.asset.data.default_joint_viscous_friction_coeff.clone(),
-                    viscous_friction_distribution_params,
-                    env_ids,
-                    joint_ids,
-                    operation=operation,
-                    distribution=distribution,
-                )
+            # Randomize raw tensors
+            dynamic_friction_coeff = _randomize_prop_by_op(
+                wp.to_torch(self.asset.data.default_joint_dynamic_friction_coeff).clone(),
+                dynamic_friction_distribution_params,
+                env_ids,
+                joint_ids,
+                operation=operation,
+                distribution=distribution,
+            )
 
-                # Clamp to non-negative
-                dynamic_friction_coeff = torch.clamp(dynamic_friction_coeff, min=0.0)
-                viscous_friction_coeff = torch.clamp(viscous_friction_coeff, min=0.0)
+            viscous_friction_coeff = _randomize_prop_by_op(
+                wp.to_torch(self.asset.data.default_joint_viscous_friction_coeff).clone(),
+                viscous_friction_distribution_params,
+                env_ids,
+                joint_ids,
+                operation=operation,
+                distribution=distribution,
+            )
 
-                # Ensure dynamic ≤ static (same shape before indexing)
-                dynamic_friction_coeff = torch.minimum(dynamic_friction_coeff, friction_coeff)
+            # Clamp to non-negative
+            dynamic_friction_coeff = torch.clamp(dynamic_friction_coeff, min=0.0)
+            viscous_friction_coeff = torch.clamp(viscous_friction_coeff, min=0.0)
 
-                # Index once at the end
-                dynamic_friction_coeff = dynamic_friction_coeff[env_ids[:, None], joint_ids]
-                viscous_friction_coeff = viscous_friction_coeff[env_ids[:, None], joint_ids]
-            else:
-                # For versions < 5.0.0, we do not set these values
-                dynamic_friction_coeff = None
-                viscous_friction_coeff = None
+            # Ensure dynamic ≤ static (same shape before indexing)
+            dynamic_friction_coeff = torch.minimum(dynamic_friction_coeff, friction_coeff)
+
+            # Index once at the end
+            dynamic_friction_coeff = dynamic_friction_coeff[env_ids[:, None], joint_ids]
+            viscous_friction_coeff = viscous_friction_coeff[env_ids[:, None], joint_ids]
+
 
             # Single write call for all versions
-            self.asset.write_joint_friction_coefficient_to_sim(
+            self.asset.write_joint_friction_coefficient_to_sim_index(
                 joint_friction_coeff=static_friction_coeff,
                 joint_dynamic_friction_coeff=dynamic_friction_coeff,
                 joint_viscous_friction_coeff=viscous_friction_coeff,
@@ -148,20 +146,20 @@ class randomize_joint_parameters_multi_friction(ManagerTermBase):
         # joint armature
         if armature_distribution_params is not None:
             armature = _randomize_prop_by_op(
-                self.asset.data.default_joint_armature.clone(),
+                wp.to_torch(self.asset.data.default_joint_armature).clone(),
                 armature_distribution_params,
                 env_ids,
                 joint_ids,
                 operation=operation,
                 distribution=distribution,
             )
-            self.asset.write_joint_armature_to_sim(
+            self.asset.write_joint_armature_to_sim_index(
                 armature[env_ids[:, None], joint_ids], joint_ids=joint_ids, env_ids=env_ids
             )
 
         # joint position limits
         if lower_limit_distribution_params is not None or upper_limit_distribution_params is not None:
-            joint_pos_limits = self.asset.data.default_joint_pos_limits.clone()
+            joint_pos_limits = wp.to_torch(self.asset.data.default_joint_pos_limits).clone()
             # -- randomize the lower limits
             if lower_limit_distribution_params is not None:
                 joint_pos_limits[..., 0] = _randomize_prop_by_op(
@@ -191,7 +189,7 @@ class randomize_joint_parameters_multi_friction(ManagerTermBase):
                     " than upper joint limits. Please check the distribution parameters for the joint position limits."
                 )
             # set the position limits into the physics simulation
-            self.asset.write_joint_position_limit_to_sim(
+            self.asset.write_joint_position_limit_to_sim_index(
                 joint_pos_limits, joint_ids=joint_ids, env_ids=env_ids, warn_limit_violation=False
             )
 
@@ -210,7 +208,7 @@ def randomize_joint_default_pos(
     asset: Articulation = env.scene[asset_cfg.name]
 
     # save nominal value for export
-    asset.data.default_joint_pos_nominal = torch.clone(asset.data.default_joint_pos[0])
+    asset.data.default_joint_pos_nominal = wp.to_torch(asset.data.default_joint_pos)[0].clone()
 
     # resolve environment ids
     if env_ids is None:
@@ -223,13 +221,47 @@ def randomize_joint_default_pos(
         joint_ids = torch.tensor(asset_cfg.joint_ids, dtype=torch.int, device=asset.device)
 
     if pos_distribution_params is not None:
-        pos = asset.data.default_joint_pos.to(asset.device).clone()
+        pos = wp.to_torch(asset.data.default_joint_pos).to(asset.device).clone()
         pos = _randomize_prop_by_op(
             pos, pos_distribution_params, env_ids, joint_ids, operation=operation, distribution=distribution
         )[env_ids][:, joint_ids]
 
         if env_ids != slice(None) and joint_ids != slice(None):
             env_ids = env_ids[:, None]
-        asset.data.default_joint_pos[env_ids, joint_ids] = pos
+        wp.to_torch(asset.data.default_joint_pos)[env_ids, joint_ids] = pos
         # update the offset in action since it is not updated automatically
         env.action_manager.get_term("joint_pos")._offset[env_ids, joint_ids] = pos
+
+##
+## NOTE: This is a fix for a bug in IsaacLab where they don't handle the types correctly.
+##
+class randomize_rigid_body_material(_randomize_rigid_body_material_base):
+    """Wrapper around IsaacLab's randomize_rigid_body_material that fixes env_ids dtype.
+
+    IsaacLab has a bug where env_ids is not cast to int32 before being passed to
+    warp's from_torch, which fails when env_ids is int64.
+    """
+
+    def __call__(
+        self,
+        env: ManagerBasedEnv,
+        env_ids: torch.Tensor | None,
+        static_friction_range: tuple[float, float],
+        dynamic_friction_range: tuple[float, float],
+        restitution_range: tuple[float, float],
+        num_buckets: int,
+        asset_cfg: SceneEntityCfg,
+        make_consistent: bool = False,
+    ):
+        """Cast env_ids to int32 before calling the parent implementation."""
+        if env_ids is not None:
+            env_ids = env_ids.to(dtype=torch.int32)
+        super().__call__(
+            env, env_ids,
+            static_friction_range=static_friction_range,
+            dynamic_friction_range=dynamic_friction_range,
+            restitution_range=restitution_range,
+            num_buckets=num_buckets,
+            asset_cfg=asset_cfg,
+            make_consistent=make_consistent,
+        )
