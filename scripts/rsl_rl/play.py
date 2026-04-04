@@ -129,12 +129,9 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         env = gym.make(args_cli.task, cfg=env_cfg, render_mode="rgb_array" if args_cli.video else None)
 
         # --- DEBUG: contact sensor ---
-        _unwrapped = env.unwrapped if hasattr(env, "unwrapped") else env
-        if "left_thigh_contact" in _unwrapped.scene.sensors:
-            _cs = _unwrapped.scene.sensors["left_thigh_contact"]
-            print("=== CONTACT SENSOR DEBUG ===")
-            print("Body names:", _cs.body_names)
-            print("Num sensors:", _cs.num_sensors)
+        for name, sensor in env.unwrapped.scene.sensors.items():
+            if hasattr(sensor, 'body_names'):
+                print(f"[{name}] bodies: {sensor.body_names}, num_bodies: {sensor.num_sensors}")
         # --- END DEBUG ---
 
         # convert to single-agent instance if required by the RL algorithm

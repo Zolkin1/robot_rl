@@ -17,6 +17,7 @@ That being said, we attempt to keep the repo as usable and documented as possibl
 - Try making the feet collisions square, not circles
 - Check the reset on ref as a good way to verify all the quats and reading in - looks pretty good to me
 - Delete all the unused rewards
+- Update all the transfer stuff to use the new folder structure
 
 ## Overview
 
