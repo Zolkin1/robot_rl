@@ -985,13 +985,16 @@ class TrajectoryCommand(CommandTerm):
                     ordered_vel_output_names.append(f"{body_name}:{btype}")
 
         # Add body outputs - then do orientations
+        # Enforce (x, y, z, w) order to match IsaacLab v3.0.0 quaternion convention.
+        ORI_ORDER = ["ori_x", "ori_y", "ori_z", "ori_w"]
         for body_name in body_names_list:
-            for btype in body_type[body_name]:
-                if "ori" in btype:
-                    ordered_pos_output_names.append(f"{body_name}:{btype}")
-                    # Exclude ori_w from velocity output names
-                    if "ori_w" not in btype:
-                        ordered_vel_output_names.append(f"{body_name}:{btype}")
+            ori_axes = [b for b in body_type[body_name] if "ori" in b]
+            ori_axes.sort(key=lambda a: ORI_ORDER.index(a) if a in ORI_ORDER else 0)
+            for btype in ori_axes:
+                ordered_pos_output_names.append(f"{body_name}:{btype}")
+                # Exclude ori_w from velocity output names
+                if "ori_w" not in btype:
+                    ordered_vel_output_names.append(f"{body_name}:{btype}")
 
         # Build body_type_list for bodies
         for body_name in body_names_list:

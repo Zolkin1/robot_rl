@@ -17,6 +17,7 @@ from .symmetry_functions import (
 )
 
 
+# TODO: Go through this for RSL RL 5.0
 @configclass
 class PPORunnerCfg(RslRlOnPolicyRunnerCfg):
     num_steps_per_env = 24
@@ -24,15 +25,18 @@ class PPORunnerCfg(RslRlOnPolicyRunnerCfg):
     save_interval = 200
     experiment_name = "g1"
     empirical_normalization = False
-    # check_for_nan = False
+    logger="wandb"
+    wandb_project = "robot_rl"
     actor = RslRlMLPModelCfg(
         hidden_dims=[512, 256, 128],
         activation="elu",
-        distribution_cfg=RslRlMLPModelCfg.GaussianDistributionCfg(init_std=1.0),
+        distribution_cfg=RslRlMLPModelCfg.GaussianDistributionCfg(init_std=1.0, std_type="log"),
+        obs_normalization=False,
     )
     critic = RslRlMLPModelCfg(
         hidden_dims=[512, 256, 128],
         activation="elu",
+        obs_normalization=False,
     )
     algorithm = RslRlPpoAlgorithmCfg(
         value_loss_coef=1.0,
@@ -51,7 +55,7 @@ class PPORunnerCfg(RslRlOnPolicyRunnerCfg):
     resume = False
     resume_path = None
     obs_groups = {
-        "policy": ["policy"],
+        "actor": ["policy"],
         "critic": ["critic"],
     }
 

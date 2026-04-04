@@ -75,7 +75,7 @@ def symmetric_data_augmentation_episodic(env, obs: tensordict.TensorDict, action
                 elif name == "root_quat":
                     obs_size = env.unwrapped.observation_manager.group_obs_term_dim[group][i][0]
                     obs_aug[group][batch_size:, obs_idx:obs_idx + obs_size] = (
-                        obs[group][:, obs_idx:obs_idx + obs_size] * torch.tensor([1, -1, 1, -1], device=device)
+                        obs[group][:, obs_idx:obs_idx + obs_size] * torch.tensor([-1, 1, -1, 1], device=device)
                     )
                 elif name == "contact_state":
                     obs_size = env.unwrapped.observation_manager.group_obs_term_dim[group][i][0]
@@ -176,7 +176,7 @@ def symmetric_data_augmentation_half_periodic(env, obs: tensordict.TensorDict, a
                 elif name == "root_quat":
                     obs_size = env.unwrapped.observation_manager.group_obs_term_dim[group][i][0]
                     obs_aug[group][batch_size:, obs_idx:obs_idx + obs_size] = (
-                        obs[group][:, obs_idx:obs_idx + obs_size] * torch.tensor([1, -1, 1, -1], device=device)
+                        obs[group][:, obs_idx:obs_idx + obs_size] * torch.tensor([-1, 1, -1, 1], device=device)
                     )
                 elif name == "contact_state":
                     obs_size = env.unwrapped.observation_manager.group_obs_term_dim[group][i][0]

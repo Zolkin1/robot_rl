@@ -9,7 +9,7 @@ import torch
 import warp as wp
 import math
 import re
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Sequence
 
 from isaaclab.managers import SceneEntityCfg
 from isaaclab.sensors import ContactSensor
@@ -151,6 +151,17 @@ def contact_no_vel(env, sensor_cfg: SceneEntityCfg, asset_cfg: SceneEntityCfg = 
     penalize = torch.square(body_vel[:,:,:3])
     return torch.sum(penalize, dim=(1,2))
 
+def multiple_undesired_contacts(env: ManagerBasedRLEnv, threshold: float, sensor_cfgs: Sequence[SceneEntityCfg]) -> torch.Tensor:
+    """Penalize undesired contacts as the number of violations above a threshold, aggregated across multiple sensors."""
+    total = torch.zeros(env.num_envs, dtype=torch.float, device=env.device)
+    for sensor_cfg in sensor_cfgs:
+        contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
+        net_contact_forces = wp.to_torch(contact_sensor.data.net_forces_w_history)
+        is_contact = (
+            torch.max(torch.linalg.norm(net_contact_forces[:, :, sensor_cfg.body_ids], dim=-1), dim=1)[0] > threshold
+        )
+        total += torch.sum(is_contact, dim=1)
+    return total
 
 def holonomic_constraint_vel(
     env: ManagerBasedRLEnv,
@@ -406,6 +417,7 @@ def ankle_roll_zero(
     
     return reward
 
+# TODO: Come back to this and make sure it is implemented correctly without hard coded stuff
 def torque_limits(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")) -> torch.Tensor:
     """Penalize applied torques if they cross the limits.
 

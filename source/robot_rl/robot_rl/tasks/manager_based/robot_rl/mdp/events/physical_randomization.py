@@ -101,44 +101,40 @@ class randomize_joint_parameters_multi_friction(ManagerTermBase):
             # Always set static friction (indexed once)
             static_friction_coeff = friction_coeff[env_ids[:, None], joint_ids]
 
-            # if isaacsim version is lower than 5.0.0 we can set only the static friction coefficient
-
-            # Randomize raw tensors
-            dynamic_friction_coeff = _randomize_prop_by_op(
-                wp.to_torch(self.asset.data.default_joint_dynamic_friction_coeff).clone(),
-                dynamic_friction_distribution_params,
-                env_ids,
-                joint_ids,
-                operation=operation,
-                distribution=distribution,
-            )
-
-            viscous_friction_coeff = _randomize_prop_by_op(
-                wp.to_torch(self.asset.data.default_joint_viscous_friction_coeff).clone(),
-                viscous_friction_distribution_params,
-                env_ids,
-                joint_ids,
-                operation=operation,
-                distribution=distribution,
-            )
-
-            # Clamp to non-negative
-            dynamic_friction_coeff = torch.clamp(dynamic_friction_coeff, min=0.0)
-            viscous_friction_coeff = torch.clamp(viscous_friction_coeff, min=0.0)
-
-            # Ensure dynamic ≤ static (same shape before indexing)
-            dynamic_friction_coeff = torch.minimum(dynamic_friction_coeff, friction_coeff)
-
-            # Index once at the end
-            dynamic_friction_coeff = dynamic_friction_coeff[env_ids[:, None], joint_ids]
-            viscous_friction_coeff = viscous_friction_coeff[env_ids[:, None], joint_ids]
-
+            # # TODO: Add back in the dynamic and viscous friction when the feature is added back.
+            # # Randomize raw tensors
+            # dynamic_friction_coeff = _randomize_prop_by_op(
+            #     wp.to_torch(self.asset.data.default_joint_dynamic_friction_coeff).clone(),
+            #     dynamic_friction_distribution_params,
+            #     env_ids,
+            #     joint_ids,
+            #     operation=operation,
+            #     distribution=distribution,
+            # )
+            #
+            # viscous_friction_coeff = _randomize_prop_by_op(
+            #     wp.to_torch(self.asset.data.default_joint_viscous_friction_coeff).clone(),
+            #     viscous_friction_distribution_params,
+            #     env_ids,
+            #     joint_ids,
+            #     operation=operation,
+            #     distribution=distribution,
+            # )
+            #
+            # # Clamp to non-negative
+            # dynamic_friction_coeff = torch.clamp(dynamic_friction_coeff, min=0.0)
+            # viscous_friction_coeff = torch.clamp(viscous_friction_coeff, min=0.0)
+            #
+            # # Ensure dynamic ≤ static (same shape before indexing)
+            # dynamic_friction_coeff = torch.minimum(dynamic_friction_coeff, friction_coeff)
+            #
+            # # Index once at the end
+            # dynamic_friction_coeff = dynamic_friction_coeff[env_ids[:, None], joint_ids]
+            # viscous_friction_coeff = viscous_friction_coeff[env_ids[:, None], joint_ids]
 
             # Single write call for all versions
             self.asset.write_joint_friction_coefficient_to_sim_index(
                 joint_friction_coeff=static_friction_coeff,
-                joint_dynamic_friction_coeff=dynamic_friction_coeff,
-                joint_viscous_friction_coeff=viscous_friction_coeff,
                 joint_ids=joint_ids,
                 env_ids=env_ids,
             )
@@ -154,7 +150,7 @@ class randomize_joint_parameters_multi_friction(ManagerTermBase):
                 distribution=distribution,
             )
             self.asset.write_joint_armature_to_sim_index(
-                armature[env_ids[:, None], joint_ids], joint_ids=joint_ids, env_ids=env_ids
+                armature=armature[env_ids[:, None], joint_ids], joint_ids=joint_ids, env_ids=env_ids
             )
 
         # joint position limits

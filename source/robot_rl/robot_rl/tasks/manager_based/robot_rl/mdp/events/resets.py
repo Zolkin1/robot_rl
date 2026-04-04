@@ -120,7 +120,7 @@ def reset_on_reference(
 
     # Extract base frame position and orientation from outputs
     base_pos_rel = y_sampled[:, pos_indices]  # Shape: [num_env, 3]
-    base_ori_quat_w = y_sampled[:, ori_indices]  # Shape: [num_env, 3] - roll, pitch, yaw
+    base_ori_quat_w = y_sampled[:, ori_indices]  # Shape: [num_env, 4] - quaternion (x, y, z, w)
 
     # Add the ground->ankle_roll_link offset
     base_pos_rel[:, 2] += base_z_offset
@@ -128,7 +128,7 @@ def reset_on_reference(
     # Compute world-frame base pose
     base_pos_w = base_pos_rel + env.scene.env_origins[ref_ids]
 
-    # Build pose tensor: [x, y, z, qw, qx, qy, qz]
+    # Build pose tensor: [x, y, z, qx, qy, qz, qw]
     base_pose = torch.cat([base_pos_w, base_ori_quat_w], dim=-1)
 
     # Extract Base Vel
@@ -143,9 +143,10 @@ def reset_on_reference(
     base_vel = torch.cat([dy_sampled[:, lin_vel_indices], dy_sampled[:, ang_vel_indices]], dim=-1) #torch.zeros(num_env, 6, device=env.device)
 
 
-    # Set the reference frame position
+    # Set the reference frame to env origin with identity quaternion (x,y,z,w)
     cmd.ref_poses[ref_ids, :3] = env.scene.env_origins[ref_ids]
-    cmd.ref_poses[ref_ids, 3:] *= 0
+    cmd.ref_poses[ref_ids, 3:6] = 0.0
+    cmd.ref_poses[ref_ids, 6] = 1.0
 
     # Extract joint positions from trajectory output
     # Build a mapping from robot joint indices to trajectory output indices
@@ -173,7 +174,7 @@ def reset_on_reference(
 
     # Write states to simulation
     asset.write_root_pose_to_sim_index(root_pose=base_pose, env_ids=ref_ids)
-    asset.write_root_link_velocity_to_sim_index(root_velocity=base_vel, env_ids=ref_ids)
+    asset.write_root_link_velocity_to_sim_index(root_velocity=base_vel, env_ids=ref_ids)    # TODO: Investigate - I've got a play result where the x velocity doesn't match the reference (y and z look good)
     asset.write_joint_position_to_sim_index(position=joint_pos, env_ids=ref_ids)
     asset.write_joint_velocity_to_sim_index(velocity=joint_vel, env_ids=ref_ids)
 
@@ -193,6 +194,10 @@ def reset_on_reference(
     #     cmd_vel = command_clone #command
     #
     #     # Pretty print the output names, desired values, and measured values
+    #     if len(ref_ids) > 1 or ref_ids[0] == 1:
+    #         env_idx = 1
+    #     else:
+    #         env_idx = 0
     #     _pretty_print_reset_state(
     #         cmd.ordered_pos_output_names,
     #         cmd.ordered_vel_output_names,
@@ -206,7 +211,7 @@ def reset_on_reference(
     #         cmd.clf.v_subgroups,
     #         cmd_vel,
     #         cmd.clf,
-    #         env_idx=0,
+    #         env_idx=env_idx, #ref_ids[0].item(),
     #     )
 
 
@@ -290,7 +295,7 @@ def _pretty_print_reset_state(
     # Header
     print(f"\n{'='*94}")
     print(f"Reset State for Environment {env_idx}")
-    print(f"Time: {times[env_idx].item():.4f} s")
+    print(f"Time: {times[0].item():.4f} s")
     print(f"Commanded Velocity: {cmd_vel[env_idx].tolist()} m/s")
     print(f"{'='*94}")
 

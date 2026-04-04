@@ -94,6 +94,9 @@ if version.parse(installed_version) < version.parse(RSL_RL_VERSION):
 def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
     """Train with RSL-RL agent."""
     with launch_simulation(env_cfg, args_cli):
+        # Patch activate_contact_sensors for recursive traversal (must be after SimulationApp)
+        import robot_rl.sensors._recursive_contact_sensor_impl  # noqa: F401
+
         # override configurations with non-hydra CLI arguments
         agent_cfg = cli_args.update_rsl_rl_cfg(agent_cfg, args_cli)
         env_cfg.scene.num_envs = args_cli.num_envs if args_cli.num_envs is not None else env_cfg.scene.num_envs

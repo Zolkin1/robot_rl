@@ -21,7 +21,7 @@ transfer holds code to transfer the RL code to mujoco (in transfer/sim) and to t
 
 # General Guidelines
 - Don't care for backwards compatibility.
-- Use the isaac_rl_v2 conda env.
+- Use uv virtual environment env_isaaaclab for running all related python code.
 - When writing a function, always provide a doc string.
 - In general, we should always use type hints where it is idiomatic.
 - In python variable names should be snake_case and function should be snake_case and classes should be UpperCamelCase.

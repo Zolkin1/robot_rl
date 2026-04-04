@@ -18,7 +18,11 @@ from isaaclab.terrains import TerrainImporterCfg
 from isaaclab.assets import ArticulationCfg, AssetBaseCfg
 import isaaclab.sim as sim_utils
 from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR, ISAACLAB_NUCLEUS_DIR
-from isaaclab.sensors import ContactSensorCfg
+from isaaclab_tasks.utils import PresetCfg
+from isaaclab_newton.sensors import ContactSensorCfg as NewtonContactSensorCfg
+from isaaclab_physx.sensors import ContactSensorCfg as PhysXContactSensorCfg
+
+from robot_rl.sensors import RecursiveContactSensorCfg
 from isaaclab.envs import ManagerBasedRLEnvCfg
 from isaaclab.managers import TerminationTermCfg as DoneTerm
 
@@ -45,6 +49,16 @@ class G1ClfTrackingActionsCfg:
 
     joint_pos = mdp.JointPositionActionCfg(asset_name="robot", joint_names=[".*"], scale=G1_ACTION_SCALE, use_default_offset=True)
 
+
+@configclass
+class ClfTrackingBaseEnvContactSensorCfg(PresetCfg):
+
+    def __init__(self, prim_path):
+        self.default = PhysXContactSensorCfg(prim_path=prim_path, history_length=3,
+                                        track_air_time=True)
+        self.newton = NewtonContactSensorCfg(prim_path=prim_path, history_length=3,
+                                        track_air_time=True)
+        self.physx = self.default
 
 @configclass
 class G1ClfTrackingSceneCfg(InteractiveSceneCfg):
@@ -84,7 +98,13 @@ class G1ClfTrackingSceneCfg(InteractiveSceneCfg):
     #     mesh_prim_paths=["/World/ground"],
     # )
 
-    contact_forces = ContactSensorCfg(prim_path="{ENV_REGEX_NS}/Robot/Geometry/.*", history_length=3, track_air_time=True)
+    left_thigh_contact = ClfTrackingBaseEnvContactSensorCfg("{ENV_REGEX_NS}/Robot/Geometry/pelvis_link/left_hip_pitch_link/left_hip_roll_link/.*")
+    right_thigh_contact = ClfTrackingBaseEnvContactSensorCfg("{ENV_REGEX_NS}/Robot/Geometry/pelvis_link/right_hip_pitch_link/right_hip_roll_link/.*")
+    torso_contact = ClfTrackingBaseEnvContactSensorCfg("{ENV_REGEX_NS}/Robot/Geometry/pelvis_link/waist_yaw_link/.*")
+    left_elbow_contact = ClfTrackingBaseEnvContactSensorCfg("{ENV_REGEX_NS}/Robot/Geometry/pelvis_link/waist_yaw_link/left_shoulder_pitch_link/left_shoulder_roll_link/left_shoulder_yaw_link/left_elbow_link/.*")
+    right_elbow_contact = ClfTrackingBaseEnvContactSensorCfg("{ENV_REGEX_NS}/Robot/Geometry/pelvis_link/waist_yaw_link/right_shoulder_pitch_link/right_shoulder_roll_link/right_shoulder_yaw_link/right_elbow_link/.*")
+
+    #RecursiveContactSensorCfg(prim_path="{ENV_REGEX_NS}/Robot/Geometry/.*", history_length=3, track_air_time=True)
 
     # lights
     sky_light = AssetBaseCfg(
@@ -208,34 +228,32 @@ class G1ClfTrackingEventsCfg:
         params={"command_name": "traj_ref",
                 "base_frame_name": "pelvis_link",
                 "conditioner_command_name": "base_velocity",
-                "special_val": 1.2,     # Sometimes start on the running traj
-                "rel_envs_on_ref": 0.5,
-                "joint_add_range": [-0.1, 0.1]}
+                "special_val": 0.0,     # Sometimes start on the running traj
+                "rel_envs_on_special": 0.0,
+                "rel_envs_on_ref": 1.0, #0.5,
+                "joint_add_range": [0.0, 0.0]} #[-0.1, 0.1]}
     )
 
-    #TODO: Consider moving the common stuff to another cfg
+    # As of Isaac v3.0.0 beta there is no way to randomize dynamic and viscous friction that I can see.
+    # Randomize joint friction
+    joint_friction_params = EventTerm(
+        func=mdp.randomize_joint_parameters_multi_friction,
+        mode="startup",
+        params={"asset_cfg": SceneEntityCfg("robot", joint_names=[".*"]),
+                "static_friction_distribution_params": (0.3, 1.6),
+                "dynamic_friction_distribution_params": (0.3, 1.2),
+                "viscous_friction_distribution_params": (0.01, 0.1),
+                "operation": "add"},
+    )
 
-    # TODO: I think there is a bug in this function with the new version of Isaac.
-    # # Randomize joint friction
-    # joint_friction_params = EventTerm(
-    #     func=mdp.randomize_joint_parameters_multi_friction,
-    #     mode="startup",
-    #     params={"asset_cfg": SceneEntityCfg("robot", joint_names=[".*"]),
-    #             "static_friction_distribution_params": (0.3, 1.6),
-    #             "dynamic_friction_distribution_params": (0.3, 1.2),
-    #             "viscous_friction_distribution_params": (0.01, 0.1),
-    #             "operation": "add"},
-    # )
-
-    # TODO: I think there is a bug in this function with the new version of Isaac.
-    # # Randomize armature
-    # joint_armature_params = EventTerm(
-    #     func=mdp.randomize_joint_parameters_multi_friction,
-    #     mode="startup",
-    #     params={"asset_cfg": SceneEntityCfg("robot", joint_names=[".*"]),
-    #             "armature_distribution_params": (0.95, 1.05),
-    #             "operation": "scale"},
-    # )
+    # Randomize armature
+    joint_armature_params = EventTerm(
+        func=mdp.randomize_joint_parameters_multi_friction,
+        mode="startup",
+        params={"asset_cfg": SceneEntityCfg("robot", joint_names=[".*"]),
+                "armature_distribution_params": (0.95, 1.05),
+                "operation": "scale"},
+    )
 
     # PD Gain randomization
     gain_randomization = EventTerm(
@@ -338,15 +356,14 @@ class G1ClfTrackingRewardCfg:
     # Undesired Contacts
     ##
     undesired_contacts = RewTerm(
-        func=mdp.undesired_contacts,
+        func=mdp.multiple_undesired_contacts,
         weight=-0.1,
         params={
-            "sensor_cfg": SceneEntityCfg(
-                "contact_forces",
-                body_names=[
-                    r"^(?!left_ankle_roll_link$)(?!right_ankle_roll_link$)(?!left_wrist_yaw_link$)(?!right_wrist_yaw_link$).+$"
-                ],
-            ),
+            "sensor_cfgs": [SceneEntityCfg("left_thigh_contact",),
+                            SceneEntityCfg("right_thigh_contact",),
+                            SceneEntityCfg("torso_contact",),
+                            SceneEntityCfg("left_elbow_contact",),
+                            SceneEntityCfg("right_elbow_contact",),],
             "threshold": 1.0,
         },
     )

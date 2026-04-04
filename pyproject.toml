@@ -1,4 +1,8 @@
 # pyproject.toml
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["robot_rl*"]
+
 [build-system]
 requires = ["setuptools>=61.0"] # Specifies the build tools needed
 build-backend = "setuptools.build_meta" # Specifies which build backend to use
