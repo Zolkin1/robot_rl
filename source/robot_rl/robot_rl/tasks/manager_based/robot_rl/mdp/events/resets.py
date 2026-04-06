@@ -20,7 +20,7 @@ def reset_on_reference(
         command_name: str,
         conditioner_command_name: str,
         base_frame_name: str,
-        base_z_offset: float = 0.03,
+        base_z_offset: float = 0.03,    # TODO: Need to handle this better, I think the blow up issue is related to this not being correct
         joint_add_range: tuple[float, float] = (0.0, 0.0),
         rel_envs_on_ref: float = 0.5,
         special_val: float = 1.0,
