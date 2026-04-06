@@ -61,14 +61,14 @@ onboard:
         - ros_parameter: timer_ctrl_setting
           timer_period_sec: 0.02    # 50 Hz
           callback_group: None
- # ----- High Level Controller ----- #
+# ----- High Level Controller ----- #
     - pkg: g1_control
       executable: high_level_control
       params:
         v_x_min: -0.75
-        v_x_max: 1.0
+        v_x_max: 0.75
         v_y_max: 0.0
-        w_z_max: 0.75
+        w_z_max: 1.0
         vel_increment: 0.1
         kp_yaw: 3.0
         kd_yaw: 0.1
@@ -83,6 +83,16 @@ onboard:
           topic: /obelisk/g1/high_level_ctrl
           history_depth: 10
           callback_group: None
+        - ros_parameter: pub_joy_feedback
+          topic: /obelisk/g1/joy_feedback
+          history_depth: 10
+        - ros_parameter: pub_odom_data
+          topic: /obelisk/g1/odom
+          history_depth: 10
+        - ros_parameter: pub_traj_data
+          topic: /obelisk/g1/traj_data
+          msg_type: PoseArray
+          history_depth: 10
       subscribers:
         # ----- Joint Encoder subscriber ----- #
         - ros_parameter: sub_joint_encoders
@@ -97,12 +107,18 @@ onboard:
           callback_group: None
         # ----- Odom subscriber ----- #
         - ros_parameter: sub_odom_setting
-          topic: /obelisk/g1/head_odom
+          topic: /Odometry #/obelisk/g1/head_odom
           history_depth: 10
           callback_group: None
         # ----- Unitree High Level subscriber ----- #
         - ros_parameter: sub_vel_cmd_setting
           topic: /obelisk/g1/unitree_high_level_ctrl
+          history_depth: 10
+          callback_group: None
+        # ----- Lidar IMU subscriber ----- #
+        - ros_parameter: sub_lidar_imu
+          topic: /livox/imu #/obelisk/g1/lidar_imu
+          msg_type: imu #ObkIMU
           history_depth: 10
           callback_group: None
       timers:
@@ -119,6 +135,7 @@ onboard:
 
         # Button mappings
         vel_cmd_yaw: 13  # RY
+
       # callback_groups:
       publishers:
       # ----- Execution FSM ----- #
@@ -163,7 +180,12 @@ onboard:
           callback_group: None
         - ros_parameter: sub_pelvis_imu
           topic: /obelisk/g1/pelvis_imu
-          msg_type: ObkIMU
+          msg_type: Imu #ObkIMU
+          history_depth: 10
+          callback_group: None
+        - ros_parameter: sub_odom
+          topic: /obelisk/g1/odom
+          msg_type: Odometry
           history_depth: 10
           callback_group: None
       timers:
