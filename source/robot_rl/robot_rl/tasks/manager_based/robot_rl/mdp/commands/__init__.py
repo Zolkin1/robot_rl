@@ -5,6 +5,4 @@
 
 """Command configurations for the environment."""
 
-from .gaitPeriodCfg import GaitPeriodCfg
-
 from .velocity_commands_cfg import VelocityTrackingCommandCfg
