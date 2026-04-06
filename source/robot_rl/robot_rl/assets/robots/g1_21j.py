@@ -21,11 +21,24 @@ DAMPING_7520_14 = 2.0 * DAMPING_RATIO * ARMATURE_7520_14 * NATURAL_FREQ
 DAMPING_7520_22 = 2.0 * DAMPING_RATIO * ARMATURE_7520_22 * NATURAL_FREQ
 DAMPING_4010 = 2.0 * DAMPING_RATIO * ARMATURE_4010 * NATURAL_FREQ
 
-ROBOT_ASSETS = "robot_assets/g1"
+import pathlib
+
+
+def _find_project_root() -> pathlib.Path:
+    """Walk up from this file until we find a directory containing 'robot_assets'."""
+    path = pathlib.Path(__file__).resolve().parent
+    while path != path.parent:
+        if (path / "robot_assets").is_dir():
+            return path
+        path = path.parent
+    raise FileNotFoundError("Could not find project root containing 'robot_assets'")
+
+
+ROBOT_ASSETS = str(_find_project_root() / "robot_assets" / "g1")
 # TODO: Fix warnings about waist_roll_link and yaw_link inertia and mass
 G1_CFG = ArticulationCfg(
     spawn=sim_utils.UsdFileCfg(
-        usd_path="{ROBOT_ASSETS}/g1_21j/g1_21j_merged/g1_21j_merged.usda",
+        usd_path=f"{ROBOT_ASSETS}/g1_21j/g1_21j_merged/g1_21j_merged.usda",
         # usd_path=f"{ROBOT_ASSETS}/g1_21j/g1_21j_merged/g1_21j_merged_flat.usda",
         activate_contact_sensors=True,
         rigid_props=sim_utils.RigidBodyPropertiesCfg(
