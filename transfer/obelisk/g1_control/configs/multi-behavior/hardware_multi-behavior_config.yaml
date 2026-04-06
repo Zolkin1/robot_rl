@@ -121,6 +121,11 @@ onboard:
           msg_type: imu #ObkIMU
           history_depth: 10
           callback_group: None
+        # ----- MPC Command Subscriber ----- #
+        - ros_parameter: sub_mpc_setting
+          topic: /mpc_command
+          msg_type: Twist
+          history_depth: 10
       timers:
         - ros_parameter: timer_ctrl_setting
           timer_period_sec: 0.05    # 20 Hz
@@ -421,7 +426,7 @@ onboard:
           # ---------- Pelvis IMU ---------- #
           - topic: /obelisk/g1/pelvis_imu
             dt: 0.001
-            msg_type: ObkImu
+            msg_type: Imu
             sensor_names:
               pelvis_imu_acc_sensor: accelerometer
               pelvis_imu_gyro_sensor: gyro

@@ -33,7 +33,7 @@ onboard:
           3,                  # y
           1,                  # b
         ]
-        # vel_thresholds: [1.0]
+        vel_thresholds: [1.0]
         START_IN_SIM: true
         init_behavior: "walking"
         log: true
@@ -119,10 +119,15 @@ onboard:
           callback_group: None
         # ----- Lidar IMU subscriber ----- #
         - ros_parameter: sub_lidar_imu
-          topic: /livox/imu #/obelisk/g1/lidar_imu
-          msg_type: imu #ObkIMU
+          topic: /obelisk/g1/lidar_imu
+          msg_type: Imu
           history_depth: 10
           callback_group: None
+        # ----- MPC Command Subscriber ----- #
+        - ros_parameter: sub_mpc_setting
+          topic: /mpc_command
+          msg_type: Twist
+          history_depth: 10
       timers:
         - ros_parameter: timer_ctrl_setting
           timer_period_sec: 0.05    # 20 Hz
@@ -330,6 +335,23 @@ onboard:
               pelvis_imu_acc_sensor: accelerometer
               pelvis_imu_gyro_sensor: gyro
               pelvis_imu_quat_sensor: framequat
+          # ---------- Head Lidar Odometry ---------- #
+          - topic: /obelisk/g1/head_odom
+            dt: 0.01
+            msg_type: Odometry
+            sensor_names:
+              head_lidar_pos_sensor: framepos
+              head_lidar_orientation_sensor: framequat
+              head_lidar_velocimeter: velocimeter
+              head_lidar_gyro: gyro
+          # ---------- Lidar IMU ---------- #
+          - topic: /obelisk/g1/lidar_imu
+            dt: 0.001
+            msg_type: Imu
+            sensor_names:
+              lidar_imu_acc_sensor: accelerometer
+              lidar_imu_gyro_sensor: gyro
+              lidar_imu_quat_sensor: framequat
   # --------------------------------- #
   # -------------- Viz -------------- #
   # --------------------------------- #
