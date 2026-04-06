@@ -54,14 +54,14 @@ class BehaviorManager:
             The currently active behavior name.
         """
         if (time - self.last_behavior_switch) > 0.1:
-            # if len(self.vel_thresholds) > 1:
-            #     for i in range(len(self.behavior_names)):
-            #         low = self.vel_thresholds[2 * i + 1]
-            #         high = self.vel_thresholds[2 * i]
-            #         if low <= cmd_vel[0] < high:
-            #             requested_behavior = self.behavior_names[i]
-            #             if requested_behavior != self.active_behavior and requested_behavior != self.pending_behavior:
-            #                 self.pending_behavior = requested_behavior
+            if len(self.vel_thresholds) > 1:
+                for i in range(len(self.behavior_names)):
+                    low = self.vel_thresholds[2 * i + 1]
+                    high = self.vel_thresholds[2 * i]
+                    if low <= cmd_vel[0] < high:
+                        requested_behavior = self.behavior_names[i]
+                        if requested_behavior != self.active_behavior and requested_behavior != self.pending_behavior:
+                            self.pending_behavior = requested_behavior
 
             for i, button in enumerate(self.behavior_buttons):
                 if joy_msg.buttons[button] == 1:
