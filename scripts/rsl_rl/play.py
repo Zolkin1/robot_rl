@@ -39,6 +39,7 @@ from isaaclab_tasks.utils.hydra import hydra_task_config
 import cli_args  # isort: skip
 from data_logger import DataLogger  # isort: skip
 from play_plots import run_plots, PLOT_REGISTRY  # isort: skip
+from export_parameters import export_policy_parameters  # isort: skip
 
 # PLACEHOLDER: Extension template (do not remove this comment)
 with contextlib.suppress(ImportError):
@@ -206,6 +207,12 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
 
         # reset environment
         obs = env.get_observations()
+
+        # Export policy parameters (YAML with joint info, gains, obs terms, etc.)
+        with torch.inference_mode():
+            actions = policy(obs)
+        export_policy_parameters(env, obs, actions, log_dir)
+
         timestep = 0
         # simulate environment
         try:

@@ -19,30 +19,6 @@ from simulation import Simulation
 
 from experiments.velocity_commands import speed_steps, smooth_ramp_running
 
-# Environment experiment names mapping (same as in train_policy.py)
-EXPERIMENT_NAMES = {
-    "vanilla": "vanilla",
-    "vanilla_ec": "vanilla",
-    "basic": "baseline",
-    "lip_clf": "lip",
-    "lip_clf_ec": "lip",
-    "lip_ref_play": "lip",
-
-    "walking_clf": "walking_clf",
-    "walking_clf_sym": "walking-clf-symmetric",
-    "walking_clf_ec": "walking_clf",
-
-    "running_clf": "running_clf",
-    "running_clf_sym": "running-clf-symmetric",
-
-    "waving_clf": "waving_clf",
-
-    "bow_forward_clf": "bow_forward_clf",
-    "bow_forward_clf_sym": "bow_forward-clf-symmetric",
-
-    "bend_up_clf_sym": "bend_up-clf-symmetric",
-}
-
 
 def find_latest_run(log_root_path):
     """Find the latest run directory in the given path."""
@@ -59,9 +35,8 @@ def find_latest_run(log_root_path):
 
 def main():
     parser = argparse.ArgumentParser(description="Run G1 robot in MuJoCo simulation with RL policy")
-    parser.add_argument("--env_type", type=str, required=True,
-                       choices=list(EXPERIMENT_NAMES.keys()),
-                       help="Type of environment (e.g., walking_clf, running_clf)")
+    parser.add_argument("--experiment", type=str, default="g1",
+                       help="Experiment name matching the folder under logs/rsl_rl/ (e.g., 'g1')")
     parser.add_argument("--load_run", type=str, required=False, default=None,
                        help="Specific run directory to load (e.g., '2025-11-17_16-15-56_running_testA'). If not specified, uses latest run.")
     parser.add_argument("--scene", type=str, default="basic_scene",
@@ -76,15 +51,13 @@ def main():
                        help="Directory for logging")
     args = parser.parse_args()
 
-    # Construct path to logs directory (same structure as play_policy.py)
+    # Construct path to logs directory (same structure as play.py)
     # Get the script directory (transfer/sim) and go up two levels to root
     script_dir = os.path.dirname(os.path.abspath(__file__))
     root_dir = os.path.dirname(os.path.dirname(script_dir))
 
-    # Build path: logs/g1_policies/{experiment_name}/{env_type}
-    experiment_name = EXPERIMENT_NAMES[args.env_type]
-    base_log_path = os.path.join(root_dir, "logs", "g1_policies", experiment_name)
-    log_root_path = os.path.join(base_log_path, args.env_type)
+    # Build path: logs/rsl_rl/{experiment}
+    log_root_path = os.path.join(root_dir, "logs", "rsl_rl", args.experiment)
 
     print(f"[INFO] Looking for policies in: {log_root_path}")
 
@@ -113,12 +86,12 @@ def main():
     # Check if files exist
     if not os.path.exists(policy_path):
         print(f"[ERROR] Policy file not found: {policy_path}")
-        print(f"[INFO] Make sure to run play_policy.py with --export_policy first")
+        print(f"[INFO] Make sure to run play.py first to export the policy")
         sys.exit(1)
 
     if not os.path.exists(param_path):
         print(f"[ERROR] Parameters file not found: {param_path}")
-        print(f"[INFO] Make sure to run play_policy.py to export parameters first")
+        print(f"[INFO] Make sure to run play.py first to export parameters")
         sys.exit(1)
 
     print(f"[INFO] Loading policy from: {policy_path}")
