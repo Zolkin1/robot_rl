@@ -8,12 +8,15 @@ onboard:
     - pkg: g1_control
       params:
         hf_policy_folders: [
+          # Bow forward
           "bow_forward_clf_sym/2026-01-09_11-32-45_T3_bowing_more_dr_new_traj",
+          
+          # Bend up
           # "bend_up_clf_sym/2026-01-15_09-13-23_T0_bend_up_ic",
           "bend_up_clf_sym/2026-01-16_11-20-58_T2_bend_up_random_base_height",
-          "walking_clf_old/hzd_clf_minimum_reward",
-          # "walking_clf_old/8_1_alpha_2",
-          # "walking_clf_old/yaw_modification",
+          
+          # Walking
+          "walking_clf_sym/2026-02-20_15-18-54_T0_walking_more_robustness_sym",
         ]
         hf_repo_ids: [
           "zolkin/robot_rl",
@@ -63,9 +66,9 @@ onboard:
       executable: high_level_control
       params:
         v_x_min: -0.75
-        v_x_max: 0.75
+        v_x_max: 1.0
         v_y_max: 0.0
-        w_z_max: 1.0
+        w_z_max: 0.75
         vel_increment: 0.1
         kp_yaw: 3.0
         kd_yaw: 0.1
