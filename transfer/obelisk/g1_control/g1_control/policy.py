@@ -147,7 +147,7 @@ class RLPolicy:
 
         # TODO: Fix when I have updated policies
         if self.get_skill_type() == "episodic":
-            time2 = max(time - 100000.0, 0)  # Adjust time offset if needed
+            time2 = time #max(time - 100000.0, 0)  # Adjust time offset if needed
         else:
             time2 = time
 

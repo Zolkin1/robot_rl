@@ -32,8 +32,9 @@ class BehaviorManager:
         for repo_id, policy_folder in zip(hf_repo_ids, hf_policy_folders):
             self.policies.append(RLPolicy(repo_id, policy_folder))
 
-        if len(self.vel_thresholds) != 0 and len(self.vel_thresholds) != 2*len(self.policies):
-            raise ValueError(f"Expected no velocity thresholds or length of {2*len(self.policies)}, got: {len(self.vel_thresholds)}")
+        # TODO: Put in a better check
+        # if len(self.vel_thresholds) != 0 and len(self.vel_thresholds) != 2*len(self.policies):
+        #     raise ValueError(f"Expected no velocity thresholds or length of {2*len(self.policies)}, got: {len(self.vel_thresholds)}")
 
         self.active_behavior = init_behavior
 
@@ -53,14 +54,14 @@ class BehaviorManager:
             The currently active behavior name.
         """
         if (time - self.last_behavior_switch) > 0.1:
-            if len(self.vel_thresholds) != 0:
-                for i in range(len(self.behavior_names)):
-                    low = self.vel_thresholds[2 * i + 1]
-                    high = self.vel_thresholds[2 * i]
-                    if low <= cmd_vel[0] < high:
-                        requested_behavior = self.behavior_names[i]
-                        if requested_behavior != self.active_behavior and requested_behavior != self.pending_behavior:
-                            self.pending_behavior = requested_behavior
+            # if len(self.vel_thresholds) > 1:
+            #     for i in range(len(self.behavior_names)):
+            #         low = self.vel_thresholds[2 * i + 1]
+            #         high = self.vel_thresholds[2 * i]
+            #         if low <= cmd_vel[0] < high:
+            #             requested_behavior = self.behavior_names[i]
+            #             if requested_behavior != self.active_behavior and requested_behavior != self.pending_behavior:
+            #                 self.pending_behavior = requested_behavior
 
             for i, button in enumerate(self.behavior_buttons):
                 if joy_msg.buttons[button] == 1:
@@ -85,24 +86,32 @@ class BehaviorManager:
         if self.pending_behavior is None:
             return False
 
-        current_policy = self.get_active_policy()
-        phi = current_policy.get_phi()
+        if len(self.vel_thresholds) > 1:
+            current_policy = self.get_active_policy()
+            phi = current_policy.get_phi()
 
-        # Check if phi is near 0 (including wrap-around) or 0.5
-        PHI_TOLERANCE = 0.03
+            # Check if phi is near 0 (including wrap-around) or 0.5
+            PHI_TOLERANCE = 0.03
 
-        # For now just hard-code the phasing variables for each transition
-        current_policy_idx = self.get_active_policy_idx()
-        if self.active_behavior == "walking":
-            val = 0.164
-        elif self.active_behavior == "running":
-            val = 0.03 #0.9 #0.06 #0.5
+            # For now just hard-code the phasing variables for each transition
+            current_policy_idx = self.get_active_policy_idx()
+            if self.active_behavior == "walking":
+                val = 0.164
+            elif self.active_behavior == "running":
+                val = 0.03 #0.9 #0.06 #0.5
+            else:
+                raise ValueError(f"Invalid active behavior: {self.active_behavior}")
+
+            at_val = abs(phi - val) < PHI_TOLERANCE
+
+            if at_val: #at_zero or at_half:
+                self.active_behavior = self.pending_behavior
+                self.last_behavior_switch = time
+                self.pending_behavior = None
+                self.policies[self.get_active_policy_idx()].reset_last_action()
+                self.policies[self.get_active_policy_idx()].set_last_zero_time(time)
+                return True
         else:
-            raise ValueError(f"Invalid active behavior: {self.active_behavior}")
-
-        at_val = abs(phi - val) < PHI_TOLERANCE
-
-        if at_val: #at_zero or at_half:
             self.active_behavior = self.pending_behavior
             self.last_behavior_switch = time
             self.pending_behavior = None
