@@ -7,8 +7,6 @@ import yaml
 from dataclasses import dataclass
 import math
 import numpy as np
-from hid import device
-
 from robot_rl.tasks.manager_based.robot_rl.mdp.commands.traj_tracking.manager_base import ManagerBase
 
 

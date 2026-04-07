@@ -31,12 +31,12 @@ dependencies = [
     "rerun-sdk"
 ]
 
-## Define optional dependencies (e.g., for testing, documentation, or extra features)
-#[project.optional-dependencies]
-#testing = [
-#  "pytest>=7.0",
-#  "pytest-cov",
-#]
+# Define optional dependencies (e.g., for testing, documentation, or extra features)
+[project.optional-dependencies]
+testing = [
+  "pytest>=7.0",
+  "pytest-cov",
+]
 #docs = [
 #  "sphinx>=5.0",
 #  "sphinx_rtd_theme",
