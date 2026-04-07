@@ -166,6 +166,13 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
             raise ValueError(f"Unsupported runner class: {agent_cfg.class_name}")
         runner.load(resume_path)
 
+        # print parameter counts
+        actor_params = sum(p.numel() for p in runner.alg.actor.parameters())
+        critic_params = sum(p.numel() for p in runner.alg.critic.parameters())
+        print(f"Actor Parameters: {actor_params:,}")
+        print(f"Critic Parameters: {critic_params:,}")
+        print(f"Total Parameters: {actor_params + critic_params:,}")
+
         # obtain the trained policy for inference
         policy = runner.get_inference_policy(device=env.unwrapped.device)
 

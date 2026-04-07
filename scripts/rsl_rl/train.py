@@ -192,6 +192,13 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
             runner = DistillationRunner(env, agent_cfg.to_dict(), log_dir=log_dir, device=agent_cfg.device)
         else:
             raise ValueError(f"Unsupported runner class: {agent_cfg.class_name}")
+        # print parameter counts
+        actor_params = sum(p.numel() for p in runner.alg.actor.parameters())
+        critic_params = sum(p.numel() for p in runner.alg.critic.parameters())
+        print(f"Actor Parameters: {actor_params:,}")
+        print(f"Critic Parameters: {critic_params:,}")
+        print(f"Total Parameters: {actor_params + critic_params:,}")
+
         # write git state to logs
         runner.add_git_repo_to_log(__file__)
         # load the checkpoint
