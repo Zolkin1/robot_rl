@@ -40,6 +40,7 @@ import cli_args  # isort: skip
 from data_logger import DataLogger  # isort: skip
 from play_plots import run_plots, PLOT_REGISTRY  # isort: skip
 from export_parameters import export_policy_parameters  # isort: skip
+from robot_rl.network.moe_network import MixtureOfExperts  # isort: skip
 
 # PLACEHOLDER: Extension template (do not remove this comment)
 with contextlib.suppress(ImportError):
@@ -181,8 +182,11 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
 
         if version.parse(installed_version) >= version.parse("4.0.0"):
             # use the new export functions for rsl-rl >= 4.0.0
-            runner.export_policy_to_jit(path=export_model_dir, filename="policy.pt")
-            runner.export_policy_to_onnx(path=export_model_dir, filename="policy.onnx")
+            try:
+                runner.export_policy_to_jit(path=export_model_dir, filename="policy.pt")
+                runner.export_policy_to_onnx(path=export_model_dir, filename="policy.onnx")
+            except RuntimeError as e:
+                print(f"[WARN] JIT/ONNX export failed (expected for MoE models): {e}")
             policy_nn = None  # Not needed for rsl-rl >= 4.0.0
         else:
             # extract the neural network for rsl-rl < 4.0.0
@@ -202,6 +206,19 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
             # export to JIT and ONNX
             export_policy_as_jit(policy_nn, normalizer=normalizer, path=export_model_dir, filename="policy.pt")
             export_policy_as_onnx(policy_nn, normalizer=normalizer, path=export_model_dir, filename="policy.onnx")
+
+        # Detect MoE architecture and set up gate weight capture
+        _moe_net = getattr(runner.alg.actor, "mlp", None)
+        is_moe = isinstance(_moe_net, MixtureOfExperts)
+        if is_moe:
+            print(f"[INFO] MoE detected: {_moe_net.num_experts} experts. Gate weights will be logged.")
+            _last_gate_w: dict[str, torch.Tensor] = {}
+
+            def _gate_hook(module, input, output):
+                _last_gate_w["val"] = output.detach().clone()
+
+            _moe_net.gate.register_forward_hook(_gate_hook)
+            gate_weights_log: list[torch.Tensor] = []
 
         dt = env.unwrapped.step_dt
 
@@ -239,6 +256,8 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
 
                 if logging_enabled:
                     logger.collect_step(env)
+                if is_moe and "val" in _last_gate_w:
+                    gate_weights_log.append(_last_gate_w["val"])
 
                 timestep += 1
                 if args_cli.video and timestep >= args_cli.video_length:
@@ -255,6 +274,10 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
             # Generate plots from collected data
             if logging_enabled and logger.num_steps > 0:
                 data, metadata = logger.finalize()
+                # Inject MoE gate weights into data for plotting
+                if is_moe and gate_weights_log:
+                    data["gate_weights"] = torch.stack(gate_weights_log).cpu().numpy()
+                    metadata["num_experts"] = _moe_net.num_experts
                 plots_dir = os.path.join(log_dir, "plots")
                 run_plots(data, metadata, plots_dir, plot_names, env_ids)
 

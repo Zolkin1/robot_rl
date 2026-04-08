@@ -145,7 +145,7 @@ def multiskill_phase(env: ManagerBasedRLEnv) -> torch.Tensor:
     Returns a tensor of shape (num_envs, 2 * num_frequencies) with sin and cos
     values interleaved: [sin_f0, cos_f0, sin_f1, cos_f1, ...].
     """
-    frequencies = torch.tensor([0.01, 0.1, 1, 10, 100], device=env.device)   # Hz
+    frequencies = torch.tensor([2*0.299, 2*0.46], device=env.device)   # Hz
     num_freq = len(frequencies)
 
     t = env.episode_length_buf * env.step_dt

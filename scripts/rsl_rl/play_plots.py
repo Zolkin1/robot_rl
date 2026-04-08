@@ -295,6 +295,99 @@ def plot_clf(
         plt.close(fig)
 
 
+def plot_moe_weights(
+    data: dict[str, np.ndarray],
+    metadata: dict[str, Any],
+    save_dir: str,
+    env_ids: list[int],
+) -> None:
+    """Mean MoE gate weights averaged over all environments and timesteps."""
+    if "gate_weights" not in data:
+        print("[WARN plot_moe_weights] Missing gate_weights data, skipping.")
+        return
+
+    gate_w = data["gate_weights"]  # [T, N_envs, num_experts]
+    # Flatten T and N_envs into a single sample dimension
+    flat = gate_w.reshape(-1, gate_w.shape[2])  # [T*N, num_experts]
+    mean_weights = flat.mean(axis=0)  # [num_experts]
+    std_weights = flat.std(axis=0)    # [num_experts]
+    num_experts = mean_weights.shape[0]
+
+    fig, ax = plt.subplots(figsize=(6, 4))
+    bars = ax.bar(range(num_experts), mean_weights, yerr=std_weights,
+                  capsize=4, color=plt.cm.tab10.colors[:num_experts], edgecolor="black")
+    ax.set_xlabel("Expert")
+    ax.set_ylabel("Mean Gate Weight")
+    ax.set_title("MoE Expert Utilization (mean over all envs & time)")
+    ax.set_xticks(range(num_experts))
+    ax.set_xticklabels([f"Expert {i}" for i in range(num_experts)])
+    ax.set_ylim(0, max((mean_weights + std_weights).max() * 1.15, 0.1))
+    ax.grid(True, alpha=0.3, axis="y")
+
+    # Add value labels on bars
+    for bar, m, s in zip(bars, mean_weights, std_weights):
+        ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + s + 0.008,
+                f"{m:.3f}\u00b1{s:.3f}", ha="center", va="bottom", fontsize=8)
+
+    plt.tight_layout()
+    plt.savefig(os.path.join(save_dir, "moe_weights.png"), dpi=300, bbox_inches="tight")
+    plt.close(fig)
+
+
+def plot_moe_weights_vs_velocity(
+    data: dict[str, np.ndarray],
+    metadata: dict[str, Any],
+    save_dir: str,
+    env_ids: list[int],
+) -> None:
+    """MoE gate weights as a function of commanded linear-x velocity."""
+    if "gate_weights" not in data or "base_velocity" not in data:
+        print("[WARN plot_moe_weights_vs_velocity] Missing gate_weights or base_velocity, skipping.")
+        return
+
+    gate_w = data["gate_weights"]       # [T, N_envs, num_experts]
+    base_vel = data["base_velocity"]     # [T, N_envs, 3]
+    num_experts = gate_w.shape[2]
+
+    # Flatten time and env dimensions
+    vel_x = base_vel[:, :, 0].flatten()          # [T*N]
+    weights = gate_w.reshape(-1, num_experts)     # [T*N, num_experts]
+
+    # Bin by commanded lin_vel_x
+    n_bins = 10
+    bin_edges = np.linspace(vel_x.min(), vel_x.max(), n_bins + 1)
+    bin_centers = 0.5 * (bin_edges[:-1] + bin_edges[1:])
+    bin_idx = np.digitize(vel_x, bin_edges) - 1
+    bin_idx = np.clip(bin_idx, 0, n_bins - 1)
+
+    # Mean and std weight per expert per bin
+    bin_means = np.zeros((n_bins, num_experts))
+    bin_stds = np.zeros((n_bins, num_experts))
+    for b in range(n_bins):
+        mask = bin_idx == b
+        if mask.any():
+            bin_means[b] = weights[mask].mean(axis=0)
+            bin_stds[b] = weights[mask].std(axis=0)
+
+    fig, ax = plt.subplots(figsize=(8, 5))
+    for e in range(num_experts):
+        ax.plot(bin_centers, bin_means[:, e], marker="o", linewidth=2, label=f"Expert {e}")
+        ax.fill_between(bin_centers,
+                        bin_means[:, e] - bin_stds[:, e],
+                        bin_means[:, e] + bin_stds[:, e],
+                        alpha=0.15)
+
+    ax.set_xlabel("Commanded Linear X Velocity (m/s)")
+    ax.set_ylabel("Mean Gate Weight")
+    ax.set_title("MoE Expert Weights vs Commanded Velocity")
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+
+    plt.tight_layout()
+    plt.savefig(os.path.join(save_dir, "moe_weights_vs_velocity.png"), dpi=300, bbox_inches="tight")
+    plt.close(fig)
+
+
 # ---------------------------------------------------------------------------
 # Registry
 # ---------------------------------------------------------------------------
@@ -307,6 +400,8 @@ PLOT_REGISTRY: dict[str, Callable] = {
     "base_velocity": plot_base_velocity,
     "domain_info": plot_domain_info,
     "clf": plot_clf,
+    "moe_weights": plot_moe_weights,
+    "moe_weights_vs_velocity": plot_moe_weights_vs_velocity,
 }
 
 DEFAULT_PLOTS = ["positions", "velocities"]
