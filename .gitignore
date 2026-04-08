@@ -88,7 +88,7 @@ transfer/sim/MUJOCO_LOG.TXT
 transfer/sim/experiments/mass_randomization_*/
 remote_mount/
 vulcan_mount/
-vulcan_remote_mount/
+*_remote_mount/
 g1_mount/
 
 transfer/sim/MUJOCO_LOG.TXT

@@ -13,6 +13,11 @@ from typing import Any
 import numpy as np
 import torch
 
+from robot_rl.tasks.manager_based.robot_rl.mdp.observations.observations import (
+    multiskill_phase,
+    ref_cos_phase,
+    ref_sin_phase,
+)
 
 # Trajectory command term names to search for (in priority order)
 _TRAJ_TERM_NAMES = ("traj_ref", "hlip_ref")
@@ -102,6 +107,20 @@ class DataLogger:
         except Exception as exc:
             self._warn("robot_data", f"Could not read robot articulation data: {exc}")
 
+        # 5. Phase observations
+        if self._phase_term_type == "multiskill":
+            try:
+                step["phase_obs"] = multiskill_phase(unwrapped, self._phase_frequency_list).clone()
+            except Exception as exc:
+                self._warn("phase_obs", f"Could not compute multiskill_phase: {exc}")
+        elif self._phase_term_type == "sin_cos":
+            try:
+                s = ref_sin_phase(unwrapped, self._traj_term_name)
+                c = ref_cos_phase(unwrapped, self._traj_term_name)
+                step["phase_obs"] = torch.cat([s, c], dim=-1).clone()
+            except Exception as exc:
+                self._warn("phase_obs", f"Could not compute sin/cos phase: {exc}")
+
         for key, val in step.items():
             self._data[key].append(val)
 
@@ -149,6 +168,28 @@ class DataLogger:
         else:
             print(f"[WARN DataLogger] No trajectory command term found among {active}. "
                   f"Trajectory-related data will not be logged.")
+
+        # Detect phase observation type
+        self._phase_term_type: str | None = None
+        self._phase_frequency_list: list[float] | None = None
+        try:
+            obs_mgr = unwrapped.observation_manager
+            policy_terms = obs_mgr.active_terms.get("policy", [])
+            if "multiskill_phases" in policy_terms:
+                self._phase_term_type = "multiskill"
+                # Extract frequency_list from the obs term config
+                term_idx = list(policy_terms).index("multiskill_phases")
+                term_cfg = obs_mgr._group_obs_term_cfgs["policy"][term_idx]
+                freq_list = term_cfg.params.get("frequency_list", [])
+                self._phase_frequency_list = freq_list
+                sin_labels = [f"sin({f:.2f}Hz)" for f in freq_list]
+                cos_labels = [f"cos({f:.2f}Hz)" for f in freq_list]
+                self.metadata["phase_obs_labels"] = sin_labels + cos_labels
+            elif "sin_phase" in policy_terms or "cos_phase" in policy_terms:
+                self._phase_term_type = "sin_cos"
+                self.metadata["phase_obs_labels"] = ["sin_phase", "cos_phase"]
+        except Exception as exc:
+            print(f"[WARN DataLogger] Could not detect phase observations: {exc}")
 
         # Joint names
         try:

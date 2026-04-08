@@ -139,13 +139,13 @@ def domain_flag(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
 
     return domain.unsqueeze(-1)
 
-def multiskill_phase(env: ManagerBasedRLEnv) -> torch.Tensor:
+def multiskill_phase(env: ManagerBasedRLEnv, frequency_list: list[float]) -> torch.Tensor:
     """Create phasing variables at different frequencies to cover a range.
 
     Returns a tensor of shape (num_envs, 2 * num_frequencies) with sin and cos
     values interleaved: [sin_f0, cos_f0, sin_f1, cos_f1, ...].
     """
-    frequencies = torch.tensor([2*0.299, 2*0.46], device=env.device)   # Hz
+    frequencies = torch.tensor(frequency_list, device=env.device)   # Hz
     num_freq = len(frequencies)
 
     # TODO: Should align this with the sampled reset time

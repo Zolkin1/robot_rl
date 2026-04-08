@@ -225,24 +225,73 @@ def plot_domain_info(
         print("[WARN plot_domain_info] Missing phasing_var data, skipping.")
         return
 
-    time_steps = np.arange(data["phasing_var"].shape[0])
+    dt = metadata.get("dt", 1.0)
+    time_s = np.arange(data["phasing_var"].shape[0]) * dt
+
+    has_phase_obs = "phase_obs" in data
+    phase_labels = metadata.get("phase_obs_labels", [])
 
     for env_id in env_ids:
-        plot_items = [("phasing_var", "Phasing Var")]
-        if "current_domain" in data:
-            plot_items.append(("current_domain", "Current Domain"))
+        if has_phase_obs:
+            # 2x2 layout: top-left=phasing_var, top-right=current_domain,
+            #              bottom-left=sin phase obs, bottom-right=cos phase obs
+            fig, axs = plt.subplots(2, 2, figsize=(10, 6))
+            fig.suptitle(f"Domain Info (Env {env_id})", fontsize=16)
 
-        n_dims = len(plot_items)
-        fig, axs = plt.subplots(1, n_dims, figsize=(5 * n_dims, 3))
-        fig.suptitle(f"Domain Info (Env {env_id})", fontsize=16)
-        if n_dims == 1:
-            axs = [axs]
+            # Top-left: phasing var
+            axs[0, 0].plot(time_s, data["phasing_var"][:, env_id], linewidth=2)
+            axs[0, 0].set_title("Phasing Var")
+            axs[0, 0].set_xlabel("Time (s)")
+            axs[0, 0].grid(True, alpha=0.3)
 
-        for i, (key, label) in enumerate(plot_items):
-            axs[i].plot(time_steps, data[key][:, env_id], linewidth=2)
-            axs[i].set_title(label)
-            axs[i].set_xlabel("Time Steps")
-            axs[i].grid(True, alpha=0.3)
+            # Top-right: current domain
+            if "current_domain" in data:
+                axs[0, 1].plot(time_s, data["current_domain"][:, env_id], linewidth=2)
+                axs[0, 1].set_title("Current Domain")
+            else:
+                axs[0, 1].set_visible(False)
+            axs[0, 1].set_xlabel("Time (s)")
+            axs[0, 1].grid(True, alpha=0.3)
+
+            # Split phase_obs into sin and cos halves
+            phase_data = data["phase_obs"][:, env_id, :]  # [T, D]
+            n_dims = phase_data.shape[1]
+            half = n_dims // 2
+
+            # Bottom-left: sin phase observations
+            for d in range(half):
+                label = phase_labels[d] if d < len(phase_labels) else f"sin dim {d}"
+                axs[1, 0].plot(time_s, phase_data[:, d], linewidth=1.5, label=label)
+            axs[1, 0].set_title("Sin Phase Obs")
+            axs[1, 0].set_xlabel("Time (s)")
+            axs[1, 0].legend(fontsize=8)
+            axs[1, 0].grid(True, alpha=0.3)
+
+            # Bottom-right: cos phase observations
+            for d in range(half, n_dims):
+                label = phase_labels[d] if d < len(phase_labels) else f"cos dim {d}"
+                axs[1, 1].plot(time_s, phase_data[:, d], linewidth=1.5, label=label)
+            axs[1, 1].set_title("Cos Phase Obs")
+            axs[1, 1].set_xlabel("Time (s)")
+            axs[1, 1].legend(fontsize=8)
+            axs[1, 1].grid(True, alpha=0.3)
+        else:
+            # No phase obs: simple 1-row layout
+            plot_items = [("phasing_var", "Phasing Var")]
+            if "current_domain" in data:
+                plot_items.append(("current_domain", "Current Domain"))
+
+            n_cols = len(plot_items)
+            fig, axs_flat = plt.subplots(1, n_cols, figsize=(5 * n_cols, 3))
+            fig.suptitle(f"Domain Info (Env {env_id})", fontsize=16)
+            if n_cols == 1:
+                axs_flat = [axs_flat]
+
+            for i, (key, label) in enumerate(plot_items):
+                axs_flat[i].plot(time_s, data[key][:, env_id], linewidth=2)
+                axs_flat[i].set_title(label)
+                axs_flat[i].set_xlabel("Time (s)")
+                axs_flat[i].grid(True, alpha=0.3)
 
         plt.tight_layout(rect=[0, 0.03, 1, 0.95])
         plt.savefig(os.path.join(save_dir, f"domain_info_env{env_id}.png"),

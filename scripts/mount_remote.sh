@@ -5,23 +5,6 @@
 
 set -e
 
-# Configuration
-#REMOTE_HOST="131.215.101.160" #"131.215.101.40" #"talos.caltech.edu"
-REMOTE_HOST="talos.caltech.edu"
-# REMOTE_HOST="10.42.0.1"
-# REMOTE_PATH="/home/unitree/robot_rl/transfer/obelisk/ctrl_logs"
-# REMOTE_USER="unitree"
-#REMOTE_USER="amy"
-REMOTE_USER="zolkin"
-#REMOTE_HOST="vulcan.amberlab.caltech.edu"
-#REMOTE_PATH="/home/amy/gitrepo/robot_rl/logs"
-REMOTE_PATH="/home/zolkin/robot_rl/logs"
-#LOCAL_MOUNT_POINT="amy_remote_mount"
-#LOCAL_MOUNT_POINT="vulcan_remote_mount"
-LOCAL_MOUNT_POINT="talos_remote_mount"
-# LOCAL_MOUNT_POINT="vulcan_mount"
-# LOCAL_MOUNT_POINT="g1_mount"
-
 # Colors for output
 GREEN='\033[0;32m'
 BLUE='\033[0;34m'
@@ -47,15 +30,21 @@ print_warning() {
 
 # Function to show usage
 show_usage() {
-    echo "Usage: $0 [mount|unmount|status]"
+    echo "Usage: $0 <user> <host> <remote_path> [mount|unmount|status]"
+    echo ""
+    echo "Arguments:"
+    echo "  user          Remote SSH username"
+    echo "  host          Remote hostname or IP"
+    echo "  remote_path   Path on the remote machine to mount"
     echo ""
     echo "Commands:"
     echo "  mount     Mount the remote directory (default)"
     echo "  unmount   Unmount the remote directory"
     echo "  status    Check if the directory is mounted"
     echo ""
-    echo "The remote directory will be mounted at: $LOCAL_MOUNT_POINT"
-    echo "Remote path: $REMOTE_HOST:$REMOTE_PATH"
+    echo "Examples:"
+    echo "  $0 user remote.host.edu /home/user/robot_rl/logs"
+    echo "  $0 user remote.host.edu /home/user/robot_rl/logs unmount"
 }
 
 # Check if SSHFS is installed
@@ -140,9 +129,27 @@ unmount_remote() {
 
 # Main script logic
 main() {
+    # Handle help flag early
+    if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+        show_usage
+        exit 0
+    fi
+
+    # Require at least 3 arguments
+    if [[ $# -lt 3 ]]; then
+        print_error "Missing required arguments"
+        show_usage
+        exit 1
+    fi
+
+    REMOTE_USER="$1"
+    REMOTE_HOST="$2"
+    REMOTE_PATH="$3"
+    LOCAL_MOUNT_POINT="${REMOTE_HOST}_remote_mount"
+
     check_sshfs
-    
-    case "${1:-mount}" in
+
+    case "${4:-mount}" in
         "mount")
             mount_remote
             ;;
@@ -152,11 +159,8 @@ main() {
         "status")
             check_mount_status
             ;;
-        "-h"|"--help")
-            show_usage
-            ;;
         *)
-            print_error "Unknown command: $1"
+            print_error "Unknown command: $4"
             show_usage
             exit 1
             ;;
@@ -164,4 +168,4 @@ main() {
 }
 
 # Run main function
-main "$@" 
+main "$@"

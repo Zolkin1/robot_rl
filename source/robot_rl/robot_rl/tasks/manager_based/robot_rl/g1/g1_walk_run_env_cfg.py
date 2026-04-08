@@ -14,14 +14,14 @@ class G1WalkRunObservationCfg(G1ClfTrackingObservationsCfg):
         sin_phase = None
         cos_phase = None
 
-        multiskill_phases = ObsTerm(func=mdp.multiskill_phase, )
+        multiskill_phases = ObsTerm(func=mdp.multiskill_phase, params={"frequency_list": [1.0/(2*0.299), 1.0/(2*0.46)]} )
 
     @configclass
     class CriticCfg(G1ClfTrackingObservationsCfg.CriticCfg):
         sin_phase = None
         cos_phase = None
 
-        multiskill_phases = ObsTerm(func=mdp.multiskill_phase, )
+        multiskill_phases = ObsTerm(func=mdp.multiskill_phase, params={"frequency_list": [1.0/(2*0.299), 1.0/(2*0.46)]} )
 
     policy: PolicyCfg = PolicyCfg()
     critic: CriticCfg = CriticCfg()
