@@ -179,6 +179,7 @@ class G1ClfTrackingObservationsCfg:
         joint_vel = ObsTerm(func=mdp.joint_vel_rel, noise=Unoise(n_min=-0.5, n_max=0.5), scale=0.05)
         actions = ObsTerm(func=mdp.last_action, clip=(-20.0,20.0))
 
+        # TODO: Move everything to the multiskill phase as its general and can even work for single skills
         # Phase clock
         sin_phase = ObsTerm(func=mdp.ref_sin_phase, params={"command_name": "traj_ref"})
         cos_phase = ObsTerm(func=mdp.ref_cos_phase, params={"command_name": "traj_ref"})

@@ -437,6 +437,98 @@ def plot_moe_weights_vs_velocity(
     plt.close(fig)
 
 
+def plot_moe_tsne(
+    data: dict[str, np.ndarray],
+    metadata: dict[str, Any],
+    save_dir: str,
+    env_ids: list[int],
+) -> None:
+    """t-SNE embedding of MoE gate weights, colored by locomotion regime.
+
+    Each point represents one (timestep, environment) pair. Points are colored
+    by the commanded forward velocity into five regimes: Backward Running,
+    Backward Walking, Standing, Walking, and Running.
+    """
+    if "gate_weights" not in data or "base_velocity" not in data:
+        print("[WARN plot_moe_tsne] Missing gate_weights or base_velocity data, skipping.")
+        return
+
+    try:
+        from sklearn.manifold import TSNE
+    except ImportError:
+        print("[WARN plot_moe_tsne] scikit-learn not installed, skipping t-SNE plot.")
+        return
+
+    gate_w = data["gate_weights"]       # [T, num_envs, num_experts]
+    base_vel = data["base_velocity"]    # [T, num_envs, 3]
+
+    # Flatten time and env dimensions
+    weights = gate_w.reshape(-1, gate_w.shape[2])   # [T*N, num_experts]
+    vel_x = base_vel[:, :, 0].flatten()              # [T*N]
+
+    # Subsample to keep t-SNE tractable
+    n_total = weights.shape[0]
+    max_points = 8000
+    rng = np.random.RandomState(42)
+    if n_total > max_points:
+        idx = rng.choice(n_total, size=max_points, replace=False)
+        weights = weights[idx]
+        vel_x = vel_x[idx]
+
+    # Assign locomotion regime labels based on signed forward velocity
+    labels = np.empty(vel_x.shape[0], dtype=object)
+    labels[vel_x < -1.5] = "Backward Running"
+    labels[(vel_x >= -1.5) & (vel_x < -0.1)] = "Backward Walking"
+    labels[(vel_x >= -0.1) & (vel_x <= 0.1)] = "Standing"
+    labels[(vel_x > 0.1) & (vel_x <= 1.5)] = "Walking"
+    labels[vel_x > 1.5] = "Running"
+
+    # Run t-SNE
+    print("[INFO plot_moe_tsne] Running t-SNE (this may take ~15s)...")
+    tsne = TSNE(n_components=2, perplexity=50, random_state=42, learning_rate="auto")
+    coords = tsne.fit_transform(weights)  # [N, 2]
+
+    # Plot with one color per regime
+    regime_colors = {
+        "Backward Running": plt.cm.tab10.colors[4],   # purple
+        "Backward Walking": plt.cm.tab10.colors[9],    # cyan
+        "Standing":         plt.cm.tab10.colors[0],    # blue
+        "Walking":          plt.cm.tab10.colors[1],    # orange
+        "Running":          plt.cm.tab10.colors[3],    # red
+    }
+
+    fig, ax = plt.subplots(figsize=(8, 6))
+    for regime_name, color in regime_colors.items():
+        mask = labels == regime_name
+        if mask.any():
+            ax.scatter(
+                coords[mask, 0], coords[mask, 1],
+                c=[color], label=f"{regime_name} ({mask.sum()})",
+                s=8, alpha=0.6, edgecolors="none",
+            )
+
+    ax.set_xlabel("t-SNE 1")
+    ax.set_ylabel("t-SNE 2")
+    ax.set_title("t-SNE of MoE Gate Weights by Locomotion Regime")
+    ax.legend(markerscale=3)
+    ax.grid(True, alpha=0.3)
+
+    plt.tight_layout()
+    plt.savefig(os.path.join(save_dir, "moe_tsne.png"), dpi=300, bbox_inches="tight")
+    plt.close(fig)
+
+    # Save coordinates to CSV for later analysis
+    csv_path = os.path.join(save_dir, "moe_tsne_coords.csv")
+    with open(csv_path, "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["tsne_1", "tsne_2", "regime", "vel_x"])
+        for i in range(coords.shape[0]):
+            writer.writerow([
+                f"{coords[i, 0]:.6f}", f"{coords[i, 1]:.6f}",
+                labels[i], f"{vel_x[i]:.4f}",
+            ])
+
+
 # ---------------------------------------------------------------------------
 # Registry
 # ---------------------------------------------------------------------------
@@ -451,6 +543,7 @@ PLOT_REGISTRY: dict[str, Callable] = {
     "clf": plot_clf,
     "moe_weights": plot_moe_weights,
     "moe_weights_vs_velocity": plot_moe_weights_vs_velocity,
+    "moe_tsne": plot_moe_tsne,
 }
 
 DEFAULT_PLOTS = ["positions", "velocities"]

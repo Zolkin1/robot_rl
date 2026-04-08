@@ -203,6 +203,7 @@ Then in that folder run `./isaaclab.sh --install`.
 ## Citing
 If you use this repo in any publications, please consider citing the relevant paper (see below).
 
+### Walking
 For the original CLF-RL idea and basic walking:
 ```
 @article{li_clf-rl_2026,
@@ -215,7 +216,19 @@ For the original CLF-RL idea and basic walking:
   pages={3230-3237},
   doi={10.1109/LRA.2026.3653329}}
 ```
-For the running:
+### Running
+```
+@misc{olkin2026chasingautonomydynamicretargeting,
+      title={Chasing Autonomy: Dynamic Retargeting and Control Guided RL for Performant and Controllable Humanoid Running}, 
+      author={Zachary Olkin and William D. Compton and Ryan M. Bena and Aaron D. Ames},
+      year={2026},
+      eprint={2603.25902},
+      archivePrefix={arXiv},
+      primaryClass={cs.RO},
+      url={https://arxiv.org/abs/2603.25902}, 
+}
+```
+and
 ```
 @misc{olkin_chasing_2025,
       title={Chasing Stability: Humanoid Running via Control Lyapunov Function Guided Reinforcement Learning}, 
@@ -227,7 +240,7 @@ For the running:
       url={https://arxiv.org/abs/2509.19573}, 
 }
 ```
-For the stepping stones:
+### Stepping stones
 ```
 @misc{dai_walk_2026,
       title={Walk the PLANC: Physics-Guided RL for Agile Humanoid Locomotion on Constrained Footholds}, 

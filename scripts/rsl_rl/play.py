@@ -182,11 +182,8 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
 
         if version.parse(installed_version) >= version.parse("4.0.0"):
             # use the new export functions for rsl-rl >= 4.0.0
-            try:
-                runner.export_policy_to_jit(path=export_model_dir, filename="policy.pt")
-                runner.export_policy_to_onnx(path=export_model_dir, filename="policy.onnx")
-            except RuntimeError as e:
-                print(f"[WARN] JIT/ONNX export failed (expected for MoE models): {e}")
+            runner.export_policy_to_jit(path=export_model_dir, filename="policy.pt")
+            runner.export_policy_to_onnx(path=export_model_dir, filename="policy.onnx")
             policy_nn = None  # Not needed for rsl-rl >= 4.0.0
         else:
             # extract the neural network for rsl-rl < 4.0.0

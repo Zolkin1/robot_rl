@@ -40,7 +40,7 @@ class G1WalkRunCLFEnvCfg(G1ClfTrackingEnvCfg):
         self.commands.traj_ref.path = "trajectories/retargeted/2026-04-01_11-24-07_merged_walk_run"
 
         # Configure velocity ranges for different gaits
-        self.commands.base_velocity.ranges.lin_vel_x = (0.0, 3.6)  # Allow full range
+        self.commands.base_velocity.ranges.lin_vel_x = (0.0, 3.6)
         self.commands.base_velocity.ranges.lin_vel_y = (0, 0) #(-0.5, 0.5)
         self.commands.base_velocity.ranges.ang_vel_z = (0, 0) #(-0.75, 0.75)
         self.commands.base_velocity.ranges.heading = (-3.14,3.14)

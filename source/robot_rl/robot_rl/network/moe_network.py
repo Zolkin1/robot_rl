@@ -6,8 +6,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from rsl_rl.models import MLPModel
-from typing import Optional
-
 class ExpertMLP(nn.Module):
     """A single expert: a small feedforward MLP.
 
@@ -52,11 +50,6 @@ class GatingNetwork(nn.Module):
     A lightweight MLP that takes the same observation input and
     outputs a probability distribution (via softmax) over which
     experts to trust for this particular input.
-
-    Optionally supports top-k sparse gating: only the top-k expert
-    weights are kept, the rest are zeroed. This saves compute at
-    inference (you skip experts with 0 weight) and encourages
-    specialization during training.
     """
 
     def __init__(self,
@@ -64,11 +57,9 @@ class GatingNetwork(nn.Module):
                  num_experts: int,
                  hidden_dims: list[int],
                  activation: str = 'elu',
-                 top_k: Optional[int] = None,
                  ):
         super().__init__()
         self.num_experts = num_experts
-        self.top_k = top_k
 
         activation_fn = {
             "elu": nn.ELU,
@@ -76,7 +67,7 @@ class GatingNetwork(nn.Module):
             "tanh": nn.Tanh,
         }[activation]
 
-        layers = []
+        layers: list[nn.Module] = []
         prev_dim = input_dim
         for h in hidden_dims:
             layers.append(nn.Linear(prev_dim, h))
@@ -88,14 +79,7 @@ class GatingNetwork(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Returns [batch, num_experts] gate weights summing to 1."""
-        logits = self.net(x)  # [batch, num_experts]
-
-        if self.top_k is not None and self.top_k < self.num_experts:
-            # Zero out all but the top-k experts
-            topk_vals, topk_idx = torch.topk(logits, self.top_k, dim=-1)
-            mask = torch.zeros_like(logits).scatter_(-1, topk_idx, 1.0)
-            logits = logits.masked_fill(mask == 0, float("-inf"))
-
+        logits = self.net(x)
         return F.softmax(logits, dim=-1)
 
 class MixtureOfExperts(nn.Module):
@@ -106,9 +90,7 @@ class MixtureOfExperts(nn.Module):
         2. Each expert produces    e_i = expert_i(x)
         3. Output = sum_i( w_i * e_i )
 
-    This is a "soft" MoE by default (all experts run, outputs are
-    blended). With top_k gating, it becomes sparse — only k experts
-    contribute, saving compute.
+    All experts run and outputs are blended by the gate weights (soft MoE).
 
     Args:
         input_dim:      Observation size (e.g. num_obs from your env)
@@ -117,7 +99,6 @@ class MixtureOfExperts(nn.Module):
         expert_hidden_dims: Hidden layer sizes inside each expert
         gate_hidden_dims:   Hidden layer sizes inside the gate
         activation:     Activation function name
-        top_k:          If set, only top-k experts contribute (sparse MoE)
     """
 
     def __init__(
@@ -128,7 +109,6 @@ class MixtureOfExperts(nn.Module):
         expert_hidden_dims: list[int] = [256, 128],
         gate_hidden_dims: list[int] = [64],
         activation: str = "elu",
-        top_k: Optional[int] = None,
     ):
         super().__init__()
         self.num_experts = num_experts
@@ -139,7 +119,7 @@ class MixtureOfExperts(nn.Module):
             for _ in range(num_experts)
         ])
 
-        self.gate = GatingNetwork(input_dim, num_experts, gate_hidden_dims, activation, top_k)
+        self.gate = GatingNetwork(input_dim, num_experts, gate_hidden_dims, activation)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -202,7 +182,6 @@ class MoEModel(MLPModel):
             num_experts=4,
             expert_hidden_dims=None,
             gate_hidden_dims=None,
-            top_k=None,
             **kwargs,
     ):
         # 1) Let MLPModel build everything: normalization, distribution,
@@ -225,7 +204,6 @@ class MoEModel(MLPModel):
             expert_hidden_dims=expert_hidden_dims or hidden_dims,
             gate_hidden_dims=gate_hidden_dims or [64],
             activation=activation,
-            top_k=top_k,
         )
 
 # ─── Load-Balancing Loss ──────────────────────────────────────────────
@@ -274,7 +252,6 @@ if __name__ == "__main__":
         expert_hidden_dims=[256, 128],
         gate_hidden_dims=[64],
         activation="elu",
-        top_k=2,
     )
 
     x = torch.randn(batch_size, obs_dim)
