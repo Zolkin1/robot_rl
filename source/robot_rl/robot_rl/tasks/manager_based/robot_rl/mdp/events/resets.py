@@ -111,7 +111,7 @@ def reset_on_reference(
 
     # Sample random times for each environment
     total_time = cmd.manager.get_total_time()
-    random_times = torch.rand(num_ref_envs, device=env.device) * total_time
+    random_times = (torch.rand(num_ref_envs, device=env.device) * total_time) * 0.0 # TODO: Remove the multiply by zero when I fix the multiskill phase obs
 
     # Get trajectory outputs at sampled times
     cmd.get_desired_outputs(random_times, env_ids=ref_ids)

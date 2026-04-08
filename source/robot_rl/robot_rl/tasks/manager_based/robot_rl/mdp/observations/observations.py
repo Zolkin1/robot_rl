@@ -148,6 +148,7 @@ def multiskill_phase(env: ManagerBasedRLEnv) -> torch.Tensor:
     frequencies = torch.tensor([2*0.299, 2*0.46], device=env.device)   # Hz
     num_freq = len(frequencies)
 
+    # TODO: Should align this with the sampled reset time
     t = env.episode_length_buf * env.step_dt
 
     sp = torch.zeros(env.num_envs, num_freq, device=env.device)
