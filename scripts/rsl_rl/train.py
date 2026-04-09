@@ -165,7 +165,14 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
             env = multi_agent_to_single_agent(env)
 
         # save resume path before creating a new log_dir
-        if agent_cfg.resume or agent_cfg.algorithm.class_name == "Distillation":
+        if agent_cfg.algorithm.class_name == "Distillation":
+            # Resolve teacher checkpoint from a (potentially different) experiment directory
+            teacher_experiment = getattr(args_cli, "teacher_experiment", None) or agent_cfg.teacher_experiment_name
+            teacher_run = getattr(args_cli, "teacher_run", None) or agent_cfg.teacher_load_run
+            teacher_checkpoint = getattr(args_cli, "teacher_checkpoint", None) or agent_cfg.teacher_load_checkpoint
+            teacher_log_path = os.path.abspath(os.path.join("logs", "rsl_rl", teacher_experiment))
+            resume_path = get_checkpoint_path(teacher_log_path, teacher_run, teacher_checkpoint)
+        elif agent_cfg.resume:
             resume_path = get_checkpoint_path(log_root_path, agent_cfg.load_run, agent_cfg.load_checkpoint)
 
         # wrap for video recording

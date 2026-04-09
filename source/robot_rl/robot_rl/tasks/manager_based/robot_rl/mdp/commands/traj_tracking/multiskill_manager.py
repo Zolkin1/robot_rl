@@ -4,6 +4,26 @@ from robot_rl.tasks.manager_based.robot_rl.mdp.commands.traj_tracking.library_ma
 from robot_rl.tasks.manager_based.robot_rl.mdp.commands.traj_tracking.manager_base import ManagerBase
 from robot_rl.tasks.manager_based.robot_rl.mdp.commands.traj_tracking.trajectory_manager import TrajectoryManager
 
+# Improvements for the multiskill manager:
+#   - Want to be able to have many trajectories without slowing down data collection time too much.
+#       I think the best way to do this will be to just collect all the data from the trajectory manager into a number
+#       of individual tensors so that every computation can be batched across all the trajectories. This way there
+#       is no looping over all the trajectories. With enough envs its should be that every trajectory is in use anyway
+#       so this should only give a speed up.
+#   - Need to be able to condition them on more than a single number. I should be able to take in a number of things
+#       from commanded velocity (in 3D) to terrain to be able to select a trajectory. So in addition to terrain type
+#       which can be literally a semantic tag (i.e. "stairs") we also need to be able to condition on terrain dimensions
+#       like stair height and width. We can grab all the terrain info from env.scene.terrain.
+#   - Need to be able to place terrain dependent trajectories at the correct place in the global frame (i.e. relative
+#       to the terrain), so there needs to be a way to do this.
+#   - Should probably be able to support transitioning between skills via some form of linear interpolation.
+#       I don't think I want to do that right away, but maybe there should be an empty function put in so the hook
+#       is available in the future.
+#   - Want to be able to hold different Lyapunov values for each skill. This way we can write multiskill CLF rewards
+#       where the CLF is scaled per skill. So we need to be able to compute the Lyapunov function value and store it,
+#       separately for each skill (but not necessarily each trajectory). So this means we need to have a distinction
+#       between skills and trajectories: a skill can be composed of a library of trajectories.
+
 
 # This is a class to manage multiple skills (i.e. multiple libraries and/or trajectories)
 

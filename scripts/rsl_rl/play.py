@@ -120,7 +120,14 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         elif args_cli.checkpoint:
             resume_path = retrieve_file_path(args_cli.checkpoint)
         else:
-            resume_path = get_checkpoint_path(log_root_path, agent_cfg.load_run, agent_cfg.load_checkpoint)
+            # For distillation, allow overriding the experiment via CLI
+            if agent_cfg.class_name == "DistillationRunner" and getattr(args_cli, "teacher_experiment", None):
+                play_log_path = os.path.abspath(
+                    os.path.join("logs", "rsl_rl", args_cli.teacher_experiment)
+                )
+            else:
+                play_log_path = log_root_path
+            resume_path = get_checkpoint_path(play_log_path, agent_cfg.load_run, agent_cfg.load_checkpoint)
 
         log_dir = os.path.dirname(resume_path)
 
@@ -168,11 +175,17 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         runner.load(resume_path)
 
         # print parameter counts
-        actor_params = sum(p.numel() for p in runner.alg.actor.parameters())
-        critic_params = sum(p.numel() for p in runner.alg.critic.parameters())
-        print(f"Actor Parameters: {actor_params:,}")
-        print(f"Critic Parameters: {critic_params:,}")
-        print(f"Total Parameters: {actor_params + critic_params:,}")
+        if isinstance(runner, DistillationRunner):
+            student_params = sum(p.numel() for p in runner.alg.student.parameters())
+            teacher_params = sum(p.numel() for p in runner.alg.teacher.parameters())
+            print(f"Student Parameters: {student_params:,}")
+            print(f"Teacher Parameters: {teacher_params:,}")
+        else:
+            actor_params = sum(p.numel() for p in runner.alg.actor.parameters())
+            critic_params = sum(p.numel() for p in runner.alg.critic.parameters())
+            print(f"Actor Parameters: {actor_params:,}")
+            print(f"Critic Parameters: {critic_params:,}")
+            print(f"Total Parameters: {actor_params + critic_params:,}")
 
         # obtain the trained policy for inference
         policy = runner.get_inference_policy(device=env.unwrapped.device)
@@ -205,7 +218,8 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
             export_policy_as_onnx(policy_nn, normalizer=normalizer, path=export_model_dir, filename="policy.onnx")
 
         # Detect MoE architecture and set up gate weight capture
-        _moe_net = getattr(runner.alg.actor, "mlp", None)
+        _policy_model = runner.alg.student if isinstance(runner, DistillationRunner) else runner.alg.actor
+        _moe_net = getattr(_policy_model, "mlp", None)
         is_moe = isinstance(_moe_net, MixtureOfExperts)
         if is_moe:
             print(f"[INFO] MoE detected: {_moe_net.num_experts} experts. Gate weights will be logged.")

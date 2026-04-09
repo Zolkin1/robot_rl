@@ -110,7 +110,7 @@ class DataLogger:
         # 5. Phase observations
         if self._phase_term_type == "multiskill":
             try:
-                step["phase_obs"] = multiskill_phase(unwrapped, self._phase_frequency_list).clone()
+                step["phase_obs"] = multiskill_phase(unwrapped, self._phase_frequency_list, self._traj_term_name).clone()
             except Exception as exc:
                 self._warn("phase_obs", f"Could not compute multiskill_phase: {exc}")
         elif self._phase_term_type == "sin_cos":

@@ -34,6 +34,19 @@ def add_rsl_rl_args(parser: argparse.ArgumentParser):
     arg_group.add_argument(
         "--logger", type=str, default=None, choices={"wandb", "tensorboard", "neptune"}, help="Logger module to use."
     )
+    # -- distillation teacher arguments
+    arg_group.add_argument(
+        "--teacher_experiment", type=str, default=None,
+        help="Experiment name where the teacher checkpoint lives (e.g. 'g1_multiskill_arch').",
+    )
+    arg_group.add_argument(
+        "--teacher_run", type=str, default=None,
+        help="Run directory (or regex) within the teacher experiment to load from.",
+    )
+    arg_group.add_argument(
+        "--teacher_checkpoint", type=str, default=None,
+        help="Checkpoint file (or regex) to load for the teacher.",
+    )
     arg_group.add_argument(
         "--log_project_name", type=str, default=None, help="Name of the logging project when using wandb or neptune."
     )
