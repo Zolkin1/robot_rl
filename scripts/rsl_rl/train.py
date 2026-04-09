@@ -193,11 +193,17 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         else:
             raise ValueError(f"Unsupported runner class: {agent_cfg.class_name}")
         # print parameter counts
-        actor_params = sum(p.numel() for p in runner.alg.actor.parameters())
-        critic_params = sum(p.numel() for p in runner.alg.critic.parameters())
-        print(f"Actor Parameters: {actor_params:,}")
-        print(f"Critic Parameters: {critic_params:,}")
-        print(f"Total Parameters: {actor_params + critic_params:,}")
+        if isinstance(runner, DistillationRunner):
+            student_params = sum(p.numel() for p in runner.alg.student.parameters())
+            teacher_params = sum(p.numel() for p in runner.alg.teacher.parameters())
+            print(f"Student Parameters: {student_params:,}")
+            print(f"Teacher Parameters: {teacher_params:,}")
+        else:
+            actor_params = sum(p.numel() for p in runner.alg.actor.parameters())
+            critic_params = sum(p.numel() for p in runner.alg.critic.parameters())
+            print(f"Actor Parameters: {actor_params:,}")
+            print(f"Critic Parameters: {critic_params:,}")
+            print(f"Total Parameters: {actor_params + critic_params:,}")
 
         # write git state to logs
         runner.add_git_repo_to_log(__file__)

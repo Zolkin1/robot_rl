@@ -175,9 +175,9 @@ class G1ClfTrackingObservationsCfg:
         velocity_commands = ObsTerm(func=mdp.generated_commands, params={"command_name": "base_velocity"},
                                     scale=(2.0, 2.0, 2.0))
 
-        joint_pos = ObsTerm(func=mdp.joint_pos_rel, noise=Unoise(n_min=-0.01, n_max=0.01), history_length=5)
+        joint_pos = ObsTerm(func=mdp.joint_pos_rel, noise=Unoise(n_min=-0.01, n_max=0.01))
         joint_vel = ObsTerm(func=mdp.joint_vel_rel, noise=Unoise(n_min=-0.5, n_max=0.5), scale=0.05)
-        actions = ObsTerm(func=mdp.last_action, clip=(-20.0,20.0), history_length=5)
+        actions = ObsTerm(func=mdp.last_action, clip=(-20.0,20.0))
 
         # TODO: Move everything to the multiskill phase as its general and can even work for single skills
         # Phase clock
@@ -202,9 +202,9 @@ class G1ClfTrackingObservationsCfg:
         velocity_commands = ObsTerm(func=mdp.generated_commands, params={"command_name": "base_velocity"},
                                     scale=(2.0, 2.0, 2.0))
 
-        joint_pos = ObsTerm(func=mdp.joint_pos_rel, history_length=5)
+        joint_pos = ObsTerm(func=mdp.joint_pos_rel,)
         joint_vel = ObsTerm(func=mdp.joint_vel_rel, scale=0.05)
-        actions = ObsTerm(func=mdp.last_action, clip=(-20.0,20.0), history_length=5)
+        actions = ObsTerm(func=mdp.last_action, clip=(-20.0,20.0))
 
         # Phase clock
         sin_phase = ObsTerm(func=mdp.ref_sin_phase, params={"command_name": "traj_ref"})
