@@ -1,6 +1,7 @@
 from isaaclab.utils import configclass
 
 from isaaclab.managers import ObservationTermCfg as ObsTerm
+from isaaclab.utils.noise import UniformNoiseCfg as Unoise
 
 from robot_rl.tasks.manager_based.robot_rl import mdp
 
@@ -14,14 +15,24 @@ class G1WalkRunObservationCfg(G1ClfTrackingObservationsCfg):
         sin_phase = None
         cos_phase = None
 
-        multiskill_phases = ObsTerm(func=mdp.multiskill_phase, params={"frequency_list": [1.0/(2*0.299), 1.0/(2*0.46)]} )
+        multiskill_phases = ObsTerm(func=mdp.multiskill_phase, params={"frequency_list": [1.0/(2*0.299), 1.0/(2*0.46)], "command_name": "traj_ref"} )
+
+        # actions = ObsTerm(func=mdp.last_action, clip=(-20.0,20.0), history_length=5)
+        joint_pos = ObsTerm(func=mdp.joint_pos_rel, noise=Unoise(n_min=-0.01, n_max=0.01), history_length=5)
+
+
+        # Trying the actor with the traj ref and traj actual
+        # ref_traj = ObsTerm(func=mdp.ref_traj, params={"command_name": "traj_ref"})
+        # act_traj = ObsTerm(func=mdp.act_traj, params={"command_name": "traj_ref"})
+        # ref_traj_vel = ObsTerm(func=mdp.ref_traj_vel, params={"command_name": "traj_ref"}, clip=(-20.0, 20.0,))
+        # act_traj_vel = ObsTerm(func=mdp.act_traj_vel, params={"command_name": "traj_ref"}, clip=(-20.0, 20.0,))
 
     @configclass
     class CriticCfg(G1ClfTrackingObservationsCfg.CriticCfg):
         sin_phase = None
         cos_phase = None
 
-        multiskill_phases = ObsTerm(func=mdp.multiskill_phase, params={"frequency_list": [1.0/(2*0.299), 1.0/(2*0.46)]} )
+        multiskill_phases = ObsTerm(func=mdp.multiskill_phase, params={"frequency_list": [1.0/(2*0.299), 1.0/(2*0.46)], "command_name": "traj_ref"} )
 
     policy: PolicyCfg = PolicyCfg()
     critic: CriticCfg = CriticCfg()

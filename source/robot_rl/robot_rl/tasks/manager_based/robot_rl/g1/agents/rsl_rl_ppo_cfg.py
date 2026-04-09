@@ -92,11 +92,16 @@ class SymmetricMoEPPORunnerCfg(PPORunnerCfg):
     )
     # TODO: Try just making the critic an MLP only
     critic = RslRlMLPModelCfg(
-        class_name="robot_rl.network.moe_network:MoEModel",
-        hidden_dims=[256, 128],
+        hidden_dims=[512, 256, 128],
         activation="elu",
         obs_normalization=False,
     )
+    # critic = RslRlMLPModelCfg(
+    #     class_name="robot_rl.network.moe_network:MoEModel",
+    #     hidden_dims=[256, 128],
+    #     activation="elu",
+    #     obs_normalization=False,
+    # )
 
     algorithm = RslRlPpoAlgorithmCfg(
         class_name="robot_rl.network.moe_ppo.MoEPPO",
