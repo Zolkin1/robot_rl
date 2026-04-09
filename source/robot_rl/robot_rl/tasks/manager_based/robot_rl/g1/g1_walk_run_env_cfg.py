@@ -101,9 +101,9 @@ class G1WalkRunCLFEnvCfg(G1ClfTrackingEnvCfg):
         ##
 
         ## CLF Based
-        self.rewards.clf_reward.params["max_eta_err"] = 10.0
-        self.rewards.clf_decreasing_condition.params["eta_max"] = 10.0
-        self.rewards.clf_decreasing_condition.params["eta_dot_max"] = 20.0
+        self.rewards.clf_reward.params["max_eta_err"] = 7.0 # 10
+        self.rewards.clf_decreasing_condition.params["eta_max"] = 7.0 # 10
+        self.rewards.clf_decreasing_condition.params["eta_dot_max"] = 18.0 # 20
 
         # Velocity Tracking
         self.rewards.xy_vel.params["std"] = 0.5
