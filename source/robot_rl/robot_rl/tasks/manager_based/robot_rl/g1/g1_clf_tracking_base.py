@@ -11,7 +11,6 @@ from isaaclab.managers import SceneEntityCfg
 from isaaclab.managers import ObservationTermCfg as ObsTerm
 from isaaclab.utils.noise import UniformNoiseCfg as Unoise
 from isaaclab.managers import ObservationGroupCfg as ObsGroup
-from isaaclab_tasks.manager_based.navigation.config.anymal_c.navigation_env_cfg import ActionsCfg
 from isaaclab.scene import InteractiveSceneCfg
 from isaaclab_physx.physics import PhysxCfg
 from isaaclab.terrains import TerrainImporterCfg

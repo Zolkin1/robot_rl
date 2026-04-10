@@ -2,6 +2,7 @@ from isaaclab.utils import configclass
 
 from robot_rl.tasks.manager_based.robot_rl.g1.g1_clf_tracking_base import G1ClfTrackingEnvCfg
 
+# TODO: I should really put all the single skill cfgs in a single file just to clean up all the env cfg files.
 
 @configclass
 class G1WalkingCLFEnvCfg(G1ClfTrackingEnvCfg):
