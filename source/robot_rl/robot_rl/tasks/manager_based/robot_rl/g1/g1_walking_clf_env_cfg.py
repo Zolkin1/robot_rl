@@ -49,6 +49,29 @@ class G1WalkingCLFEnvCfg(G1ClfTrackingEnvCfg):
         self.scene.height_scanner = None
 
 @configclass
+class G1WalkingCLFTransformerEnvCfg(G1WalkingCLFEnvCfg):
+    """Config for G1 walking with causal transformer policy.
+
+    Sets uniform history_length on all policy observation terms so the
+    transformer can reshape the flat observation into a token sequence.
+    """
+
+    def __post_init__(self):
+        # Must call parent to get walking-specific setup
+        # (removes sin/cos phase, sets commands, terrain, etc.)
+        super().__post_init__()
+
+        # Set uniform history for all policy obs terms (each timestep = 1 token)
+        history_length = 10
+        self.observations.policy.base_ang_vel.history_length = history_length
+        self.observations.policy.projected_gravity.history_length = history_length
+        self.observations.policy.velocity_commands.history_length = history_length
+        self.observations.policy.joint_pos.history_length = history_length
+        self.observations.policy.joint_vel.history_length = history_length
+        self.observations.policy.actions.history_length = history_length
+
+
+@configclass
 class G1WalkingCLFEnvCfg_PLAY(G1WalkingCLFEnvCfg):
     """Configuration for the G1 environment with gait library."""
 

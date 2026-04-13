@@ -2,15 +2,55 @@ from typing import Tuple
 import torch
 import tensordict
 
-def symmetric_data_augmentation_episodic(env, obs: tensordict.TensorDict, actions: torch.Tensor) -> Tuple[tensordict.TensorDict, torch.Tensor]:
+
+def _tile_multiplier(multiplier: torch.Tensor, obs_size: int) -> torch.Tensor:
+    """Tile a per-timestep multiplier to cover the full (possibly history-stacked) obs slice.
+
+    When history_length > 1, the obs term is flattened as [t0_feat, t1_feat, ..., tH_feat].
+    This tiles the single-timestep multiplier H times so element-wise multiply works.
+
+    Args:
+        multiplier: 1D tensor for a single timestep (e.g. [-1, 1, -1] for 3-dim obs).
+        obs_size: Total flattened size of this obs term (single_dim * history_length).
+
+    Returns:
+        Tiled multiplier of shape [obs_size].
     """
-    Augment the data for the RSL RL data augmentation.
+    single_dim = multiplier.shape[0]
+    n_repeats = obs_size // single_dim
+    return multiplier.repeat(n_repeats)
+
+
+def _switch_g1_joints_with_history(flat_joints: torch.Tensor, single_dim: int = 21) -> torch.Tensor:
+    """Apply joint switching that handles history-stacked joint observations.
+
+    Args:
+        flat_joints: [batch, history_length * single_dim] flattened joint obs.
+        single_dim: Number of joints per timestep (default 21).
+
+    Returns:
+        Switched joints with same shape as input.
+    """
+    obs_size = flat_joints.shape[-1]
+    if obs_size == single_dim:
+        return _switch_g1_joints(flat_joints)
+
+    # Reshape to [batch * history_length, single_dim], switch, reshape back
+    batch = flat_joints.shape[0]
+    reshaped = flat_joints.reshape(-1, single_dim)
+    switched = _switch_g1_joints(reshaped)
+    return switched.reshape(batch, obs_size)
+
+
+def symmetric_data_augmentation_episodic(env, obs: tensordict.TensorDict, actions: torch.Tensor) -> Tuple[tensordict.TensorDict, torch.Tensor]:
+    """Augment the data for the RSL RL data augmentation.
 
     obs: Tensor of shape [batch, num_obs]
     actions: Tensor of shape [batch, num_actions]
     env: RL vec env
 
-    Flip the observation and actions.
+    Flip the observation and actions. Handles history-stacked observations
+    by tiling multipliers or reshaping before applying per-timestep transforms.
     """
 
     # Can pull the remapping matrix R from the trajectory manager from the command from the env
@@ -33,31 +73,35 @@ def symmetric_data_augmentation_episodic(env, obs: tensordict.TensorDict, action
                 obs_size = 0
                 if name == "base_ang_vel":
                     obs_size = env.unwrapped.observation_manager.group_obs_term_dim[group][i][0]
+                    multiplier = _tile_multiplier(torch.tensor([-1, 1, -1], device=device), obs_size)
 
                     obs_aug[group][batch_size:, obs_idx:obs_idx + obs_size] = (
-                        obs[group][:, obs_idx:obs_idx + obs_size] * torch.tensor([-1, 1, -1], device=device))
+                        obs[group][:, obs_idx:obs_idx + obs_size] * multiplier)
                 elif name == "base_lin_vel":
                     obs_size = env.unwrapped.observation_manager.group_obs_term_dim[group][i][0]
+                    multiplier = _tile_multiplier(torch.tensor([1, -1, 1], device=device), obs_size)
 
                     obs_aug[group][batch_size:, obs_idx:obs_idx + obs_size] = (
-                        obs[group][:, obs_idx:obs_idx + obs_size] * torch.tensor([1, -1, 1], device=device)
+                        obs[group][:, obs_idx:obs_idx + obs_size] * multiplier
                     )
                 elif name == "projected_gravity":
                     obs_size = env.unwrapped.observation_manager.group_obs_term_dim[group][i][0]
+                    multiplier = _tile_multiplier(torch.tensor([1, -1, 1], device=device), obs_size)
 
                     obs_aug[group][batch_size:, obs_idx:obs_idx + obs_size] = (
-                        obs[group][:, obs_idx:obs_idx + obs_size] * torch.tensor([1, -1, 1], device=device)
+                        obs[group][:, obs_idx:obs_idx + obs_size] * multiplier
                     )
                 elif name == "velocity_commands":
                     obs_size = env.unwrapped.observation_manager.group_obs_term_dim[group][i][0]
+                    multiplier = _tile_multiplier(torch.tensor([1, -1, -1], device=device), obs_size)
 
                     obs_aug[group][batch_size:, obs_idx:obs_idx + obs_size] = (
-                        obs[group][:, obs_idx:obs_idx + obs_size] * torch.tensor([1, -1, -1], device=device)
+                        obs[group][:, obs_idx:obs_idx + obs_size] * multiplier
                     )
                 elif name == "joint_pos" or name == "joint_vel" or name == "actions":
                     obs_size = env.unwrapped.observation_manager.group_obs_term_dim[group][i][0]
                     obs_aug[group][batch_size:, obs_idx:obs_idx + obs_size] = (
-                        _switch_g1_joints(obs[group][:, obs_idx:obs_idx + obs_size])
+                        _switch_g1_joints_with_history(obs[group][:, obs_idx:obs_idx + obs_size])
                     )
                 elif name == "sin_phase" or name == "cos_phase":
                     obs_size = env.unwrapped.observation_manager.group_obs_term_dim[group][i][0]
@@ -74,8 +118,9 @@ def symmetric_data_augmentation_episodic(env, obs: tensordict.TensorDict, action
                     )
                 elif name == "root_quat":
                     obs_size = env.unwrapped.observation_manager.group_obs_term_dim[group][i][0]
+                    multiplier = _tile_multiplier(torch.tensor([-1, 1, -1, 1], device=device), obs_size)
                     obs_aug[group][batch_size:, obs_idx:obs_idx + obs_size] = (
-                        obs[group][:, obs_idx:obs_idx + obs_size] * torch.tensor([-1, 1, -1, 1], device=device)
+                        obs[group][:, obs_idx:obs_idx + obs_size] * multiplier
                     )
                 elif name == "contact_state":
                     obs_size = env.unwrapped.observation_manager.group_obs_term_dim[group][i][0]
@@ -104,14 +149,14 @@ def symmetric_data_augmentation_episodic(env, obs: tensordict.TensorDict, action
     return (obs_aug, actions_aug)
 
 def symmetric_data_augmentation_half_periodic(env, obs: tensordict.TensorDict, actions: torch.Tensor) -> Tuple[tensordict.TensorDict, torch.Tensor]:
-    """
-    Augment the data for the RSL RL data augmentation.
+    """Augment the data for the RSL RL data augmentation.
 
     obs: Tensor of shape [batch, num_obs]
     actions: Tensor of shape [batch, num_actions]
     env: RL vec env
 
-    Flip the observation and actions.
+    Flip the observation and actions. Handles history-stacked observations
+    by tiling multipliers or reshaping before applying per-timestep transforms.
     """
 
     # Can pull the remapping matrix R from the trajectory manager from the command from the env
@@ -134,31 +179,35 @@ def symmetric_data_augmentation_half_periodic(env, obs: tensordict.TensorDict, a
                 obs_size = 0
                 if name == "base_ang_vel":
                     obs_size = env.unwrapped.observation_manager.group_obs_term_dim[group][i][0]
+                    multiplier = _tile_multiplier(torch.tensor([-1, 1, -1], device=device), obs_size)
 
                     obs_aug[group][batch_size:, obs_idx:obs_idx + obs_size] = (
-                        obs[group][:, obs_idx:obs_idx + obs_size] * torch.tensor([-1, 1, -1], device=device))
+                        obs[group][:, obs_idx:obs_idx + obs_size] * multiplier)
                 elif name == "base_lin_vel":
                     obs_size = env.unwrapped.observation_manager.group_obs_term_dim[group][i][0]
+                    multiplier = _tile_multiplier(torch.tensor([1, -1, 1], device=device), obs_size)
 
                     obs_aug[group][batch_size:, obs_idx:obs_idx + obs_size] = (
-                        obs[group][:, obs_idx:obs_idx + obs_size] * torch.tensor([1, -1, 1], device=device)
+                        obs[group][:, obs_idx:obs_idx + obs_size] * multiplier
                     )
                 elif name == "projected_gravity":
                     obs_size = env.unwrapped.observation_manager.group_obs_term_dim[group][i][0]
+                    multiplier = _tile_multiplier(torch.tensor([1, -1, 1], device=device), obs_size)
 
                     obs_aug[group][batch_size:, obs_idx:obs_idx + obs_size] = (
-                        obs[group][:, obs_idx:obs_idx + obs_size] * torch.tensor([1, -1, 1], device=device)
+                        obs[group][:, obs_idx:obs_idx + obs_size] * multiplier
                     )
                 elif name == "velocity_commands":
                     obs_size = env.unwrapped.observation_manager.group_obs_term_dim[group][i][0]
+                    multiplier = _tile_multiplier(torch.tensor([1, -1, -1], device=device), obs_size)
 
                     obs_aug[group][batch_size:, obs_idx:obs_idx + obs_size] = (
-                        obs[group][:, obs_idx:obs_idx + obs_size] * torch.tensor([1, -1, -1], device=device)
+                        obs[group][:, obs_idx:obs_idx + obs_size] * multiplier
                     )
                 elif name == "joint_pos" or name == "joint_vel" or name == "actions":
                     obs_size = env.unwrapped.observation_manager.group_obs_term_dim[group][i][0]
                     obs_aug[group][batch_size:, obs_idx:obs_idx + obs_size] = (
-                        _switch_g1_joints(obs[group][:, obs_idx:obs_idx + obs_size])
+                        _switch_g1_joints_with_history(obs[group][:, obs_idx:obs_idx + obs_size])
                     )
                 elif name == "sin_phase" or name == "cos_phase":
                     obs_size = env.unwrapped.observation_manager.group_obs_term_dim[group][i][0]
@@ -175,8 +224,9 @@ def symmetric_data_augmentation_half_periodic(env, obs: tensordict.TensorDict, a
                     )
                 elif name == "root_quat":
                     obs_size = env.unwrapped.observation_manager.group_obs_term_dim[group][i][0]
+                    multiplier = _tile_multiplier(torch.tensor([-1, 1, -1, 1], device=device), obs_size)
                     obs_aug[group][batch_size:, obs_idx:obs_idx + obs_size] = (
-                        obs[group][:, obs_idx:obs_idx + obs_size] * torch.tensor([-1, 1, -1, 1], device=device)
+                        obs[group][:, obs_idx:obs_idx + obs_size] * multiplier
                     )
                 elif name == "contact_state":
                     obs_size = env.unwrapped.observation_manager.group_obs_term_dim[group][i][0]
