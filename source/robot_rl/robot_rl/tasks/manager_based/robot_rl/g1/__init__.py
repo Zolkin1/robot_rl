@@ -140,7 +140,7 @@ if not _registered:
 
     # Custom network architecture
     gym.register(
-        id="G1-walk-run-clf-custom-arch",
+        id="G1-walk-run-clf-sym-moe",
         entry_point="isaaclab.envs:ManagerBasedRLEnv",
         disable_env_checker=True,
         kwargs={

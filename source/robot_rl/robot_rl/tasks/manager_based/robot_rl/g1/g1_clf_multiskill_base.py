@@ -23,23 +23,23 @@ class G1MultiSkillObservationCfg(G1ClfTrackingObservationsCfg):
         sin_phase = None
         cos_phase = None
 
-        multiskill_phases = ObsTerm(func=mdp.multiskill_phase, params={"frequency_list": [1.0/(2*0.299), 1.0/(2*0.46)], "command_name": "traj_ref"} )
+        # multiskill_phases = ObsTerm(func=mdp.multiskill_phase, params={"frequency_list": [1.0/(2*0.299), 1.0/(2*0.46)], "command_name": "traj_ref"} )
 
-        joint_pos = ObsTerm(func=mdp.joint_pos_rel, noise=Unoise(n_min=-0.01, n_max=0.01), history_length=3)
+        joint_pos = ObsTerm(func=mdp.joint_pos_rel, noise=Unoise(n_min=-0.01, n_max=0.01)) #, history_length=3)
 
 
         # Trying the actor with the traj ref and traj actual
-        # ref_traj = ObsTerm(func=mdp.ref_traj, params={"command_name": "traj_ref"})
-        # act_traj = ObsTerm(func=mdp.act_traj, params={"command_name": "traj_ref"})
-        # ref_traj_vel = ObsTerm(func=mdp.ref_traj_vel, params={"command_name": "traj_ref"}, clip=(-20.0, 20.0,))
-        # act_traj_vel = ObsTerm(func=mdp.act_traj_vel, params={"command_name": "traj_ref"}, clip=(-20.0, 20.0,))
+        ref_traj = ObsTerm(func=mdp.ref_traj, params={"command_name": "traj_ref"})
+        act_traj = ObsTerm(func=mdp.act_traj, params={"command_name": "traj_ref"})
+        ref_traj_vel = ObsTerm(func=mdp.ref_traj_vel, params={"command_name": "traj_ref"}, clip=(-20.0, 20.0,))
+        act_traj_vel = ObsTerm(func=mdp.act_traj_vel, params={"command_name": "traj_ref"}, clip=(-20.0, 20.0,))
 
     @configclass
     class CriticCfg(G1ClfTrackingObservationsCfg.CriticCfg):
         sin_phase = None
         cos_phase = None
 
-        multiskill_phases = ObsTerm(func=mdp.multiskill_phase, params={"frequency_list": [1.0/(2*0.299), 1.0/(2*0.46)], "command_name": "traj_ref"} )
+        # multiskill_phases = ObsTerm(func=mdp.multiskill_phase, params={"frequency_list": [1.0/(2*0.299), 1.0/(2*0.46)], "command_name": "traj_ref"} )
 
     @configclass
     class StudentCfg(PolicyCfg):
