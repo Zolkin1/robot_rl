@@ -29,7 +29,17 @@ class G1WalkingCLFEnvCfg(G1ClfTrackingEnvCfg):
         self.commands.base_velocity.ranges.lin_vel_y = (0, 0) #(-0.5, 0.5)
         self.commands.base_velocity.ranges.ang_vel_z = (0, 0) #(-0.75, 0.75)
         self.commands.base_velocity.ranges.heading = (-3.14,3.14)
-        self.commands.base_velocity.resampling_time_range = (4.0, 8.0)
+        self.commands.base_velocity.resampling_time_range = (3.0, 4.0)
+
+        ##
+        # Observations
+        ##
+        self.observations.policy.joint_pos.history_length = 6
+        self.observations.policy.sin_phase = None
+        self.observations.policy.cos_phase = None
+
+        self.observations.critic.sin_phase = None
+        self.observations.critic.cos_phase = None
 
         ##
         # Terrain
@@ -66,3 +76,5 @@ class G1WalkingCLFEnvCfg_PLAY(G1WalkingCLFEnvCfg):
         self.commands.base_velocity.ranges.lin_vel_x = (0.0, 1.4)
         # self.commands.base_velocity.ranges.lin_vel_y = (-0.5, 0.5)
         # self.commands.base_velocity.ranges.ang_vel_z = (-0.75, 0.75)
+        self.commands.base_velocity.debug_vis = False
+

@@ -329,17 +329,28 @@ class BaseTrajectoryCommand(CommandTerm):
         else:
             ref_frame_indices = self.manager.get_ref_frames_in_use(t, self.ref_frames, env_ids)
 
-        # TODO: Previously, ref_poses were only updated when the reference frame
-        #   body was in contact with the ground (contact-gating). This was removed
-        #   for simplicity. If we see weird reference frame bugs (e.g. ref frame
-        #   updating while foot is mid-swing), re-add contact state check here.
+        # Contact-gating: only update ref_poses when the reference frame body
+        # is actually in contact with the ground. This prevents snapping to a
+        # foot that is mid-swing (e.g. during a skill transition).
+        # TODO: On a skill switch the new trajectory may be out of phase with the
+        #   robot (e.g. right foot is currently on the ground but the new skill's
+        #   domain expects left foot down). We may want to phase-align the new
+        #   trajectory so the stance foot matches, or offset the time into the
+        #   new trajectory by half a period.
+        contact_state = self.get_contact_state(t, env_ids)
+        contact_frame_indices = self.ref_to_contact_idx[ref_frame_indices]
+        ref_in_contact = torch.gather(
+            contact_state, 1, contact_frame_indices.unsqueeze(1)
+        ).squeeze(1)
+        changed_and_contact = changed & (ref_in_contact > 0)
+
         if env_ids is None:
-            if torch.any(changed):
-                env_indices = torch.where(changed)[0]
+            if torch.any(changed_and_contact):
+                env_indices = torch.where(changed_and_contact)[0]
                 self.ref_poses[env_indices, :] = ref_poses[env_indices, ref_frame_indices[env_indices], :]
         else:
-            if torch.any(changed):
-                subset_indices = torch.where(changed)[0]
+            if torch.any(changed_and_contact):
+                subset_indices = torch.where(changed_and_contact)[0]
                 global_env_indices = env_ids[subset_indices]
                 self.ref_poses[global_env_indices, :] = ref_poses[
                     global_env_indices, ref_frame_indices[subset_indices], :

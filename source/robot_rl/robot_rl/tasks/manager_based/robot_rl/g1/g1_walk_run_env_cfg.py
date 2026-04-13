@@ -93,16 +93,16 @@ class G1WalkRunCLFEnvCfg(G1MultiSkillCLFEnvCfg):
         self.commands.base_velocity.ranges.lin_vel_y = (0, 0) #(-0.5, 0.5)
         self.commands.base_velocity.ranges.ang_vel_z = (0, 0) #(-0.75, 0.75)
         self.commands.base_velocity.ranges.heading = (-3.14,3.14)
-        self.commands.base_velocity.resampling_time_range = (2.0, 2.0) #(4.0, 8.0)
+        self.commands.base_velocity.resampling_time_range = (4.0, 8.0)
 
         ##
         # Rewards
         ##
 
         ## CLF Based
-        self.rewards.clf_reward.params["max_eta_err"] = 7.0 # 10
-        self.rewards.clf_decreasing_condition.params["eta_max"] = 7.0 # 10
-        self.rewards.clf_decreasing_condition.params["eta_dot_max"] = 18.0 # 20
+        self.rewards.clf_reward.params["max_eta_err"] = 6.0 # 10
+        self.rewards.clf_decreasing_condition.params["eta_max"] = 6.0 # 10
+        self.rewards.clf_decreasing_condition.params["eta_dot_max"] = 15.0 # 20
 
         # Velocity Tracking
         self.rewards.xy_vel.params["std"] = 0.5
@@ -129,13 +129,13 @@ class G1WalkRunCLFEnvCfgPlay(G1WalkRunCLFEnvCfg):
     def __post_init__(self):
         super().__post_init__()
 
-        self.commands.base_velocity.ranges.lin_vel_x = (3.6, 3.6)
+        self.commands.base_velocity.ranges.lin_vel_x = (0.0, 3.6)
         self.commands.base_velocity.ranges.lin_vel_y = (0.0, 0.0)
         self.commands.base_velocity.ranges.ang_vel_z = (0.0, 0.0)
         # self.commands.base_velocity.ranges.lin_vel_x = (1.1, 3.7)
         # self.commands.base_velocity.ranges.lin_vel_y = (-0.75, 0.75)
         # self.commands.base_velocity.ranges.ang_vel_z = (-0.75, 0.75)
-        self.commands.base_velocity.ranges.resampling_time_range=(5.0, 5.0) #(4.0, 4.0) #(3.0, 4.0)
+        self.commands.base_velocity.ranges.resampling_time_range=(2.0, 2.0) #(4.0, 4.0) #(3.0, 4.0)
         self.commands.base_velocity.debug_vis = False
 
         self.episode_length_s = 10.0 #4.0 #6.0

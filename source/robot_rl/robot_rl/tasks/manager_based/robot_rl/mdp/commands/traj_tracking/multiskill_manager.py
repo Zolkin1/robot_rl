@@ -546,12 +546,25 @@ class MultiSkillManager(ManagerBase):
             # --- Skill transition detection --------------------------------
             new_skill_indices = self.data["skill_idx"][new_indices]
             if self._prev_skill_indices is not None:
-                self._skill_changed = new_skill_indices != self._prev_skill_indices
+                if env_ids is not None:
+                    self._skill_changed = new_skill_indices != self._prev_skill_indices[env_ids]
+                    self._prev_skill_indices[env_ids] = new_skill_indices
+                else:
+                    self._skill_changed = new_skill_indices != self._prev_skill_indices
+                    self._prev_skill_indices = new_skill_indices
             else:
                 self._skill_changed = torch.zeros(
                     new_indices.shape[0], dtype=torch.bool, device=self.device,
                 )
-            self._prev_skill_indices = new_skill_indices
+                # First call — store full-batch size regardless of env_ids
+                if env_ids is not None:
+                    N_total = self.env.num_envs
+                    self._prev_skill_indices = torch.zeros(
+                        N_total, dtype=torch.long, device=self.device,
+                    )
+                    self._prev_skill_indices[env_ids] = new_skill_indices
+                else:
+                    self._prev_skill_indices = new_skill_indices
 
             self._cached_global_indices = new_indices
         else:

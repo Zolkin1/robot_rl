@@ -20,6 +20,10 @@ class RLPolicy:
 
         self.action_isaac = np.zeros(self.get_num_actions())
 
+        # History buffers for observation terms with history_length > 0
+        # Maps term_name -> list of np.ndarray (oldest to newest)
+        self.history_buffers: dict[str, list[np.ndarray]] = {}
+
         self.phi = 0.0
         self.prev_phi = 0.0
         self.last_zero_time = 0.0
@@ -116,57 +120,60 @@ class RLPolicy:
 
         # Create the observation
         obs_idx = 0
-        for term, shape, scale in obs_terms:
+        for term_info in obs_terms:
+            term = term_info["name"]
+            shape = term_info["shape"]
+            scale = term_info["scale"]
+            history_length = term_info["history_length"]
+
+            # Compute the single-step observation for this term
             if term == "base_ang_vel":
-                obs_np[obs_idx:obs_idx+shape] = self.create_base_ang_vel_obs(vfb_ang) * scale
-                obs_idx += shape
+                raw_obs = self.create_base_ang_vel_obs(vfb_ang)
             elif term == "projected_gravity":
-                obs_np[obs_idx:obs_idx+shape] = self.create_projected_gravity_obs(quat) * scale
-                obs_idx += shape
+                raw_obs = self.create_projected_gravity_obs(quat)
             elif term == "velocity_commands":
-                obs_np[obs_idx:obs_idx+shape] = self.create_velocity_commands_obs(cmd_vel) * scale
-                obs_idx += shape
+                raw_obs = self.create_velocity_commands_obs(cmd_vel)
             elif term == "joint_pos":
-                obs_np[obs_idx:obs_idx+shape] = self.create_joint_pos_obs(qjoints_isaac) * scale
-                obs_idx += shape
+                raw_obs = self.create_joint_pos_obs(qjoints_isaac)
             elif term == "joint_vel":
-                obs_np[obs_idx:obs_idx+shape] = self.create_joint_vel_obs(vjoints_isaac) * scale
-                obs_idx += shape
+                raw_obs = self.create_joint_vel_obs(vjoints_isaac)
             elif term == "actions":
-                obs_np[obs_idx:obs_idx+shape] = self.create_action_obs() * scale
-                obs_idx += shape
+                raw_obs = self.create_action_obs()
             elif term == "sin_phase":
                 if self.get_skill_type() == "periodic" or self.get_skill_type() == "half_periodic":
-                    # if np.linalg.norm(cmd_vel) > 0.1:
-                    obs_np[obs_idx:obs_idx+shape] = self.create_sin_phase_obs(self.phi, 1.0) #time, 1.0/(self.get_total_time())) * scale
-                    # else:
-                    #     obs_np[obs_idx:obs_idx+shape] = 0 * scale
+                    raw_obs = self.create_sin_phase_obs(self.phi, 1.0)
                 elif self.get_skill_type() == "episodic":
-                    phi = (min(self.get_total_time() - 1e-8, time) % self.get_total_time())/self.get_total_time()
-                    # phi = 0
-                    obs_np[obs_idx:obs_idx + shape] = self.create_sin_phase_obs(phi, 1.0) * scale
+                    phi = (min(self.get_total_time() - 1e-8, time) % self.get_total_time()) / self.get_total_time()
+                    raw_obs = self.create_sin_phase_obs(phi, 1.0)
                 else:
                     raise NotImplementedError(f"Skill type {self.get_skill_type()} is not implemented yet!")
-
-                obs_idx += shape
-
             elif term == "cos_phase":
                 if self.get_skill_type() == "periodic" or self.get_skill_type() == "half_periodic":
-                    # if np.linalg.norm(cmd_vel) > 0.1:
-                    obs_np[obs_idx:obs_idx+shape] = self.create_cos_phase_obs(self.phi, 1.0) #time, 1.0/(self.get_total_time())) * scale
-                    # else:
-                    #     obs_np[obs_idx:obs_idx+shape] = 1 * scale
+                    raw_obs = self.create_cos_phase_obs(self.phi, 1.0)
                 elif self.get_skill_type() == "episodic":
-                    phi = (min(self.get_total_time() - 1e-8, time) % self.get_total_time())/self.get_total_time()
-                    # phi = 0
-                    # print(f"phi: {phi}, time: {time}")
-                    obs_np[obs_idx:obs_idx + shape] = self.create_cos_phase_obs(phi, 1.0) * scale
-                    # print(f"cos phase: {self.create_cos_phase_obs(phi, 1.0)}")
+                    phi = (min(self.get_total_time() - 1e-8, time) % self.get_total_time()) / self.get_total_time()
+                    raw_obs = self.create_cos_phase_obs(phi, 1.0)
                 else:
                     raise NotImplementedError(f"Skill type {self.get_skill_type()} is not implemented yet!")
-                obs_idx += shape
+            elif term == "multiskill_phases":
+                frequency_list = term_info["frequency_list"]
+                if frequency_list is None:
+                    raise ValueError("multiskill_phases term requires frequency_list in exported parameters!")
+                raw_obs = self.create_multiskill_phases_obs(time, frequency_list)
             else:
-                raise NotImplementedError("Observation term not implemented yet!")
+                raise NotImplementedError(f"Observation term '{term}' not implemented yet!")
+
+            # Ensure raw_obs is a numpy array
+            raw_obs = np.atleast_1d(np.asarray(raw_obs, dtype=np.float32))
+
+            # Apply history buffer if needed
+            if history_length > 0:
+                obs_val = self._update_history(term, raw_obs, history_length) * scale
+            else:
+                obs_val = raw_obs * scale
+
+            obs_np[obs_idx:obs_idx + shape] = obs_val
+            obs_idx += shape
 
         return torch.from_numpy(obs_np).unsqueeze(0)
 
@@ -236,6 +243,47 @@ class RLPolicy:
         """Create the cosine phase observation."""
         return np.cos(2 * np.pi * time * freq)
 
+    def create_multiskill_phases_obs(self, time: float, frequency_list: list[float]) -> np.ndarray:
+        """Create the multiskill phases observation.
+
+        Computes sin and cos at each frequency, concatenated as [sin_f0, sin_f1, ..., cos_f0, cos_f1, ...].
+
+        Args:
+            time: Elapsed episode time in seconds.
+            frequency_list: List of frequencies in Hz.
+
+        Returns:
+            Array of shape (2 * len(frequency_list),).
+        """
+        sin_vals = [np.sin(2 * np.pi * f * time) for f in frequency_list]
+        cos_vals = [np.cos(2 * np.pi * f * time) for f in frequency_list]
+        return np.array(sin_vals + cos_vals, dtype=np.float32)
+
+    def _update_history(self, term_name: str, new_obs: np.ndarray, history_length: int) -> np.ndarray:
+        """Update the history buffer for a term and return the flattened history.
+
+        On first call, fills the entire buffer with the initial observation (matching IsaacLab behavior).
+        Returns oldest-to-newest flattened: [obs_t-(H-1), ..., obs_t-1, obs_t].
+
+        Args:
+            term_name: Name of the observation term.
+            new_obs: The current single-step observation.
+            history_length: Number of timesteps to buffer.
+
+        Returns:
+            Flattened history array of shape (history_length * base_dim,).
+        """
+        if term_name not in self.history_buffers:
+            # First call: fill entire buffer with the initial observation
+            self.history_buffers[term_name] = [new_obs.copy() for _ in range(history_length)]
+        else:
+            buf = self.history_buffers[term_name]
+            buf.append(new_obs.copy())
+            if len(buf) > history_length:
+                buf.pop(0)
+
+        return np.concatenate(self.history_buffers[term_name])
+
     ##
     # Joint Conversions
     ##
@@ -283,16 +331,22 @@ class RLPolicy:
         """Get the number of actions from the policy_params file."""
         return self.policy_params['num_actions']
 
-    def get_obs_terms(self) -> list[tuple[str, int, float | list[float]]]:
-        """Get the observation term names, shape, and scale in the correct order from the policy_params file.
+    def get_obs_terms(self) -> list[dict]:
+        """Get the observation term info in the correct order from the policy_params file.
 
         Returns:
-            List of tuples containing (term_name, shape, scale)
+            List of dicts with keys: name, shape, scale, history_length, frequency_list.
         """
         obs_terms = []
         if 'observation_terms' in self.policy_params and 'policy' in self.policy_params['observation_terms']:
             for term_name, term_info in self.policy_params['observation_terms']['policy'].items():
-                obs_terms.append((term_name, term_info['shape'], term_info['scale']))
+                obs_terms.append({
+                    "name": term_name,
+                    "shape": term_info['shape'],
+                    "scale": term_info['scale'],
+                    "history_length": term_info.get('history_length', 0),
+                    "frequency_list": term_info.get('frequency_list', None),
+                })
         return obs_terms
 
     def get_dt(self) -> float:

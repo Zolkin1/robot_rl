@@ -209,6 +209,16 @@ def export_policy_parameters(env, obs, actions, save_dir):
             else:
                 term_info["scale"] = 1.0
 
+            # Export history_length if present (defaults to 0 = no history)
+            history_len = getattr(term_cfg, 'history_length', 0)
+            if history_len > 0:
+                term_info["history_length"] = history_len
+
+            # Export frequency_list for multiskill_phase terms
+            term_params = getattr(term_cfg, 'params', None)
+            if term_params and 'frequency_list' in term_params:
+                term_info["frequency_list"] = term_params['frequency_list']
+
             obs_info[group_name][term_name] = term_info
 
     params["observation_terms"] = obs_info
@@ -242,12 +252,14 @@ def export_policy_parameters(env, obs, actions, save_dir):
     if 'valid_ic_vel' in params:
         params['valid_ic_vel'] = FlowStyleList(params['valid_ic_vel'])
 
-    # Convert all scale lists in observation_terms to flow style
+    # Convert all scale and frequency_list lists in observation_terms to flow style
     if 'observation_terms' in params:
         for group_name, group_terms in params['observation_terms'].items():
             for term_name, term_info in group_terms.items():
                 if 'scale' in term_info and isinstance(term_info['scale'], list):
                     term_info['scale'] = FlowStyleList(term_info['scale'])
+                if 'frequency_list' in term_info and isinstance(term_info['frequency_list'], list):
+                    term_info['frequency_list'] = FlowStyleList(term_info['frequency_list'])
 
     # Save to YAML file
     yaml_path = os.path.join(export_dir, "policy_parameters.yaml")
