@@ -13,13 +13,11 @@ if TYPE_CHECKING:
 def ref_traj(env: ManagerBasedRLEnv, command_name:str = "hlip_ref") -> torch.Tensor:
     cmd = env.command_manager.get_term(command_name)
     ref_traj = cmd.y_des.clone()
-    # ref_traj[:,8] *= 50.0       # TODO: What is this?
     return ref_traj
 
 def act_traj(env: ManagerBasedRLEnv, command_name:str = "hlip_ref") -> torch.Tensor:
     cmd = env.command_manager.get_term(command_name)
     act_traj = cmd.y_act.clone()
-    # act_traj[:,8] *= 50.0   # TODO: What is this?
     return act_traj
 
 def ref_traj_vel(env: ManagerBasedRLEnv, command_name:str = "hlip_ref") -> torch.Tensor:
