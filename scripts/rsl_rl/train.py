@@ -165,7 +165,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
             env = multi_agent_to_single_agent(env)
 
         # save resume path before creating a new log_dir
-        if agent_cfg.algorithm.class_name == "Distillation":
+        if agent_cfg.class_name == "DistillationRunner":
             # Resolve teacher checkpoint from a (potentially different) experiment directory
             teacher_experiment = getattr(args_cli, "teacher_experiment", None) or agent_cfg.teacher_experiment_name
             teacher_run = getattr(args_cli, "teacher_run", None) or agent_cfg.teacher_load_run
@@ -215,7 +215,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         # write git state to logs
         runner.add_git_repo_to_log(__file__)
         # load the checkpoint
-        if agent_cfg.resume or agent_cfg.algorithm.class_name == "Distillation":
+        if agent_cfg.resume or agent_cfg.class_name == "DistillationRunner":
             print(f"[INFO]: Loading model checkpoint from: {resume_path}")
             # load previously trained model
             runner.load(resume_path)
