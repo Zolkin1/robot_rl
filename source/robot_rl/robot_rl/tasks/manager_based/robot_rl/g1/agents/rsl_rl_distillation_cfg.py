@@ -10,7 +10,7 @@ from isaaclab_rl.rsl_rl import (
 # MLP -> MLP Multiskill Distillation
 ##
 @configclass
-class G1nMulitskillMLP2MLPDistillationRunner(RslRlDistillationRunnerCfg):
+class G1nMulitskillMLP2MLPDistillationRunner(RslRlDistillationRunnerCfg):   # TODO: Refactor to fix the spelling error
     """Distillation runner config for the G1 walk-run task.
         Uses an MLP Teacher and an MLP Student.
     """
@@ -111,8 +111,9 @@ class G1MultiskillMoE2MoEDistillationRunnerCfg(G1nMulitskillMLP2MLPDistillationR
     algorithm = RslRlDistillationAlgorithmCfg(
         class_name="robot_rl.network.moe_distillation:MoEDistillation",
         num_learning_epochs=2,
-        learning_rate=1.0e-3,
-        gradient_length=15,
+        learning_rate=5.0e-4,
+        gradient_length=1,
+        loss_type="huber",
     )
 
 ##
@@ -144,6 +145,7 @@ class G1MultiskillMLP2MoEDistillationRunnerCfg(G1nMulitskillMLP2MLPDistillationR
     algorithm = RslRlDistillationAlgorithmCfg(
         class_name="robot_rl.network.moe_distillation:MoEDistillation",
         num_learning_epochs=2,
-        learning_rate=1.0e-3,
-        gradient_length=15,
+        learning_rate=5.0e-4,
+        gradient_length=1,
+        loss_type="huber",
     )
