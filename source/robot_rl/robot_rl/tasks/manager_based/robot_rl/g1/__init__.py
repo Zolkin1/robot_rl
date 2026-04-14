@@ -150,7 +150,7 @@ if not _registered:
             "env_cfg_entry_point": f"{__name__}.g1_walk_run_env_cfg:G1WalkRunCLFDistillationEnvCfg",
             "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_rl_ppo_cfg:SymmetricHalfPeriodicPPORunnerCfg",
             "rsl_rl_distillation_cfg_entry_point": (
-                f"{agents.__name__}.rsl_rl_distillation_cfg:G1nMulitskillMLP2MLPDistillationRunner"
+                f"{agents.__name__}.rsl_rl_distillation_cfg:G1MulitskillMLP2MLPDistillationRunner"
             ),
         }
     )
@@ -163,6 +163,20 @@ if not _registered:
         kwargs={
             "env_cfg_entry_point": f"{__name__}.g1_walk_run_env_cfg:G1WalkRunCLFEnvCfgPlay",
             "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_rl_ppo_cfg:PPORunnerCfg",
+        }
+    )
+
+    # MLP teacher -> LSTM student
+    gym.register(
+        id="G1-walk-run-clf-distill-mlp2lstm",
+        entry_point="isaaclab.envs:ManagerBasedRLEnv",
+        disable_env_checker=True,
+        kwargs={
+            "env_cfg_entry_point": f"{__name__}.g1_walk_run_env_cfg:G1WalkRunCLFDistillationEnvCfg",
+            "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_rl_ppo_cfg:SymmetricHalfPeriodicPPORunnerCfg",
+            "rsl_rl_distillation_cfg_entry_point": (
+                f"{agents.__name__}.rsl_rl_distillation_cfg:G1MultiskillMLP2LSTMDistillationRunnerCfg"
+            ),
         }
     )
 

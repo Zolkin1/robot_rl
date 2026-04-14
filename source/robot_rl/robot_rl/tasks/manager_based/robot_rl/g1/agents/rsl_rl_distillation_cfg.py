@@ -4,13 +4,14 @@ from isaaclab_rl.rsl_rl import (
     RslRlDistillationAlgorithmCfg,
     RslRlDistillationRunnerCfg,
     RslRlMLPModelCfg,
+    RslRlRNNModelCfg,
 )
 
 ##
 # MLP -> MLP Multiskill Distillation
 ##
 @configclass
-class G1nMulitskillMLP2MLPDistillationRunner(RslRlDistillationRunnerCfg):   # TODO: Refactor to fix the spelling error
+class G1MulitskillMLP2MLPDistillationRunner(RslRlDistillationRunnerCfg):
     """Distillation runner config for the G1 walk-run task.
         Uses an MLP Teacher and an MLP Student.
     """
@@ -30,7 +31,7 @@ class G1nMulitskillMLP2MLPDistillationRunner(RslRlDistillationRunnerCfg):   # TO
     teacher_load_checkpoint: str = "model_.*.pt"
 
     student = RslRlMLPModelCfg(
-        hidden_dims=[512, 256, 128],
+        hidden_dims=[512, 256, 128],    # NOTE: Trying to increase the MLP size to see if that will help
         activation="elu",
         obs_normalization=False,
         distribution_cfg=RslRlMLPModelCfg.GaussianDistributionCfg(init_std=0.1),
@@ -52,7 +53,7 @@ class G1nMulitskillMLP2MLPDistillationRunner(RslRlDistillationRunnerCfg):   # TO
 # MoE -> MLP Walk-Run Distillation
 ##
 @configclass
-class G1MultiskillMoE2MLPDistillationRunnerCfg(G1nMulitskillMLP2MLPDistillationRunner):
+class G1MultiskillMoE2MLPDistillationRunnerCfg(G1MulitskillMLP2MLPDistillationRunner):
     """Distillation runner config for the G1 walk-run task."""
 
     # Teacher checkpoint loading — these specify where to find the pre-trained teacher.
@@ -85,7 +86,7 @@ class G1MultiskillMoE2MLPDistillationRunnerCfg(G1nMulitskillMLP2MLPDistillationR
 # MoE -> MoE Walk-Run Distillation
 ##
 @configclass
-class G1MultiskillMoE2MoEDistillationRunnerCfg(G1nMulitskillMLP2MLPDistillationRunner):
+class G1MultiskillMoE2MoEDistillationRunnerCfg(G1MulitskillMLP2MLPDistillationRunner):
     """Distillation runner config for the G1 walk-run task."""
 
     # Teacher checkpoint loading — these specify where to find the pre-trained teacher.
@@ -120,7 +121,7 @@ class G1MultiskillMoE2MoEDistillationRunnerCfg(G1nMulitskillMLP2MLPDistillationR
 # MLP -> MoE Walk-Run Distillation
 ##
 @configclass
-class G1MultiskillMLP2MoEDistillationRunnerCfg(G1nMulitskillMLP2MLPDistillationRunner):
+class G1MultiskillMLP2MoEDistillationRunnerCfg(G1MulitskillMLP2MLPDistillationRunner):
     """Distillation runner config for the G1 walk-run task."""
 
     # Teacher checkpoint loading — these specify where to find the pre-trained teacher.
@@ -147,5 +148,37 @@ class G1MultiskillMLP2MoEDistillationRunnerCfg(G1nMulitskillMLP2MLPDistillationR
         num_learning_epochs=2,
         learning_rate=5.0e-4,
         gradient_length=1,
+        loss_type="huber",
+    )
+
+
+##
+# MLP -> LSTM Walk-Run Distillation
+##
+@configclass
+class G1MultiskillMLP2LSTMDistillationRunnerCfg(G1MulitskillMLP2MLPDistillationRunner):
+    """Distillation runner config for the G1 walk-run task.
+    Uses an MLP Teacher and an LSTM Student.
+    """
+
+    student = RslRlRNNModelCfg(
+        hidden_dims=[256, 128],
+        activation="elu",
+        obs_normalization=False,
+        distribution_cfg=RslRlMLPModelCfg.GaussianDistributionCfg(init_std=0.1),
+        rnn_type="lstm",
+        rnn_hidden_dim=256,
+        rnn_num_layers=1,
+    )
+    teacher = RslRlMLPModelCfg(
+        hidden_dims=[512, 256, 128],
+        activation="elu",
+        obs_normalization=False,
+        distribution_cfg=RslRlMLPModelCfg.GaussianDistributionCfg(init_std=1.0, std_type="log"),
+    )
+    algorithm = RslRlDistillationAlgorithmCfg(
+        num_learning_epochs=2,
+        learning_rate=5.0e-4,
+        gradient_length=15,  # BPTT window for LSTM temporal learning
         loss_type="huber",
     )

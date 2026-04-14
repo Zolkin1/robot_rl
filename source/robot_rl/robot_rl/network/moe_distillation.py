@@ -47,7 +47,7 @@ class MoEDistillation(Distillation):
                 # MoE load balancing loss on the student's gate weights
                 latent = self.student.get_latent(batch.observations)
                 gate_weights = self.student.mlp.gate(latent)
-                lb_loss = load_balancing_loss(gate_weights)
+                lb_loss = load_balancing_loss(gate_weights)     # TODO: Need to make sure this makes sense with the sampled data. need to make sure in each batch we have a good distribution of each skill
 
                 # total loss (accumulated over gradient_length steps)
                 loss = loss + behavior_loss + self.load_balance_coef * lb_loss

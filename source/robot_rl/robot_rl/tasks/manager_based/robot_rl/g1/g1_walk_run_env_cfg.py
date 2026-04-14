@@ -70,6 +70,7 @@ class G1WalkRunCLFDistillationEnvCfg(G1WalkRunCLFEnvCfg):
         self.commands.base_velocity.ranges.lin_vel_x = (0.0, 1.4)
 
 
+
 @configclass
 class G1WalkRunCLFEnvCfgPlay(G1WalkRunCLFEnvCfg):
     """Configuration for the G1 running gait library play environment."""
