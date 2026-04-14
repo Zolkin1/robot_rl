@@ -24,6 +24,7 @@ from isaaclab.utils.math import (
 
 from .clf import CLF
 from .manager_base import ManagerBase
+from .sagittal_reflector import NamedReflector, SagittalReflectionConfig
 from .trajectory_manager import TrajectoryType
 
 
@@ -99,6 +100,12 @@ class BaseTrajectoryCommand(CommandTerm):
         # --- Order manager outputs to match our ordering ------------------
         self.manager.order_outputs(self.ordered_pos_output_names, self.ordered_vel_output_names)
         self.body_type = torch.tensor(self.body_type, dtype=torch.int, device=self.device)
+
+        # --- Precomputed reflectors for sagittal symmetry -----------------
+        _rcfg = SagittalReflectionConfig()
+        self._traj_pos_reflector = NamedReflector(_rcfg, self.ordered_pos_output_names, self.device)
+        self._traj_vel_reflector = NamedReflector(_rcfg, self.ordered_vel_output_names, self.device)
+        self._contact_reflector = NamedReflector(_rcfg, self.contact_bodies, self.device)
 
         # --- vel_to_pos_idx mapping (pos includes ori_w, vel excludes it) -
         self.vel_to_pos_idx = torch.zeros(len(self.ordered_vel_output_names), dtype=torch.long, device=self.device)
@@ -253,18 +260,7 @@ class BaseTrajectoryCommand(CommandTerm):
         Returns:
             Symmetric contacts of the same shape.
         """
-        symmetric_contacts = contacts.clone()
-        for i, frame_name in enumerate(self.contact_bodies):
-            if "left" in frame_name:
-                symmetric_frame = frame_name.replace("left", "right")
-            elif "right" in frame_name:
-                symmetric_frame = frame_name.replace("right", "left")
-            else:
-                continue
-            if symmetric_frame in self.contact_bodies:
-                j = self.contact_bodies.index(symmetric_frame)
-                symmetric_contacts[:, i] = contacts[:, j]
-        return symmetric_contacts
+        return self._contact_reflector.reflect(contacts)
 
     # ------------------------------------------------------------------
     # Trajectory type
@@ -540,26 +536,8 @@ class BaseTrajectoryCommand(CommandTerm):
         Returns:
             Symmetric trajectory of the same shape.
         """
-        symmetric_traj = traj.clone()
-        output_names = self.ordered_vel_output_names if traj_type == "vel" else self.ordered_pos_output_names
-
-        for i, output_name in enumerate(output_names):
-            if "left" in output_name:
-                symmetric_name = output_name.replace("left", "right")
-            elif "right" in output_name:
-                symmetric_name = output_name.replace("right", "left")
-            else:
-                if any(axis in output_name for axis in ["pos_y", "ori_x", "ori_z", "roll_joint", "yaw_joint"]):
-                    symmetric_traj[:, i] = -traj[:, i]
-                continue
-
-            if symmetric_name in output_names:
-                j = output_names.index(symmetric_name)
-                symmetric_traj[:, i] = traj[:, j]
-                if any(axis in output_name for axis in ["pos_y", "ori_x", "ori_z", "roll_joint", "yaw_joint"]):
-                    symmetric_traj[:, i] = -symmetric_traj[:, i]
-
-        return symmetric_traj
+        reflector = self._traj_vel_reflector if traj_type == "vel" else self._traj_pos_reflector
+        return reflector.reflect(traj)
 
     # ------------------------------------------------------------------
     # CommandTerm interface

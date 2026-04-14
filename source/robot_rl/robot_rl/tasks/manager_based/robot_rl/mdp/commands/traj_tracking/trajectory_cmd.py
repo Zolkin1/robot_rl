@@ -7,6 +7,7 @@ from isaaclab.managers import CommandTerm
 
 from .clf import CLF
 from .library_manager import LibraryManager
+from .sagittal_reflector import NamedReflector, SagittalReflectionConfig
 from .trajectory_manager import TrajectoryManager
 from .trajectory_manager import TrajectoryType
 
@@ -75,6 +76,12 @@ class TrajectoryCommand(CommandTerm):
         self.manager.order_outputs(self.ordered_pos_output_names, self.ordered_vel_output_names)
 
         self.body_type = torch.tensor(self.body_type, dtype=torch.int, device=self.device)
+
+        # --- Precomputed reflectors for sagittal symmetry -----------------
+        _rcfg = SagittalReflectionConfig()
+        self._traj_pos_reflector = NamedReflector(_rcfg, self.ordered_pos_output_names, self.device)
+        self._traj_vel_reflector = NamedReflector(_rcfg, self.ordered_vel_output_names, self.device)
+        self._contact_reflector = NamedReflector(_rcfg, self.contact_bodies, self.device)
 
         print(f"Ordered pos output names: {self.ordered_pos_output_names}")
         print(f"Ordered vel output names: {self.ordered_vel_output_names}")
@@ -273,39 +280,16 @@ class TrajectoryCommand(CommandTerm):
         """
         return self.manager.get_contact_state(t, self.contact_bodies, env_ids)
 
-    def get_symmetric_contacts(self, contacts):
-        """
-        Get the left-right symmetric reflection of the contacts.
-
-        If a left contact is a 1 then make it 0 and make the right contact 1. And vice-versa.
+    def get_symmetric_contacts(self, contacts: torch.Tensor) -> torch.Tensor:
+        """Return the left-right symmetric reflection of *contacts*.
 
         Args:
-            contacts: Tensor of shape [N, num_contacts] with contact states
+            contacts: ``[N, num_contacts]`` contact states.
 
         Returns:
-            Symmetric contacts tensor of shape [N, num_contacts]
+            Symmetric contacts of the same shape.
         """
-        # Create a copy to avoid modifying the original
-        symmetric_contacts = contacts.clone()
-
-        # Create a mapping of contact indices to their symmetric counterparts
-        for i, frame_name in enumerate(self.contact_bodies):
-            # Find the symmetric frame
-            if "left" in frame_name:
-                symmetric_frame = frame_name.replace("left", "right")
-            elif "right" in frame_name:
-                symmetric_frame = frame_name.replace("right", "left")
-            else:
-                # No symmetry for this frame (e.g., center frame)
-                continue
-
-            # Find the index of the symmetric frame
-            if symmetric_frame in self.contact_bodies:
-                j = self.contact_bodies.index(symmetric_frame)
-                # Swap the contact states
-                symmetric_contacts[:, i] = contacts[:, j]
-
-        return symmetric_contacts
+        return self._contact_reflector.reflect(contacts)
 
 
     def get_trajectory_type(self):
@@ -745,56 +729,19 @@ class TrajectoryCommand(CommandTerm):
         self.user_heuristic = heuristic_func
 
     def get_symmetric_traj(self, traj: torch.Tensor, traj_type: str) -> torch.Tensor:
-        """
-        Computes the symmetric version of the trajectory.
+        """Return the left-right symmetric reflection of a trajectory.
 
-        Goes through each of the output names and swaps the values if there is a corresponding right/left symmetric output.
-
-        Need to negate the values for any pos_y or ori_x, ori_z.
+        Swaps left/right outputs and negates pos_y, ori_x, ori_z, roll, yaw.
 
         Args:
-            traj: Trajectory tensor of shape [N, num_outputs]
+            traj: ``[N, num_outputs]`` trajectory tensor.
+            traj_type: ``"vel"`` or ``"pos"`` to select the output name list.
 
         Returns:
-            Symmetric trajectory tensor of shape [N, num_outputs]
-
-        TODO: Does this work with any reference frame? Specifically think about pos_y
+            Symmetric trajectory of the same shape.
         """
-        # Create a copy to avoid modifying the original
-        symmetric_traj = traj.clone()
-
-        # Use velocity output names since this is typically used with CLF
-        if traj_type == "vel":
-            output_names = self.ordered_vel_output_names
-        else:
-            output_names = self.ordered_pos_output_names
-
-        # Create a mapping from each output to its symmetric counterpart
-        for i, output_name in enumerate(output_names):
-            # Find the symmetric output name
-            if "left" in output_name:
-                symmetric_name = output_name.replace("left", "right")
-            elif "right" in output_name:
-                symmetric_name = output_name.replace("right", "left")
-            else:
-                # No left/right symmetry (e.g., COM, waist), but may need sign flip
-                # Check if this axis needs negation
-                if any(axis in output_name for axis in ["pos_y", "ori_x", "ori_z", "roll_joint", "yaw_joint"]):
-                    symmetric_traj[:, i] = -traj[:, i]
-                continue
-
-            # Find the index of the symmetric output
-            if symmetric_name in output_names:
-                j = output_names.index(symmetric_name)
-
-                # Swap the values
-                symmetric_traj[:, i] = traj[:, j]
-
-                # Apply sign flip for specific axes
-                if any(axis in output_name for axis in ["pos_y", "ori_x", "ori_z", "roll_joint", "yaw_joint"]):
-                    symmetric_traj[:, i] = -symmetric_traj[:, i]
-
-        return symmetric_traj
+        reflector = self._traj_vel_reflector if traj_type == "vel" else self._traj_pos_reflector
+        return reflector.reflect(traj)
 
     @property
     def command(self):

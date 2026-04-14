@@ -18,6 +18,7 @@ from tensordict import TensorDict
 from torch import Tensor
 
 from .manager_base import ManagerBase
+from .sagittal_reflector import swap_left_right
 from .trajectory_manager import TrajectoryManager, TrajectoryType
 
 
@@ -988,10 +989,7 @@ class MultiSkillManager(ManagerBase):
 
                 for di in range(ed):
                     bodies = self._contact_bodies_per_domain[ti][di % nd]
-                    reflected_bodies = [
-                        b.replace("right", "TEMP").replace("left", "right").replace("TEMP", "left")
-                        for b in bodies
-                    ]
+                    reflected_bodies = [swap_left_right(b) for b in bodies]
                     for ci, frame in enumerate(contact_frames):
                         if frame in bodies:
                             table_first[ti, di, ci] = 1.0
