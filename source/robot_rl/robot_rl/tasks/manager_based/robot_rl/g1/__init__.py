@@ -125,6 +125,9 @@ if not _registered:
     ## =========================================
     # Walk + Run Trajectory Optimization
     ## =========================================
+    #########
+    ## MLP ##
+    #########
     gym.register(
         id="G1-walk-run-clf-symmetric",
         entry_point="isaaclab.envs:ManagerBasedRLEnv",
@@ -132,22 +135,22 @@ if not _registered:
         kwargs={
             "env_cfg_entry_point": f"{__name__}.g1_walk_run_env_cfg:G1WalkRunCLFEnvCfg",
             "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_rl_ppo_cfg:SymmetricHalfPeriodicPPORunnerCfg",
-            "rsl_rl_distillation_cfg_entry_point": (
-                f"{agents.__name__}.rsl_rl_distillation_cfg:G1WalkRunDistillationRunnerCfg"
-            ),
         }
     )
 
-    # Custom network architecture
+    # TODO: Why does the distillation looks so good given the rewards look bad
+    #   investigate the actually applied std dev
+
+    # MLP -> MLP distillation
     gym.register(
-        id="G1-walk-run-clf-sym-moe",
+        id="G1-walk-run-clf-distillation",
         entry_point="isaaclab.envs:ManagerBasedRLEnv",
         disable_env_checker=True,
         kwargs={
-            "env_cfg_entry_point": f"{__name__}.g1_walk_run_env_cfg:G1WalkRunCLFEnvCfg",
-            "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_rl_ppo_cfg:SymmetricMoEPPORunnerCfg",
+            "env_cfg_entry_point": f"{__name__}.g1_walk_run_env_cfg:G1WalkRunCLFDistillationEnvCfg",
+            "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_rl_ppo_cfg:SymmetricHalfPeriodicPPORunnerCfg",
             "rsl_rl_distillation_cfg_entry_point": (
-                f"{agents.__name__}.rsl_rl_distillation_cfg:G1WalkRunDistillationRunnerCfg"
+                f"{agents.__name__}.rsl_rl_distillation_cfg:G1nMulitskillMLP2MLPDistillationRunner"
             ),
         }
     )
@@ -163,6 +166,51 @@ if not _registered:
         }
     )
 
+    # MLP teacher -> MoE student
+    gym.register(
+        id="G1-walk-run-clf-sym-distill-mlp2moe",
+        entry_point="isaaclab.envs:ManagerBasedRLEnv",
+        disable_env_checker=True,
+        kwargs={
+            "env_cfg_entry_point": f"{__name__}.g1_walk_run_env_cfg:G1WalkRunCLFEnvCfg",
+            "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_rl_ppo_cfg:SymmetricHalfPeriodicPPORunnerCfg",
+            "rsl_rl_distillation_cfg_entry_point": (
+                f"{agents.__name__}.rsl_rl_distillation_cfg:G1MultiskillMLP2MoEDistillationRunnerCfg"
+            ),
+        }
+    )
+
+    #########
+    ## MoE ##
+    #########
+    gym.register(
+        id="G1-walk-run-clf-sym-moe",
+        entry_point="isaaclab.envs:ManagerBasedRLEnv",
+        disable_env_checker=True,
+        kwargs={
+            "env_cfg_entry_point": f"{__name__}.g1_walk_run_env_cfg:G1WalkRunCLFEnvCfg",
+            "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_rl_ppo_cfg:SymmetricMoEPPORunnerCfg",
+            "rsl_rl_distillation_cfg_entry_point": (
+                f"{agents.__name__}.rsl_rl_distillation_cfg:G1MultiskillMoE2MLPDistillationRunnerCfg"
+            ),
+        }
+    )
+
+    # MoE teacher -> MoE student
+    gym.register(
+        id="G1-walk-run-clf-sym-distill-moe2moe",
+        entry_point="isaaclab.envs:ManagerBasedRLEnv",
+        disable_env_checker=True,
+        kwargs={
+            "env_cfg_entry_point": f"{__name__}.g1_walk_run_env_cfg:G1WalkRunCLFEnvCfg",
+            "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_rl_ppo_cfg:SymmetricMoEPPORunnerCfg",
+            "rsl_rl_distillation_cfg_entry_point": (
+                f"{agents.__name__}.rsl_rl_distillation_cfg:G1MultiskillMoE2MoEDistillationRunnerCfg"
+            ),
+        }
+    )
+
+    # Play
     gym.register(
         id="G1-walk-run-clf-custom-arch-play",
         entry_point="isaaclab.envs:ManagerBasedRLEnv",

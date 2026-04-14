@@ -101,3 +101,5 @@ talos_remote_mount/
 transfer/sim/experiments/temp_holder/
 hf/
 /uv.lock
+
+todo-report-*

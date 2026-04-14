@@ -2,79 +2,8 @@ import math
 
 from isaaclab.utils import configclass
 
-from isaaclab.managers import ObservationTermCfg as ObsTerm
-from isaaclab.utils.noise import UniformNoiseCfg as Unoise
-
-from robot_rl.tasks.manager_based.robot_rl import mdp
-
 from .g1_clf_multiskill_base import G1MultiSkillCLFEnvCfg
-from .g1_clf_tracking_base import G1ClfTrackingEnvCfg, G1ClfTrackingObservationsCfg, G1ClfTrackingCommandCfg
-from ..mdp.commands.multiskill_velocity_commands_cfg import MultiskillVelocityTrackingCommandCfg, VelocityBucketCfg
-from ..mdp.commands.velocity_commands_cfg import VelocityTrackingCommandCfg
-
-# @configclass
-# class G1WalkRunObservationCfg(G1ClfTrackingObservationsCfg):
-#
-#     @configclass
-#     class PolicyCfg(G1ClfTrackingObservationsCfg.PolicyCfg):
-#         sin_phase = None
-#         cos_phase = None
-#
-#         multiskill_phases = ObsTerm(func=mdp.multiskill_phase, params={"frequency_list": [1.0/(2*0.299), 1.0/(2*0.46)], "command_name": "traj_ref"} )
-#
-#         # actions = ObsTerm(func=mdp.last_action, clip=(-20.0,20.0), history_length=5)
-#         joint_pos = ObsTerm(func=mdp.joint_pos_rel, noise=Unoise(n_min=-0.01, n_max=0.01), history_length=3)
-#
-#
-#         # Trying the actor with the traj ref and traj actual
-#         # ref_traj = ObsTerm(func=mdp.ref_traj, params={"command_name": "traj_ref"})
-#         # act_traj = ObsTerm(func=mdp.act_traj, params={"command_name": "traj_ref"})
-#         # ref_traj_vel = ObsTerm(func=mdp.ref_traj_vel, params={"command_name": "traj_ref"}, clip=(-20.0, 20.0,))
-#         # act_traj_vel = ObsTerm(func=mdp.act_traj_vel, params={"command_name": "traj_ref"}, clip=(-20.0, 20.0,))
-#
-#     @configclass
-#     class CriticCfg(G1ClfTrackingObservationsCfg.CriticCfg):
-#         sin_phase = None
-#         cos_phase = None
-#
-#         multiskill_phases = ObsTerm(func=mdp.multiskill_phase, params={"frequency_list": [1.0/(2*0.299), 1.0/(2*0.46)], "command_name": "traj_ref"} )
-#
-#     @configclass
-#     class StudentCfg(PolicyCfg):
-#         ref_traj = None
-#         act_traj = None
-#         ref_traj_vel = None
-#         act_traj_vel = None
-#
-#     policy: PolicyCfg = PolicyCfg()
-#     critic: CriticCfg = CriticCfg()
-#     student: StudentCfg = StudentCfg()
-#
-# @configclass
-# class G1WalkRunCommandsCfg(G1ClfTrackingCommandCfg):
-#     base_velocity = MultiskillVelocityTrackingCommandCfg(
-#         asset_name="robot",
-#         resampling_time_range=(7.0, 10.0), #(10.0, 10.0),
-#         rel_closed_loop=0.55, #0.55,
-#         rel_closed_loop_yaw=0.25,
-#         rel_open_loop=0.2,
-#         debug_vis=True,
-#         ranges=VelocityTrackingCommandCfg.VelRanges(
-#             lin_vel_x=(0.0, 3.7),
-#             lin_vel_y=(0.0, 0.0),
-#             ang_vel_z=(0.0, 0.0),
-#             heading=(-math.pi, math.pi),
-#             y_pos_offset=(-0.5, 0.5),
-#             y_kp=(1.2, 1.8),
-#             y_kd=(0.2, 0.4),
-#         ),
-#         velocity_buckets = [
-#             VelocityBucketCfg(percentage=0.48, lin_vel_x=(0.11, 1.49)),     # Walking
-#             VelocityBucketCfg(percentage=0.48, lin_vel_x=(1.51, 3.7)),      # Running
-#             VelocityBucketCfg(percentage=0.04, lin_vel_x=(0, 0.99)),           # Standing
-#         ]
-#     )
-
+from ..mdp.commands.multiskill_velocity_commands_cfg import VelocityBucketCfg
 
 @configclass
 class G1WalkRunCLFEnvCfg(G1MultiSkillCLFEnvCfg):
@@ -121,6 +50,25 @@ class G1WalkRunCLFEnvCfg(G1MultiSkillCLFEnvCfg):
         self.scene.terrain.terrain_type = "plane"
         self.scene.terrain.terrain_generator = None
         self.scene.height_scanner = None
+
+@configclass
+class G1WalkRunCLFDistillationEnvCfg(G1WalkRunCLFEnvCfg):
+    def __post_init__(self):
+        # Post init of parent
+        super().__post_init__()
+
+        self.observations.policy.enable_corruption = False
+        # TODO: Just for debugging
+        self.observations.student.enable_corruption = False
+
+        # For now just distill walking — override velocity buckets
+        # (ranges.lin_vel_x alone has no effect because buckets consume 100% of envs)
+        self.commands.base_velocity.velocity_buckets = [
+            VelocityBucketCfg(percentage=0.90, lin_vel_x=(0.11, 1.4)),   # Walking
+            VelocityBucketCfg(percentage=0.10, lin_vel_x=(0.0, 0.10)),   # Standing
+        ]
+        self.commands.base_velocity.ranges.lin_vel_x = (0.0, 1.4)
+
 
 @configclass
 class G1WalkRunCLFEnvCfgPlay(G1WalkRunCLFEnvCfg):

@@ -77,7 +77,6 @@ def multiple_undesired_contacts(env: ManagerBasedRLEnv, threshold: float, sensor
         total += torch.sum(is_contact, dim=1)
     return total
 
-# TODO: Come back to this and make sure it is implemented correctly without hard coded stuff
 def torque_limits(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")) -> torch.Tensor:
     """Penalize applied torques if they cross the limits.
 

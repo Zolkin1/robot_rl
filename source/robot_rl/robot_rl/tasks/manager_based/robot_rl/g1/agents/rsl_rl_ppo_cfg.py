@@ -16,8 +16,12 @@ from .symmetry_functions import (
     symmetric_data_augmentation_half_periodic
 )
 
-
-# TODO: Go through this for RSL RL 5.0
+###################################################
+# MLP
+###################################################
+##
+# Default MLP Runner
+##
 @configclass
 class PPORunnerCfg(RslRlOnPolicyRunnerCfg):
     num_steps_per_env = 24
@@ -59,6 +63,9 @@ class PPORunnerCfg(RslRlOnPolicyRunnerCfg):
         "critic": ["critic"],
     }
 
+##
+# Symmetric MLP Runner
+##
 @configclass
 class SymmetricEpisodicPPORunnerCfg(PPORunnerCfg):
     algorithm = RslRlPpoAlgorithmCfg(
@@ -79,6 +86,35 @@ class SymmetricEpisodicPPORunnerCfg(PPORunnerCfg):
         )
     )
 
+##
+# Symmetric MLP Runner for Half Periodic
+##
+@configclass
+class SymmetricHalfPeriodicPPORunnerCfg(PPORunnerCfg):
+    algorithm = RslRlPpoAlgorithmCfg(
+        value_loss_coef=1.0,
+        use_clipped_value_loss=True,
+        clip_param=0.2,
+        entropy_coef=0.008,
+        num_learning_epochs=5,
+        num_mini_batches=4,
+        learning_rate=1.0e-3,
+        schedule="adaptive",
+        gamma=0.99,
+        lam=0.95,
+        desired_kl=0.01,
+        max_grad_norm=1.0,
+        symmetry_cfg = RslRlSymmetryCfg(
+            use_data_augmentation=True, data_augmentation_func=symmetric_data_augmentation_half_periodic
+        )
+    )
+
+###################################################
+# MoE
+###################################################
+##
+# Symmetric MoE Runner
+##
 @configclass
 class SymmetricMoEPPORunnerCfg(PPORunnerCfg):
     """PPO runner config using the custom MLP model (placeholder for future MoE)."""
@@ -122,7 +158,12 @@ class SymmetricMoEPPORunnerCfg(PPORunnerCfg):
         )
     )
 
-
+###################################################
+# Transformer
+###################################################
+##
+# Symmetric Causal Transformer Model
+##
 @configclass
 class RslRlCausalTransformerModelCfg(RslRlMLPModelCfg):
     """Configuration for the Causal Transformer model."""
@@ -135,7 +176,9 @@ class RslRlCausalTransformerModelCfg(RslRlMLPModelCfg):
     dim_feedforward: int = 256
     dropout: float = 0.0
 
-
+##
+# Symmetric Causal Transformer Runner
+##
 @configclass
 class CausalTransformerPPORunnerCfg(PPORunnerCfg):
     """PPO runner config using a causal transformer actor."""
@@ -169,23 +212,3 @@ class CausalTransformerPPORunnerCfg(PPORunnerCfg):
         )
     )
 
-
-@configclass
-class SymmetricHalfPeriodicPPORunnerCfg(PPORunnerCfg):
-    algorithm = RslRlPpoAlgorithmCfg(
-        value_loss_coef=1.0,
-        use_clipped_value_loss=True,
-        clip_param=0.2,
-        entropy_coef=0.008,
-        num_learning_epochs=5,
-        num_mini_batches=4,
-        learning_rate=1.0e-3,
-        schedule="adaptive",
-        gamma=0.99,
-        lam=0.95,
-        desired_kl=0.01,
-        max_grad_norm=1.0,
-        symmetry_cfg = RslRlSymmetryCfg(
-            use_data_augmentation=True, data_augmentation_func=symmetric_data_augmentation_half_periodic
-        )
-    )
