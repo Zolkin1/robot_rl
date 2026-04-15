@@ -222,7 +222,7 @@ class G1MultiskillMLP2TransformerDistillationRunnerCfg(G1MulitskillMLP2MLPDistil
     algorithm = RslRlDistillationAlgorithmCfg(
         num_learning_epochs=2,
         learning_rate=5.0e-4,
-        gradient_length=15,  # BPTT window for LSTM temporal learning
+        gradient_length=1,
         loss_type="huber",
     )
 
