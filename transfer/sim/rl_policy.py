@@ -34,7 +34,7 @@ class RLPolicy:
         self.hold_phi_value = -1.0  # -1 means not locked
 
     def load(self):
-        """Load RL Policy"""
+        """Load RL Policy."""
         # Get the cwd and get the logs dir relative to this.
         # NOTE: Assuming we are running from transfer/sim
         two_up = Path.cwd().parent.parent
@@ -46,6 +46,17 @@ class RLPolicy:
         # load to cuda
         if torch.cuda.is_available():
             self.policy = self.policy.cuda()
+
+        # Zero LSTM hidden/cell states (no-op for MLP policies)
+        self.reset()
+
+    def reset(self):
+        """Reset the policy's recurrent hidden states to zero.
+
+        For LSTM policies this zeros the hidden and cell state buffers.
+        For MLP policies this is a no-op.
+        """
+        self.policy.reset()
 
     def create_obs(self,
                    qfb: np.ndarray,
@@ -323,6 +334,17 @@ class RLPolicy:
         self.action_scale = self.get_action_scale()
         self.default_joint_angles = self.get_default_joint_angles()
 
+        # Print loaded observation terms for verification
+        obs_terms = self.get_obs_terms()
+        print(f"[INFO] Loaded {len(obs_terms)} observation terms (total obs dim: {self.get_num_obs()}):")
+        for term in obs_terms:
+            extras = ""
+            if term["history_length"] > 0:
+                extras += f", history={term['history_length']}"
+            if term["frequency_list"] is not None:
+                extras += f", freqs={term['frequency_list']}"
+            print(f"  {term['name']:30s} shape={term['shape']:<6} scale={term['scale']}{extras}")
+
     def get_num_obs(self) -> int:
         """Get the number of observations from the policy_params file."""
         return self.policy_params['num_obs']
@@ -336,17 +358,25 @@ class RLPolicy:
 
         Returns:
             List of dicts with keys: name, shape, scale, history_length, frequency_list.
+
+        Raises:
+            ValueError: If observation_terms or the policy group is missing from params.
         """
+        if 'observation_terms' not in self.policy_params or 'policy' not in self.policy_params['observation_terms']:
+            raise ValueError(
+                "Could not find observation_terms.policy in policy parameters. "
+                "Ensure the policy was exported with export_parameters.py."
+            )
+
         obs_terms = []
-        if 'observation_terms' in self.policy_params and 'policy' in self.policy_params['observation_terms']:
-            for term_name, term_info in self.policy_params['observation_terms']['policy'].items():
-                obs_terms.append({
-                    "name": term_name,
-                    "shape": term_info['shape'],
-                    "scale": term_info['scale'],
-                    "history_length": term_info.get('history_length', 0),
-                    "frequency_list": term_info.get('frequency_list', None),
-                })
+        for term_name, term_info in self.policy_params['observation_terms']['policy'].items():
+            obs_terms.append({
+                "name": term_name,
+                "shape": term_info['shape'],
+                "scale": term_info['scale'],
+                "history_length": term_info.get('history_length', 0),
+                "frequency_list": term_info.get('frequency_list', None),
+            })
         return obs_terms
 
     def get_dt(self) -> float:
@@ -419,11 +449,19 @@ class RLPolicy:
         }
 
     def get_obs_scale(self, term_name: str):
-        """Get the observation scale for a specific term."""
-        if 'observation_terms' in self.policy_params and 'policy' in self.policy_params['observation_terms']:
-            term_info = self.policy_params['observation_terms']['policy'].get(term_name, {})
-            return term_info.get('scale')
-        return None
+        """Get the observation scale for a specific term.
+
+        Raises:
+            ValueError: If observation_terms or the policy group is missing from params.
+        """
+        if 'observation_terms' not in self.policy_params or 'policy' not in self.policy_params['observation_terms']:
+            raise ValueError(
+                "Could not find observation_terms.policy in policy parameters. "
+                "Ensure the policy was exported with export_parameters.py."
+            )
+
+        term_info = self.policy_params['observation_terms']['policy'].get(term_name, {})
+        return term_info.get('scale')
 
     def get_skill_type(self):
         """Get the skill type: episodic, periodic, half_periodic."""

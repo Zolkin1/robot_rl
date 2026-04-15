@@ -235,7 +235,7 @@ class CausalTransformerModel(MLPModel):
 if __name__ == "__main__":
     batch_size = 4096
     single_obs_dim = 74  # e.g. G1 policy observation
-    history_length = 16
+    history_length = 100 #16
     act_dim = 21          # e.g. 21 joint targets
 
     transformer = CausalTransformer(

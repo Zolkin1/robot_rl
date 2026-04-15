@@ -191,7 +191,7 @@ def export_policy_parameters(env, obs, actions, save_dir):
         if group_name != obs_group_name:
             continue
 
-        obs_info[group_name] = {}
+        obs_info["policy"] = {}
         # Get the dimensions and configs for this group
         group_dims = obs_manager._group_obs_term_dim[group_name]
         group_cfgs = obs_manager._group_obs_term_cfgs[group_name]
@@ -223,7 +223,7 @@ def export_policy_parameters(env, obs, actions, save_dir):
             if term_params and 'frequency_list' in term_params:
                 term_info["frequency_list"] = term_params['frequency_list']
 
-            obs_info[group_name][term_name] = term_info
+            obs_info["policy"][term_name] = term_info
 
     params["observation_terms"] = obs_info
 

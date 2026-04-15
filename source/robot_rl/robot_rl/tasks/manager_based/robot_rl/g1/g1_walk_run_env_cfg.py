@@ -70,7 +70,20 @@ class G1WalkRunCLFDistillationEnvCfg(G1WalkRunCLFEnvCfg):
         ]
         self.commands.base_velocity.ranges.lin_vel_x = (0.0, 1.4)
 
+@configclass
+class G1WalkRunCLFTransformerDistillationEnvCfg(G1WalkRunCLFDistillationEnvCfg):
+    def __post_init__(self):
+        # Post init of parent
+        super().__post_init__()
 
+        # Set uniform history for all policy obs terms (each timestep = 1 token)
+        history_length = 10
+        self.observations.student.base_ang_vel.history_length = history_length
+        self.observations.student.projected_gravity.history_length = history_length
+        self.observations.student.velocity_commands.history_length = history_length
+        self.observations.student.joint_pos.history_length = history_length
+        self.observations.student.joint_vel.history_length = history_length
+        self.observations.student.actions.history_length = history_length
 
 @configclass
 class G1WalkRunCLFEnvCfgPlay(G1WalkRunCLFEnvCfg):

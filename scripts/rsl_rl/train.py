@@ -205,6 +205,10 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
             teacher_params = sum(p.numel() for p in runner.alg.teacher.parameters())
             print(f"Student Parameters: {student_params:,}")
             print(f"Teacher Parameters: {teacher_params:,}")
+            if hasattr(runner.alg, "critic"):
+                critic_params = sum(p.numel() for p in runner.alg.critic.parameters())
+                print(f"Critic Parameters: {critic_params:,}")
+                print(f"Total Parameters: {student_params + teacher_params + critic_params:,}")
         else:
             actor_params = sum(p.numel() for p in runner.alg.actor.parameters())
             critic_params = sum(p.numel() for p in runner.alg.critic.parameters())
