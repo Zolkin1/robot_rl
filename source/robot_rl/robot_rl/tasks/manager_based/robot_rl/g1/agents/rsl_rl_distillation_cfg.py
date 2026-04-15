@@ -182,3 +182,6 @@ class G1MultiskillMLP2LSTMDistillationRunnerCfg(G1MulitskillMLP2MLPDistillationR
         gradient_length=15,  # BPTT window for LSTM temporal learning
         loss_type="huber",
     )
+
+
+    # TODO: Try an arch wehre an LSTM goes into an MLP but the observation also comes directly to the MLP. Can also try with an MoE

@@ -41,8 +41,11 @@ def export_policy_parameters(env, obs, actions, save_dir):
     unwrapped_env = env.unwrapped
     robot = unwrapped_env.scene.articulations["robot"]
 
+    # Prefer student observations (distillation) over policy observations
+    obs_key = "student" if "student" in obs else "policy"
+
     params = {
-        "num_obs": obs["policy"].shape[1],
+        "num_obs": obs[obs_key].shape[1],
         "num_actions": actions.shape[1],
         "dt": unwrapped_env.step_dt,
     }
@@ -178,13 +181,14 @@ def export_policy_parameters(env, obs, actions, save_dir):
 
     yaml.add_representer(FlowStyleList, represent_flow_list)
 
-    # Add observation information (only policy group, skip critic)
+    # Add observation information (prefer student group for distillation, else policy)
     obs_manager = unwrapped_env.observation_manager
     obs_info = {}
+    obs_group_name = "student" if "student" in obs_manager.active_terms else "policy"
 
     for group_name, group_terms in obs_manager.active_terms.items():
-        # Only include policy observations
-        if group_name != "policy":
+        # Only include the target observation group
+        if group_name != obs_group_name:
             continue
 
         obs_info[group_name] = {}

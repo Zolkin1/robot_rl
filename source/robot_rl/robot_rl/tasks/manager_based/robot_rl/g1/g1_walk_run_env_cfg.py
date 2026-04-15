@@ -58,6 +58,7 @@ class G1WalkRunCLFDistillationEnvCfg(G1WalkRunCLFEnvCfg):
         super().__post_init__()
 
         self.observations.policy.enable_corruption = False
+        self.observations.critic.enable_corruption = False
         # TODO: Just for debugging
         self.observations.student.enable_corruption = False
 
