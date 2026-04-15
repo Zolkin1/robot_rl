@@ -202,7 +202,7 @@ if not _registered:
         entry_point="isaaclab.envs:ManagerBasedRLEnv",
         disable_env_checker=True,
         kwargs={
-            "env_cfg_entry_point": f"{__name__}.g1_walk_run_env_cfg:G1WalkRunCLFDistillationEnvCfg",
+            "env_cfg_entry_point": f"{__name__}.g1_walk_run_env_cfg:G1WalkRunCLFTransformerDistillationEnvCfg",
             "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_rl_ppo_cfg:SymmetricHalfPeriodicPPORunnerCfg",
             "rsl_rl_distillation_cfg_entry_point": (
                 f"{agents.__name__}.rsl_rl_distillation_cfg:G1MultiskillMLP2TransformerDistillationRunnerCfg"
