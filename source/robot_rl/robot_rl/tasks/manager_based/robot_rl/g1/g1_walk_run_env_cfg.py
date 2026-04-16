@@ -62,6 +62,13 @@ class G1WalkRunCLFDistillationEnvCfg(G1WalkRunCLFEnvCfg):
         # TODO: Just for debugging
         # self.observations.student.enable_corruption = False
 
+        self.commands.base_velocity.resampling_time_range = (2.0, 4.0)
+        self.commands.velocity_buckets = [
+            VelocityBucketCfg(percentage=0.45, lin_vel_x=(0.11, 1.49)),     # Walking
+            VelocityBucketCfg(percentage=0.45, lin_vel_x=(1.51, 3.7)),      # Running
+            VelocityBucketCfg(percentage=0.10, lin_vel_x=(0, 0.09)),        # Standing
+        ]
+
         # For now just distill walking — override velocity buckets
         # (ranges.lin_vel_x alone has no effect because buckets consume 100% of envs)
         # self.commands.base_velocity.velocity_buckets = [
