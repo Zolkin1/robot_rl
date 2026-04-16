@@ -207,7 +207,7 @@ class G1MultiskillMLP2TransformerDistillationRunnerCfg(G1MulitskillMLP2MLPDistil
     Uses an MLP Teacher and an LSTM Student.
     """
     # NOTE: This is really just for testing
-    num_steps_per_env = 240
+    num_steps_per_env = 150
 
     student = RslRlCausalTransformerModelCfg(
         hidden_dims=[256, 128],
@@ -226,6 +226,42 @@ class G1MultiskillMLP2TransformerDistillationRunnerCfg(G1MulitskillMLP2MLPDistil
         learning_rate=5.0e-4,
         gradient_length=1,
         loss_type="huber",
+    )
+
+
+##
+# Mixed On/Off-Policy Distillation Algorithm Config
+##
+@configclass
+class MixedPolicyDistillationAlgorithmCfg(RslRlDistillationAlgorithmCfg):
+    """Configuration for the mixed on/off-policy distillation algorithm.
+
+    Like the base distillation, but each env is driven entirely by the teacher
+    with probability ``teacher_action_probability`` for the duration of each
+    episode (resampled on every env reset).
+    """
+
+    class_name: str = "robot_rl.network.mixed_policy_distillation:MixedPolicyDistillation"
+    """The algorithm class name."""
+
+    teacher_action_probability: float = 0.5
+    """Per-env probability of taking the teacher's actions for the whole episode."""
+
+
+##
+# MLP -> Transformer Mixed Policy Distillation
+##
+@configclass
+class G1MultiskillMixedPolicyMLP2TransformerDistillationRunnerCfg(G1MultiskillMLP2TransformerDistillationRunnerCfg):
+    """Mixed on/off-policy distillation runner config (MLP teacher -> Transformer student)."""
+
+    experiment_name = "g1_multiskill_mixed_policy_distillation"
+    algorithm = MixedPolicyDistillationAlgorithmCfg(
+        num_learning_epochs=2,
+        learning_rate=5.0e-4,
+        gradient_length=1,
+        loss_type="huber",
+        teacher_action_probability=0.2,
     )
 
 
