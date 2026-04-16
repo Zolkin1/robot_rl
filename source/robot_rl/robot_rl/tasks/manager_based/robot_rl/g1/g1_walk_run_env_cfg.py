@@ -60,15 +60,15 @@ class G1WalkRunCLFDistillationEnvCfg(G1WalkRunCLFEnvCfg):
         self.observations.policy.enable_corruption = False
         self.observations.critic.enable_corruption = False
         # TODO: Just for debugging
-        self.observations.student.enable_corruption = False
+        # self.observations.student.enable_corruption = False
 
         # For now just distill walking — override velocity buckets
         # (ranges.lin_vel_x alone has no effect because buckets consume 100% of envs)
-        self.commands.base_velocity.velocity_buckets = [
-            VelocityBucketCfg(percentage=0.95, lin_vel_x=(0.11, 1.4)),   # Walking
-            VelocityBucketCfg(percentage=0.05, lin_vel_x=(0.0, 0.10)),   # Standing
-        ]
-        self.commands.base_velocity.ranges.lin_vel_x = (0.0, 1.4)
+        # self.commands.base_velocity.velocity_buckets = [
+        #     VelocityBucketCfg(percentage=0.95, lin_vel_x=(0.11, 1.4)),   # Walking
+        #     VelocityBucketCfg(percentage=0.05, lin_vel_x=(0.0, 0.10)),   # Standing
+        # ]
+        # self.commands.base_velocity.ranges.lin_vel_x = (0.0, 1.4)
 
 @configclass
 class G1WalkRunCLFTransformerDistillationEnvCfg(G1WalkRunCLFDistillationEnvCfg):
@@ -77,7 +77,7 @@ class G1WalkRunCLFTransformerDistillationEnvCfg(G1WalkRunCLFDistillationEnvCfg):
         super().__post_init__()
 
         # Set uniform history for all policy obs terms (each timestep = 1 token)
-        history_length = 10
+        history_length = 50
         self.observations.student.base_ang_vel.history_length = history_length
         self.observations.student.projected_gravity.history_length = history_length
         self.observations.student.velocity_commands.history_length = history_length

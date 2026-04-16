@@ -283,6 +283,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
             pass
         finally:
             # Generate plots from collected data
+            # TODO: It would be great to have a way to plot the teacher vs the student, although idk a good way to do that
             if logging_enabled and logger.num_steps > 0:
                 data, metadata = logger.finalize()
                 # Inject MoE gate weights into data for plotting

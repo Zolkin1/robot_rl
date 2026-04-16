@@ -86,7 +86,7 @@ class G1MultiSkillCommandsCfg(G1ClfTrackingCommandCfg):
         velocity_buckets = [
             VelocityBucketCfg(percentage=0.48, lin_vel_x=(0.11, 1.49)),     # Walking
             VelocityBucketCfg(percentage=0.48, lin_vel_x=(1.51, 3.7)),      # Running
-            VelocityBucketCfg(percentage=0.04, lin_vel_x=(0, 0.99)),           # Standing
+            VelocityBucketCfg(percentage=0.04, lin_vel_x=(0, 0.09)),        # Standing
         ]
     )
 

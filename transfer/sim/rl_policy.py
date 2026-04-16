@@ -179,7 +179,13 @@ class RLPolicy:
 
             # Apply history buffer if needed
             if history_length > 0:
-                obs_val = self._update_history(term, raw_obs, history_length) * scale
+                # Build per-step scale matching raw_obs dimension, then tile across history
+                scale_arr = np.broadcast_to(
+                    np.atleast_1d(np.asarray(scale, dtype=np.float32)),
+                    raw_obs.shape,
+                )
+                tiled_scale = np.tile(scale_arr, history_length)
+                obs_val = self._update_history(term, raw_obs, history_length) * tiled_scale
             else:
                 obs_val = raw_obs * scale
 
