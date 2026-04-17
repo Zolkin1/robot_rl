@@ -247,6 +247,7 @@ class HybridDistillation:
 
                 # --- Forward pass ---
                 self.student(batch_obs, stochastic_output=True)
+                student_mean_actions = self.student.output_distribution_params[0]   # TODO: Double check this line
                 new_actions_log_prob = self.student.get_output_log_prob(batch_actions)
                 new_values = self.critic(batch_obs)
                 distribution_params = tuple(p for p in self.student.output_distribution_params)
@@ -299,7 +300,7 @@ class HybridDistillation:
                 ppo_loss = surrogate_loss + self.value_loss_coef * value_loss - self.entropy_coef * entropy.mean()
 
                 # --- Behavior cloning loss (student mean vs teacher mean) ---
-                student_mean_actions = self.student(batch_obs)  # deterministic forward
+                # student_mean_actions = self.student(batch_obs)  # deterministic forward   # NOTE: Moved up to avoid recomputation
                 behavior_loss = self.loss_fn(student_mean_actions, batch_teacher_actions)
 
                 # --- Combined loss with curriculum weighting ---

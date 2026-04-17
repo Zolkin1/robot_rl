@@ -281,7 +281,7 @@ class HybridDistillationAlgorithmCfg:
     """The algorithm class name."""
 
     # Distillation params
-    loss_type: Literal["mse", "huber"] = "mse"
+    loss_type: Literal["mse", "huber"] = "huber"
     """Loss type for the behavior cloning term."""
 
     behavior_loss_coef: float = 10.0
@@ -328,7 +328,7 @@ class HybridDistillationAlgorithmCfg:
     """Target KL divergence for adaptive LR."""
 
     # Curriculum params
-    curriculum_end_iteration: int = 10000
+    curriculum_end_iteration: int = 3000 #10000
     """Iteration at which lambda_D reaches its minimum value."""
 
     min_dagger_weight: float = 0.1
@@ -348,18 +348,18 @@ class G1HybridDistillationRunnerCfg(RslRlDistillationRunnerCfg):
     experiment_name = "g1_hybrid_distillation"
     logger = "wandb"
     wandb_project = "robot_rl_distillation"
-    obs_groups = {"student": ["student"], "teacher": ["policy"], "critic": ["policy"]}
+    obs_groups = {"student": ["student"], "teacher": ["policy"], "critic": ["critic"]}
 
     # Teacher checkpoint loading
     teacher_experiment_name: str = "g1"
     teacher_load_run: str = ".*"
     teacher_load_checkpoint: str = "model_.*.pt"
 
-    student = RslRlMLPModelCfg(
-        hidden_dims=[512, 256, 128],
+    student = RslRlCausalTransformerModelCfg(
+        hidden_dims=[256, 128],
         activation="elu",
-        obs_normalization=False,
         distribution_cfg=RslRlMLPModelCfg.GaussianDistributionCfg(init_std=0.1),
+        obs_normalization=False,
     )
     teacher = RslRlMLPModelCfg(
         hidden_dims=[512, 256, 128],
