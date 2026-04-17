@@ -294,7 +294,7 @@ class HybridDistillationAlgorithmCfg:
     num_mini_batches: int = 4
     """Number of mini-batches per epoch."""
 
-    learning_rate: float = 3e-4
+    learning_rate: float = 5e-4
     """Learning rate for the optimizer."""
 
     optimizer: Literal["adam", "adamw", "sgd", "rmsprop"] = "adam"
@@ -334,6 +334,13 @@ class HybridDistillationAlgorithmCfg:
     min_dagger_weight: float = 0.1
     """Minimum DAgger weight (lambda_D floor). Never drops to zero."""
 
+    lambda_d_freeze_threshold: float = 0.80
+    """Freeze student std and LR while lambda_d >= this threshold.
+
+    Set to 0.0 to disable. With curriculum_end_iteration=3000, 0.83 ≈ 510 warmup iters.
+    """
+
+# TODO: Can try playing with the critic - copying it over vs learning from scratch
 
 ##
 # Hybrid DAgger + PPO Distillation

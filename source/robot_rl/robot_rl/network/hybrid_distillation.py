@@ -68,6 +68,7 @@ class HybridDistillation:
         # Curriculum params
         curriculum_end_iteration: int = 10000,
         min_dagger_weight: float = 0.1,
+        lambda_d_freeze_threshold: float = 0.0,
         # Standard
         optimizer: str = "adam",
         device: str = "cpu",
@@ -133,6 +134,24 @@ class HybridDistillation:
         # Curriculum parameters
         self.curriculum_end_iteration = curriculum_end_iteration
         self.min_dagger_weight = min_dagger_weight
+        self.lambda_d_freeze_threshold = lambda_d_freeze_threshold
+
+        # Locate the student's state-independent std parameter (Gaussian scalar/log).
+        dist = self.student.distribution
+        self._std_param: torch.nn.Parameter | None = getattr(dist, "std_param", None)
+        if self._std_param is None:
+            self._std_param = getattr(dist, "log_std_param", None)
+        if self._std_param is None and self.lambda_d_freeze_threshold > 0.0:
+            raise ValueError(
+                "HybridDistillation: lambda_d_freeze_threshold > 0 requires a "
+                "GaussianDistribution student with a state-independent std_param/log_std_param."
+            )
+
+        # Initial lambda_d is 1.0, so warmup is active if threshold > 0.
+        self._std_frozen = False
+        if self._std_param is not None and self.lambda_d_freeze_threshold > 0.0:
+            self._std_param.requires_grad = False
+            self._std_frozen = True
 
         self.num_updates = 0
 
@@ -207,6 +226,12 @@ class HybridDistillation:
         lambda_d = max(self.min_dagger_weight, 1.0 - self.num_updates / self.curriculum_end_iteration)
         lambda_ppo = 1.0 - lambda_d
 
+        # --- Warmup: freeze std + LR while DAgger dominates ---
+        warmup_active = lambda_d >= self.lambda_d_freeze_threshold > 0.0
+        if self._std_param is not None and warmup_active != self._std_frozen:
+            self._std_param.requires_grad = not warmup_active
+            self._std_frozen = warmup_active
+
         # --- Flatten storage data for mini-batching ---
         batch_size = self.storage.num_envs * self.storage.num_transitions_per_env
         mini_batch_size = batch_size // self.num_mini_batches
@@ -253,8 +278,8 @@ class HybridDistillation:
                 distribution_params = tuple(p for p in self.student.output_distribution_params)
                 entropy = self.student.output_entropy
 
-                # --- Adaptive LR based on KL divergence ---
-                if self.desired_kl is not None and self.schedule == "adaptive":
+                # --- Adaptive LR based on KL divergence (skipped during warmup) ---
+                if self.desired_kl is not None and self.schedule == "adaptive" and not warmup_active:
                     with torch.inference_mode():
                         kl = self.student.get_kl_divergence(batch_old_dist_params, distribution_params)
                         kl_mean = torch.mean(kl)
@@ -340,6 +365,8 @@ class HybridDistillation:
             "behavior": mean_behavior_loss,
             "lambda_d": lambda_d,
             "lambda_ppo": lambda_ppo,
+            "warmup_active": float(warmup_active),
+            "lr": self.learning_rate,
         }
 
     def train_mode(self) -> None:
