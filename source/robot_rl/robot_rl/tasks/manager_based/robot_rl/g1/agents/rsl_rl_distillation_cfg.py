@@ -281,17 +281,17 @@ class HybridDistillationAlgorithmCfg:
     """The algorithm class name."""
 
     # Distillation params
-    loss_type: Literal["mse", "huber"] = "huber"
+    loss_type: Literal["mse", "huber"] = "mse"
     """Loss type for the behavior cloning term."""
 
-    behavior_loss_coef: float = 10.0
+    behavior_loss_coef: float = 1.0
     """Scaling coefficient for the DAgger behavior loss."""
 
     # PPO params
     num_learning_epochs: int = 2
     """Number of learning epochs per update."""
 
-    num_mini_batches: int = 4
+    num_mini_batches: int = 20 #4
     """Number of mini-batches per epoch."""
 
     learning_rate: float = 5e-4
@@ -328,19 +328,20 @@ class HybridDistillationAlgorithmCfg:
     """Target KL divergence for adaptive LR."""
 
     # Curriculum params
-    curriculum_end_iteration: int = 3000 #10000
+    curriculum_end_iteration: int = 800 #10000
     """Iteration at which lambda_D reaches its minimum value."""
 
     min_dagger_weight: float = 0.1
     """Minimum DAgger weight (lambda_D floor). Never drops to zero."""
 
-    lambda_d_freeze_threshold: float = 0.80
+    lambda_d_freeze_threshold: float = 0.90
     """Freeze student std and LR while lambda_d >= this threshold.
 
     Set to 0.0 to disable. With curriculum_end_iteration=3000, 0.83 ≈ 510 warmup iters.
     """
 
 # TODO: Can try playing with the critic - copying it over vs learning from scratch
+# TODO: considering increasing the number of mini-batches more
 
 ##
 # Hybrid DAgger + PPO Distillation
