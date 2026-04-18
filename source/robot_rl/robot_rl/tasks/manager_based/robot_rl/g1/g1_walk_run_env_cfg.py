@@ -83,9 +83,6 @@ class G1WalkRunCLFTransformerDistillationEnvCfg(G1WalkRunCLFDistillationEnvCfg):
         # Post init of parent
         super().__post_init__()
 
-
-        self.commands.base_velocity.resampling_time_range = (1.0, 7.0) #(2.0, 4.0)
-
         # Set uniform history for all policy obs terms (each timestep = 1 token)
         history_length = 50
         self.observations.student.base_ang_vel.history_length = history_length

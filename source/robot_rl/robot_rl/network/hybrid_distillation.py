@@ -61,6 +61,7 @@ class HybridDistillation:
         num_learning_epochs: int = 2,
         num_mini_batches: int = 4,
         learning_rate: float = 3e-4,
+        critic_learning_rate: float = 1e-3,
         max_grad_norm: float = 1.0,
         use_clipped_value_loss: bool = True,
         schedule: str = "adaptive",
@@ -93,10 +94,13 @@ class HybridDistillation:
         self.teacher = teacher.to(self.device)
         self.critic = critic.to(self.device)
 
-        # Create the optimizer over student + critic params (teacher is frozen)
+        # Create the optimizer over student params (teacher is frozen)
         self.optimizer = resolve_optimizer(optimizer)(
-            chain(self.student.parameters(), self.critic.parameters()), lr=learning_rate
+            chain(self.student.parameters()), lr=learning_rate
         )
+
+        # Separate optimizer for the critic
+        self.critic_optimizer = resolve_optimizer(optimizer)(chain(self.critic.parameters()), lr=critic_learning_rate)
 
         # Storage
         self.storage = storage
@@ -126,6 +130,7 @@ class HybridDistillation:
         self.num_learning_epochs = num_learning_epochs
         self.num_mini_batches = num_mini_batches
         self.learning_rate = learning_rate
+        self.critic_learning_rate = critic_learning_rate
         self.max_grad_norm = max_grad_norm
         self.use_clipped_value_loss = use_clipped_value_loss
         self.desired_kl = desired_kl
@@ -322,17 +327,20 @@ class HybridDistillation:
                     value_loss = (batch_returns - new_values).pow(2).mean()
 
                 # --- PPO total loss ---
-                ppo_loss = surrogate_loss + self.value_loss_coef * value_loss - self.entropy_coef * entropy.mean()
+                # ppo_loss = surrogate_loss + self.value_loss_coef * value_loss - self.entropy_coef * entropy.mean()
+                ppo_loss_annealing = surrogate_loss - self.entropy_coef * entropy.mean()
 
                 # --- Behavior cloning loss (student mean vs teacher mean) ---
                 # student_mean_actions = self.student(batch_obs)  # deterministic forward   # NOTE: Moved up to avoid recomputation
                 behavior_loss = self.loss_fn(student_mean_actions, batch_teacher_actions)
 
                 # --- Combined loss with curriculum weighting ---
-                loss = lambda_ppo * ppo_loss + lambda_d * self.behavior_loss_coef * behavior_loss
+                # Only anneal the non-value part of the PPO
+                loss = lambda_ppo * ppo_loss_annealing + lambda_d * self.behavior_loss_coef * behavior_loss + self.value_loss_coef * value_loss
 
                 # --- Backward + gradient step ---
                 self.optimizer.zero_grad()
+                self.critic_optimizer.zero_grad()
                 loss.backward()
 
                 if self.is_multi_gpu:
@@ -341,6 +349,7 @@ class HybridDistillation:
                 nn.utils.clip_grad_norm_(self.student.parameters(), self.max_grad_norm)
                 nn.utils.clip_grad_norm_(self.critic.parameters(), self.max_grad_norm)
                 self.optimizer.step()
+                self.critic_optimizer.step()
 
                 # --- Accumulate for logging ---
                 mean_surrogate_loss += surrogate_loss.item()
@@ -388,6 +397,7 @@ class HybridDistillation:
             "teacher_state_dict": self.teacher.state_dict(),
             "critic_state_dict": self.critic.state_dict(),
             "optimizer_state_dict": self.optimizer.state_dict(),
+            "critic_optimizer_state_dict": self.critic_optimizer.state_dict(),
         }
 
     def load(self, loaded_dict: dict, load_cfg: dict | None, strict: bool) -> bool:
@@ -432,6 +442,8 @@ class HybridDistillation:
             self.critic.load_state_dict(loaded_dict["critic_state_dict"], strict=strict)
         if load_cfg.get("optimizer") and "optimizer_state_dict" in loaded_dict:
             self.optimizer.load_state_dict(loaded_dict["optimizer_state_dict"])
+        if load_cfg.get("optimizer") and "critic_optimizer_state_dict" in loaded_dict:
+            self.critic_optimizer.load_state_dict(loaded_dict["critic_optimizer_state_dict"])
 
         return load_cfg.get("iteration", False)
 

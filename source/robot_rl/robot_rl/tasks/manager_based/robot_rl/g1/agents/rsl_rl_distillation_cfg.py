@@ -297,6 +297,9 @@ class HybridDistillationAlgorithmCfg:
     learning_rate: float = 5e-4
     """Learning rate for the optimizer."""
 
+    critic_learning_rate: float = 1e-3
+    """Critic learning rate for the optimizer."""
+
     optimizer: Literal["adam", "adamw", "sgd", "rmsprop"] = "adam"
     """Optimizer type."""
 
@@ -328,7 +331,7 @@ class HybridDistillationAlgorithmCfg:
     """Target KL divergence for adaptive LR."""
 
     # Curriculum params
-    curriculum_end_iteration: int = 800 #10000
+    curriculum_end_iteration: int = 1000 #10000
     """Iteration at which lambda_D reaches its minimum value."""
 
     min_dagger_weight: float = 0.1
