@@ -338,18 +338,32 @@ class HybridDistillation:
                 # Only anneal the non-value part of the PPO
                 loss = lambda_ppo * ppo_loss_annealing + lambda_d * self.behavior_loss_coef * behavior_loss + self.value_loss_coef * value_loss
 
-                # --- Backward + gradient step ---
+                # # --- Backward + gradient step ---
+                # self.optimizer.zero_grad()
+                # self.critic_optimizer.zero_grad()
+                # loss.backward()
+
+                # Actor step
+                actor_loss = lambda_ppo * ppo_loss_annealing + lambda_d * self.behavior_loss_coef * behavior_loss
                 self.optimizer.zero_grad()
-                self.critic_optimizer.zero_grad()
-                loss.backward()
-
-                if self.is_multi_gpu:
-                    self.reduce_parameters()
-
+                actor_loss.backward(retain_graph=True)
                 nn.utils.clip_grad_norm_(self.student.parameters(), self.max_grad_norm)
-                nn.utils.clip_grad_norm_(self.critic.parameters(), self.max_grad_norm)
                 self.optimizer.step()
+
+                # Critic step
+                critic_loss = self.value_loss_coef * value_loss
+                self.critic_optimizer.zero_grad()
+                critic_loss.backward()
+                nn.utils.clip_grad_norm_(self.critic.parameters(), self.max_grad_norm)
                 self.critic_optimizer.step()
+
+                # if self.is_multi_gpu:
+                #     self.reduce_parameters()
+                #
+                # nn.utils.clip_grad_norm_(self.student.parameters(), self.max_grad_norm)
+                # nn.utils.clip_grad_norm_(self.critic.parameters(), self.max_grad_norm)
+                # self.optimizer.step()
+                # self.critic_optimizer.step()
 
                 # --- Accumulate for logging ---
                 mean_surrogate_loss += surrogate_loss.item()

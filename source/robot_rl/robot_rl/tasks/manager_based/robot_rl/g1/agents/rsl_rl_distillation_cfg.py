@@ -276,6 +276,7 @@ class HybridDistillationAlgorithmCfg:
     Combines behavior cloning with PPO using a curriculum that shifts from
     DAgger-dominated to PPO-dominated training.
     """
+    # TODO: Why was the critic value loss good for the first hybrid test I ran but not the others?
 
     class_name: str = "robot_rl.network.hybrid_distillation:HybridDistillation"
     """The algorithm class name."""
