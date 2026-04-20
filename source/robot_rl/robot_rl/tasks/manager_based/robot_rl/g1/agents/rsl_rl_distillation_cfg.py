@@ -282,20 +282,20 @@ class HybridDistillationAlgorithmCfg:
     """The algorithm class name."""
 
     # Distillation params
-    loss_type: Literal["mse", "huber"] = "mse"
+    loss_type: Literal["mse", "huber"] = "huber" #"mse"
     """Loss type for the behavior cloning term."""
 
-    behavior_loss_coef: float = 1.0
+    behavior_loss_coef: float = 10.0 #1.0
     """Scaling coefficient for the DAgger behavior loss."""
 
     # PPO params
     num_learning_epochs: int = 2
     """Number of learning epochs per update."""
 
-    num_mini_batches: int = 20 #4
+    num_mini_batches: int = 4 #20 #4
     """Number of mini-batches per epoch."""
 
-    learning_rate: float = 5e-4
+    learning_rate: float = 3e-4
     """Learning rate for the optimizer."""
 
     critic_learning_rate: float = 1e-3
