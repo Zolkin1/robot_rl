@@ -206,8 +206,6 @@ class G1MultiskillMLP2TransformerDistillationRunnerCfg(G1MulitskillMLP2MLPDistil
     """Distillation runner config for the G1 walk-run task.
     Uses an MLP Teacher and an LSTM Student.
     """
-    # NOTE: This is really just for testing
-    num_steps_per_env = 150
 
     student = RslRlCausalTransformerModelCfg(
         hidden_dims=[256, 128],
