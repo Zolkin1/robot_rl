@@ -219,6 +219,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
 
         # Detect MoE architecture and set up gate weight capture
         _policy_model = runner.alg.student if isinstance(runner, DistillationRunner) else runner.alg.actor
+        teacher_model = runner.alg.teacher if isinstance(runner, DistillationRunner) else None
         _moe_net = getattr(_policy_model, "mlp", None)
         is_moe = isinstance(_moe_net, MixtureOfExperts)
         if is_moe:
@@ -257,6 +258,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
                 with torch.inference_mode():
                     # agent stepping
                     actions = policy(obs)
+                    teacher_actions = teacher_model(obs) if teacher_model is not None else None
                     # env stepping
                     obs, _, dones, _ = env.step(actions)
                     # reset recurrent states for episodes that have terminated
@@ -267,6 +269,10 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
 
                 if logging_enabled:
                     logger.collect_step(env)
+                    if teacher_model is not None:
+                        logger.collect_distillation_actions(
+                            student_actions=actions, teacher_actions=teacher_actions
+                        )
                 if is_moe and "val" in _last_gate_w:
                     gate_weights_log.append(_last_gate_w["val"])
 
@@ -283,7 +289,6 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
             pass
         finally:
             # Generate plots from collected data
-            # TODO: It would be great to have a way to plot the teacher vs the student, although idk a good way to do that
             if logging_enabled and logger.num_steps > 0:
                 data, metadata = logger.finalize()
                 # Inject MoE gate weights into data for plotting

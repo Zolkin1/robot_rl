@@ -344,8 +344,8 @@ class HybridDistillationAlgorithmCfg:
     Set to 0.0 to disable. With curriculum_end_iteration=3000, 0.83 ≈ 510 warmup iters.
     """
 
+# TODO: I think I need the distillation to get to a better spot before using PPO (I think having so many early terminations really hurts the critic learning)
 # TODO: Can try playing with the critic - copying it over vs learning from scratch
-# TODO: considering increasing the number of mini-batches more
 
 ##
 # Hybrid DAgger + PPO Distillation

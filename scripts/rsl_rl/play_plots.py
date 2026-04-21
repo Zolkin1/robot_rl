@@ -158,6 +158,28 @@ def plot_joint_targets(
     )
 
 
+def plot_teacher_vs_student_actions(
+    data: dict[str, np.ndarray],
+    metadata: dict[str, Any],
+    save_dir: str,
+    env_ids: list[int],
+) -> None:
+    """Teacher vs. student raw policy outputs, one subplot per action dim."""
+    if "teacher_actions" not in data or "student_actions" not in data:
+        print("[WARN plot_teacher_vs_student_actions] Missing teacher/student actions, skipping.")
+        return
+    raw_names = metadata.get("joint_names", [])
+    names = [_format_joint_name(n) for n in raw_names]
+    _grid_plot(
+        data, "teacher_actions", "student_actions", names,
+        title_fmt="Teacher vs Student Actions (Env {env_id})",
+        y_label_fmt="Action (rad)",
+        filename_fmt="teacher_vs_student_env{env_id}.png",
+        save_dir=save_dir, env_ids=env_ids,
+        label_a="Teacher", label_b="Student",
+    )
+
+
 def plot_torques(
     data: dict[str, np.ndarray],
     metadata: dict[str, Any],
@@ -537,6 +559,7 @@ PLOT_REGISTRY: dict[str, Callable] = {
     "positions": plot_positions,
     "velocities": plot_velocities,
     "joint_targets": plot_joint_targets,
+    "teacher_vs_student": plot_teacher_vs_student_actions,
     "torques": plot_torques,
     "base_velocity": plot_base_velocity,
     "domain_info": plot_domain_info,

@@ -40,5 +40,11 @@ class MultiskillVelocityTrackingCommandCfg(VelocityTrackingCommandCfg):
     """List of velocity buckets. Percentages should sum to <= 1.0.
     Any remainder is assigned to the default uniform range from ``ranges``."""
 
+    skill_transition_prob: float | None = None
+    """If set, fraction of resamples that force a skill transition (new bucket != current bucket).
+    The non-transitioning fraction (1 - skill_transition_prob) keeps the env's previous bucket and
+    only resamples the velocity within that bucket. If None, buckets are sampled independently from
+    the configured percentages each resample."""
+
     rel_standing_envs: float = 0.0
     """Not used -- standing is a zero-velocity bucket. Kept for parent compatibility."""

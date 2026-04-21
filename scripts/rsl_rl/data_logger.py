@@ -63,6 +63,20 @@ class DataLogger:
         """Number of timesteps collected so far."""
         return self._step_count
 
+    def collect_distillation_actions(
+        self,
+        student_actions: torch.Tensor,
+        teacher_actions: torch.Tensor,
+    ) -> None:
+        """Log raw student and teacher policy outputs for one step.
+
+        Args:
+            student_actions: Student network output for this step, shape ``[N_envs, n_actions]``.
+            teacher_actions: Teacher network output for this step, shape ``[N_envs, n_actions]``.
+        """
+        self._data["student_actions"].append(student_actions.detach().clone())
+        self._data["teacher_actions"].append(teacher_actions.detach().clone())
+
     def collect_step(self, env) -> None:
         """Capture all loggable data for the current timestep.
 

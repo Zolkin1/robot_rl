@@ -69,6 +69,8 @@ class G1WalkRunCLFDistillationEnvCfg(G1WalkRunCLFEnvCfg):
             VelocityBucketCfg(percentage=0.10, lin_vel_x=(0, 0.09)),        # Standing
         ]
 
+        self.commands.base_velocity.skill_transition_prob = 0.9
+
         # For now just distill walking — override velocity buckets
         # (ranges.lin_vel_x alone has no effect because buckets consume 100% of envs)
         # self.commands.base_velocity.velocity_buckets = [
