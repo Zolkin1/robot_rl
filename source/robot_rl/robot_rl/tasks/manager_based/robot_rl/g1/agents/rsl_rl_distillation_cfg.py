@@ -193,7 +193,7 @@ class G1MultiskillMLP2LSTMDistillationRunnerCfg(G1MulitskillMLP2MLPDistillationR
 class RslRlCausalTransformerModelCfg(RslRlMLPModelCfg):
     """Configuration for the Causal Transformer model."""
     class_name: str = "robot_rl.network.transformer_network:CausalTransformerModel"
-    single_obs_dim: int = 72
+    single_obs_dim: int = 286 #179 for just ref or just act #72 for no ref and no act
     history_length: int = 50
     d_model: int = 128
     nhead: int = 4
@@ -223,7 +223,7 @@ class G1MultiskillMLP2TransformerDistillationRunnerCfg(G1MulitskillMLP2MLPDistil
         num_learning_epochs=2,
         learning_rate=5.0e-4,
         gradient_length=1,
-        loss_type="huber",
+        loss_type="mse",
     )
 
 

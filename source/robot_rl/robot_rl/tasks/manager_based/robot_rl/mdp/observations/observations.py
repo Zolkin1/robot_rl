@@ -54,6 +54,25 @@ def ref_cos_phase(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
         cphase = cphase.unsqueeze(-1)
     return cphase
 
+def skill_one_hot(env: ManagerBasedRLEnv, command_name: str = "base_velocity") -> torch.Tensor:
+    """One-hot encoding of the active velocity bucket (skill) for each environment.
+
+    Reads ``bucket_id`` from a :class:`MultiskillVelocityTrackingCommand` term and converts it
+    into a one-hot vector of length ``len(cfg.velocity_buckets)``. Envs assigned to the implicit
+    default bucket (when bucket percentages do not sum to 1) are returned as all-zeros.
+
+    Returns a tensor of shape ``(num_envs, num_buckets)``.
+    """
+    cmd = env.command_manager.get_term(command_name)
+    num_buckets = len(cmd.cfg.velocity_buckets)
+    one_hot = torch.zeros(env.num_envs, num_buckets, device=env.device)
+    in_bucket = cmd.bucket_id < num_buckets
+    one_hot[in_bucket] = torch.nn.functional.one_hot(
+        cmd.bucket_id[in_bucket], num_classes=num_buckets
+    ).float()
+    return one_hot
+
+
 def multiskill_phase(env: ManagerBasedRLEnv, frequency_list: list[float], command_name: str) -> torch.Tensor:
     """Create phasing variables at different frequencies to cover a range.
 

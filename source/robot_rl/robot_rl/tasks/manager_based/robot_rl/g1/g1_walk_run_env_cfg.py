@@ -94,6 +94,17 @@ class G1WalkRunCLFTransformerDistillationEnvCfg(G1WalkRunCLFDistillationEnvCfg):
         self.observations.student.joint_vel.history_length = history_length
         self.observations.student.actions.history_length = history_length
 
+        # One hot testing
+        self.observations.student.skill_one_hot.history_length = history_length
+
+        # For the privledged student test
+        self.observations.student.ref_traj.history_length = history_length
+        self.observations.student.act_traj.history_length = history_length
+        self.observations.student.ref_traj_vel.history_length = history_length
+        self.observations.student.act_traj_vel.history_length = history_length
+
+        self.observations.student.skill_one_hot.history_length = history_length
+
 @configclass
 class G1WalkRunCLFEnvCfgPlay(G1WalkRunCLFEnvCfg):
     """Configuration for the G1 running gait library play environment."""

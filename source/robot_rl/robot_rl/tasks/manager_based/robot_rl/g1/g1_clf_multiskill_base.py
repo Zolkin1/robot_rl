@@ -43,10 +43,11 @@ class G1MultiSkillObservationCfg(G1ClfTrackingObservationsCfg):
 
     @configclass
     class StudentCfg(PolicyCfg):
-        ref_traj = None
-        act_traj = None
-        ref_traj_vel = None
-        act_traj_vel = None
+        skill_one_hot = ObsTerm(func=mdp.skill_one_hot, params={"command_name": "base_velocity"})
+        # ref_traj = None
+        # act_traj = None
+        # ref_traj_vel = None
+        # act_traj_vel = None
 
     policy: PolicyCfg = PolicyCfg()
     critic: CriticCfg = CriticCfg()
