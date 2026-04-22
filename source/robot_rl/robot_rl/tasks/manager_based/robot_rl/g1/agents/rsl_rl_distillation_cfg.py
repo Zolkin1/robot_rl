@@ -193,13 +193,17 @@ class G1MultiskillMLP2LSTMDistillationRunnerCfg(G1MulitskillMLP2MLPDistillationR
 class RslRlCausalTransformerModelCfg(RslRlMLPModelCfg):
     """Configuration for the Causal Transformer model."""
     class_name: str = "robot_rl.network.transformer_network:CausalTransformerModel"
-    single_obs_dim: int = 286 #179 for just ref or just act #72 for no ref and no act
+    single_obs_dim: int = 179 #286 #179 for just ref or just act #72 for no ref and no act
     history_length: int = 50
     d_model: int = 128
     nhead: int = 4
     num_layers: int = 4
     dim_feedforward: int = 256
     dropout: float = 0.0
+    # Indices below are tied to StudentCfg declaration order in g1_clf_multiskill_base.py
+    use_velocity_embedding: bool = False
+    velocity_command_start: int = 6
+    velocity_command_dim: int = 3
 
 @configclass
 class G1MultiskillMLP2TransformerDistillationRunnerCfg(G1MulitskillMLP2MLPDistillationRunner):

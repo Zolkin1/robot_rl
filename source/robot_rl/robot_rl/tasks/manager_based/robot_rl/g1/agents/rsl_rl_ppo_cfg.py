@@ -175,6 +175,10 @@ class RslRlCausalTransformerModelCfg(RslRlMLPModelCfg):
     num_layers: int = 4
     dim_feedforward: int = 256
     dropout: float = 0.0
+    # Indices below are tied to PolicyCfg declaration order in g1_clf_tracking_base.py
+    use_velocity_embedding: bool = False
+    velocity_command_start: int = 6
+    velocity_command_dim: int = 3
 
 ##
 # Symmetric Causal Transformer Runner

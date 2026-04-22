@@ -57,6 +57,13 @@ class CausalTransformer(nn.Module):
         num_layers: Number of transformer encoder layers.
         dim_feedforward: Feedforward dimension in each transformer layer.
         dropout: Dropout rate (0.0 is typical for RL).
+        use_velocity_embedding: If True, project the velocity command slice of each
+            timestep's observation separately and add it to the token, similarly to
+            the positional encoding. This highlights the command signal to attention.
+        velocity_command_start: Start index of the velocity command within a single
+            timestep's observation. Only used when ``use_velocity_embedding`` is True.
+        velocity_command_dim: Length of the velocity command slice. Only used when
+            ``use_velocity_embedding`` is True.
     """
 
     def __init__(
@@ -69,14 +76,43 @@ class CausalTransformer(nn.Module):
         num_layers: int = 4,
         dim_feedforward: int = 256,
         dropout: float = 0.0,
+        use_velocity_embedding: bool = False,
+        velocity_command_start: int = 0,
+        velocity_command_dim: int = 0,
     ):
         super().__init__()
         self.single_obs_dim = single_obs_dim
         self.history_length = history_length
         self.d_model = d_model
+        self.use_velocity_embedding = use_velocity_embedding
 
         # Project each observation token to the model dimension
         self.input_proj = nn.Linear(single_obs_dim, d_model)
+
+        # Optional: separate projection for the velocity command slice, added to each
+        # token alongside the positional encoding to surface the command signal.
+        # velocity_proj is always defined so TorchScript scripting sees a static
+        # attribute graph; when the feature is off it's an nn.Identity placeholder
+        # (no params) so old checkpoints load without state_dict mismatches.
+        if use_velocity_embedding:
+            if velocity_command_dim <= 0:
+                raise ValueError(
+                    f"velocity_command_dim must be positive when use_velocity_embedding "
+                    f"is True, got {velocity_command_dim}."
+                )
+            if velocity_command_start + velocity_command_dim > single_obs_dim:
+                raise ValueError(
+                    f"velocity_command_start ({velocity_command_start}) + "
+                    f"velocity_command_dim ({velocity_command_dim}) exceeds "
+                    f"single_obs_dim ({single_obs_dim})."
+                )
+            self.velocity_proj: nn.Module = nn.Linear(velocity_command_dim, d_model)
+            self.vel_start: int = velocity_command_start
+            self.vel_end: int = velocity_command_start + velocity_command_dim
+        else:
+            self.velocity_proj: nn.Module = nn.Identity()
+            self.vel_start: int = 0
+            self.vel_end: int = 0
 
         # Fixed sinusoidal positional encoding
         self.register_buffer(
@@ -119,14 +155,19 @@ class CausalTransformer(nn.Module):
 
         # Reshape flat input to sequence of tokens
         # [B, H*D] -> [B, H, D]
-        x = x.view(batch_size, self.history_length, self.single_obs_dim)
+        x_seq = x.view(batch_size, self.history_length, self.single_obs_dim)
 
         # Project each token to model dimension
         # [B, H, D] -> [B, H, d_model]
-        x = self.input_proj(x)
+        x = self.input_proj(x_seq)
 
         # Add positional encoding
         x = x + self.pos_encoding
+
+        # Add optional velocity command embedding (per-timestep) so the command is
+        # surfaced to attention beyond its presence in the raw observation.
+        if self.use_velocity_embedding:
+            x = x + self.velocity_proj(x_seq[:, :, self.vel_start:self.vel_end])
 
         # Apply causal transformer
         # [B, H, d_model] -> [B, H, d_model]
@@ -170,6 +211,9 @@ class CausalTransformerModel(MLPModel):
         num_layers: int = 4,
         dim_feedforward: int = 256,
         dropout: float = 0.0,
+        use_velocity_embedding: bool = False,
+        velocity_command_start: int = 0,
+        velocity_command_dim: int = 0,
         **kwargs,
     ):
         """Initialize the Causal Transformer model.
@@ -188,6 +232,15 @@ class CausalTransformerModel(MLPModel):
             num_layers: Number of transformer encoder layers.
             dim_feedforward: Feedforward dimension in each transformer layer.
             dropout: Dropout rate.
+            use_velocity_embedding: If True, add a separate velocity command embedding
+                to each token (alongside the positional encoding). The indices below
+                must point to the velocity command slice within a single timestep's
+                observation.
+            velocity_command_start: Start index of the velocity command within a
+                single timestep's observation. Must be set when
+                ``use_velocity_embedding`` is True.
+            velocity_command_dim: Length of the velocity command slice. Must be
+                positive when ``use_velocity_embedding`` is True.
         """
         if single_obs_dim is None or history_length is None:
             raise ValueError(
@@ -228,6 +281,9 @@ class CausalTransformerModel(MLPModel):
             num_layers=num_layers,
             dim_feedforward=dim_feedforward,
             dropout=dropout,
+            use_velocity_embedding=use_velocity_embedding,
+            velocity_command_start=velocity_command_start,
+            velocity_command_dim=velocity_command_dim,
         )
 
 
@@ -262,3 +318,24 @@ if __name__ == "__main__":
     # Outputs for the last token should differ, but this test checks the full output
     # (which only uses the last token anyway)
     print(f"Output differs after changing last token: {not torch.allclose(y, y2)}")
+
+    # Smoke test: velocity command embedding variant
+    vel_transformer = CausalTransformer(
+        single_obs_dim=single_obs_dim,
+        history_length=history_length,
+        output_dim=act_dim,
+        d_model=128,
+        nhead=4,
+        num_layers=4,
+        dim_feedforward=256,
+        dropout=0.0,
+        use_velocity_embedding=True,
+        velocity_command_start=6,
+        velocity_command_dim=3,
+    )
+    y_vel = vel_transformer(x)
+    y_vel.sum().backward()
+    vel_grad = vel_transformer.velocity_proj.weight.grad
+    print(f"Vel-embed output: {y_vel.shape}")
+    print(f"Vel-embed params: {sum(p.numel() for p in vel_transformer.parameters()):,}")
+    print(f"velocity_proj received grad: {vel_grad is not None and vel_grad.abs().sum().item() > 0}")
