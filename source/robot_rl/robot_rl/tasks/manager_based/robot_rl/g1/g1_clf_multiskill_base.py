@@ -23,11 +23,6 @@ class G1MultiSkillObservationCfg(G1ClfTrackingObservationsCfg):
         sin_phase = None
         cos_phase = None
 
-        # multiskill_phases = ObsTerm(func=mdp.multiskill_phase, params={"frequency_list": [1.0/(2*0.299), 1.0/(2*0.46)], "command_name": "traj_ref"} )
-
-        joint_pos = ObsTerm(func=mdp.joint_pos_rel, noise=Unoise(n_min=-0.01, n_max=0.01)) #, history_length=3)
-
-
         # Trying the actor with the traj ref and traj actual
         ref_traj = ObsTerm(func=mdp.ref_traj, params={"command_name": "traj_ref"})
         act_traj = ObsTerm(func=mdp.act_traj, params={"command_name": "traj_ref"})
@@ -39,15 +34,13 @@ class G1MultiSkillObservationCfg(G1ClfTrackingObservationsCfg):
         sin_phase = None
         cos_phase = None
 
-        # multiskill_phases = ObsTerm(func=mdp.multiskill_phase, params={"frequency_list": [1.0/(2*0.299), 1.0/(2*0.46)], "command_name": "traj_ref"} )
-
     @configclass
     class StudentCfg(PolicyCfg):
         # skill_one_hot = ObsTerm(func=mdp.skill_one_hot, params={"command_name": "base_velocity"})
         ref_traj = None
-        # act_traj = None
+        act_traj = None
         ref_traj_vel = None
-        # act_traj_vel = None
+        act_traj_vel = None
 
     policy: PolicyCfg = PolicyCfg()
     critic: CriticCfg = CriticCfg()
@@ -64,8 +57,6 @@ class G1MultiSkillCommandsCfg(G1ClfTrackingCommandCfg):
         conditioner_generator_name = "base_velocity",
         Q_weights = WALKING_Q_weights,
         R_weights = WALKING_R_weights,
-        hold_phi_threshold = 0.1,
-        phasing_boundaries=4,
     )
 
     base_velocity = MultiskillVelocityTrackingCommandCfg(

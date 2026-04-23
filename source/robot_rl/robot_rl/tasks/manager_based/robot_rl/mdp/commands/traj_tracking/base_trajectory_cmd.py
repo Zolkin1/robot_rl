@@ -1,8 +1,9 @@
 """Abstract base class for trajectory command terms.
 
-Extracts all manager-agnostic logic from :class:`TrajectoryCommand` so that
-both single-skill (:class:`LibraryCommand`) and multi-skill
-(:class:`BatchedMultiSkillCommand`) are thin subclasses.
+Holds the manager-agnostic, phase-free shared logic.  Concrete commands
+extend either this class directly (multi-skill, no phase state) or the
+:class:`PhasedTrajectoryCommand` subclass (single-skill, phase variable
+exposed as observation with hold-phi logic).
 """
 
 from __future__ import annotations
@@ -31,9 +32,14 @@ from .trajectory_manager import TrajectoryType
 class BaseTrajectoryCommand(CommandTerm):
     """Trajectory command term base class.
 
-    Handles phasing variables, measured/desired output computation, CLF
-    tracking, and metrics logging.  Subclasses only need to implement
-    manager creation and contact-frame verification.
+    Handles measured/desired output computation, CLF tracking, ref-frame
+    bookkeeping, and metrics logging.  Trajectory advancement is time-based
+    only; no phasing variable is stored on this class.  Subclasses that
+    want phase-as-observation or hold-phi logic should extend
+    :class:`PhasedTrajectoryCommand` instead.
+
+    Subclasses must implement ``_create_manager`` and
+    ``_verify_contact_frames``.
     """
 
     # ------------------------------------------------------------------
@@ -134,6 +140,11 @@ class BaseTrajectoryCommand(CommandTerm):
         self.ref_poses = torch.zeros((self.num_envs, 7), device=self.device)
         self.ref_poses[:, 6] = 1.0  # identity quaternion
 
+        # Index (into self.ref_frames) of the ref frame currently in contact
+        # per env.  Updated each step inside get_measured_outputs.  Exposed
+        # for logging / debug visualisation.
+        self.cur_ref_frame_idx = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
+
         # --- CLF ----------------------------------------------------------
         self.clf = CLF(
             sim_dt=self.env.cfg.sim.dt,
@@ -145,95 +156,16 @@ class BaseTrajectoryCommand(CommandTerm):
             device=self.device,
         )
 
-        # --- Phasing variable state ---------------------------------------
-        self.phasing_var = torch.zeros(self.num_envs, device=self.device)
-        self.unmasked_phasing_var = torch.zeros(self.num_envs, device=self.device)
-        self.prev_unmasked_phasing_var = torch.zeros(self.num_envs, device=self.device)
-        self.hold_envs = torch.ones(self.num_envs, device=self.device)
-
-        # Hold logic state (hold at second boundary, not first)
-        self.should_hold = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
-        self.boundaries_crossed = torch.zeros(self.num_envs, dtype=torch.int, device=self.device)
-        self.hold_phi_value = -1.0 * torch.ones(self.num_envs, device=self.device)
-
         # --- Time offsets -------------------------------------------------
         self.time_offset = torch.zeros(self.num_envs, device=self.device)
         self.init_time_offset = torch.zeros(self.num_envs, device=self.device)
 
+        # Private scratch for single-domain change detection. Holds the
+        # previous step's raw manager-reported phi. Not exposed to RL.
+        self._prev_phi = torch.zeros(self.num_envs, device=self.device)
+
         # --- Subclass hook ------------------------------------------------
         self._post_init()
-
-    # ------------------------------------------------------------------
-    # Phasing variable
-    # ------------------------------------------------------------------
-
-    def update_phasing_var(self, t: torch.Tensor, env_ids: torch.Tensor = None) -> torch.Tensor:
-        """Update the phasing variable, with hold logic on full updates.
-
-        Holds phi at the second boundary crossing (0.0 or 0.5) rather than
-        the first, allowing a full phase to complete before stopping when
-        velocity is low.
-
-        Args:
-            t: Time tensor of shape ``[N]``.
-            env_ids: Optional environment indices. If provided, only those
-                environments are updated (hold logic is skipped).
-
-        Returns:
-            Phasing variable tensor of shape ``[N]``.
-        """
-        if env_ids is not None:
-            new_phi = self.manager.get_phasing_var(t, env_ids)
-            self.phasing_var[env_ids] = new_phi
-            self.unmasked_phasing_var[env_ids] = new_phi
-            return new_phi
-
-        # Full update with hold / boundary tracking
-        prev_phi = self.phasing_var
-        self.prev_unmasked_phasing_var = self.unmasked_phasing_var
-        self.phasing_var = self.manager.get_phasing_var(t)
-        self.unmasked_phasing_var = self.phasing_var
-
-        # Determine which envs should hold
-        cmd_vel = self.env.command_manager.get_command("base_velocity")
-        prev_should_hold = self.should_hold.clone()
-        self.should_hold = torch.abs(cmd_vel[:, 0]) < self.cfg.hold_phi_threshold
-
-        # Reset tracking on newly holding envs or episode resets
-        newly_holding = self.should_hold & ~prev_should_hold
-        reset_mask = newly_holding | (self.env.episode_length_buf == 0)
-        self.boundaries_crossed[reset_mask] = 0
-        self.hold_phi_value[reset_mask] = -1.0
-
-        # Release hold when no longer should hold
-        released = ~self.should_hold
-        self.hold_phi_value[released] = -1.0
-        self.boundaries_crossed[released] = 0
-
-        # Detect boundary crossings (only for envs that should hold but aren't locked yet)
-        active = self.should_hold & (self.hold_phi_value < 0)
-
-        crosses_zero = active & (self.phasing_var < prev_phi) & (prev_phi > 0)
-        crosses_half = active & (prev_phi < 0.5) & (self.phasing_var >= 0.5)
-
-        crosses_any = crosses_zero | crosses_half
-        self.boundaries_crossed[crosses_any] += 1
-
-        # Lock hold on the second boundary crossing
-        lock_at_zero = crosses_zero & (self.boundaries_crossed >= self.cfg.phasing_boundaries)
-        lock_at_half = crosses_half & (self.boundaries_crossed >= self.cfg.phasing_boundaries)
-        self.hold_phi_value[lock_at_zero] = 0.0
-        self.hold_phi_value[lock_at_half] = 0.5
-
-        # Apply hold for all locked envs
-        holding = self.hold_phi_value >= 0
-        self.phasing_var[holding] = self.hold_phi_value[holding]
-
-        return self.phasing_var
-
-    def get_phasing_var(self) -> torch.Tensor:
-        """Return the current phasing variable of shape ``[N]``."""
-        return self.phasing_var
 
     # ------------------------------------------------------------------
     # Contact state & symmetry helpers
@@ -294,36 +226,41 @@ class BaseTrajectoryCommand(CommandTerm):
         else:
             changed = new_domains != self.current_domain[env_ids]
 
-        # For single-domain trajectories, force update at stepping cadence
+        # For single-domain trajectories, force update at stepping cadence by
+        # detecting phase wrap / half-crossing in the raw (unheld) phi.
+        cur_phi = self.manager.get_phasing_var(t, env_ids)
         if env_ids is None:
+            prev_phi = self._prev_phi
             single_dom_mask = (
                 (self.manager.get_num_domains() == 1)
                 & (
-                    (self.prev_unmasked_phasing_var > self.unmasked_phasing_var)
-                    | ((self.prev_unmasked_phasing_var < 0.5) & (0.5 < self.unmasked_phasing_var))
+                    (prev_phi > cur_phi)
+                    | ((prev_phi < 0.5) & (0.5 < cur_phi))
                 )
             )
             changed[single_dom_mask] = True
             self.current_domain = new_domains
+            self._prev_phi = cur_phi
         else:
+            prev_phi = self._prev_phi[env_ids]
             single_dom_mask = (
                 (self.manager.get_num_domains()[env_ids] == 1)
                 & (
-                    (self.prev_unmasked_phasing_var[env_ids] > self.unmasked_phasing_var[env_ids])
-                    | (
-                        (self.prev_unmasked_phasing_var[env_ids] < 0.5)
-                        & (0.5 < self.unmasked_phasing_var[env_ids])
-                    )
+                    (prev_phi > cur_phi)
+                    | ((prev_phi < 0.5) & (0.5 < cur_phi))
                 )
             )
             changed[single_dom_mask] = True
             self.current_domain[env_ids] = new_domains
+            self._prev_phi[env_ids] = cur_phi
 
         # Which reference frame each env should use
         if env_ids is None:
             ref_frame_indices = self.manager.get_ref_frames_in_use(t, self.ref_frames)
+            self.cur_ref_frame_idx = ref_frame_indices
         else:
             ref_frame_indices = self.manager.get_ref_frames_in_use(t, self.ref_frames, env_ids)
+            self.cur_ref_frame_idx[env_ids] = ref_frame_indices
 
         # Contact-gating: only update ref_poses when the reference frame body
         # is actually in contact with the ground. This prevents snapping to a
@@ -494,6 +431,20 @@ class BaseTrajectoryCommand(CommandTerm):
     # Desired outputs
     # ------------------------------------------------------------------
 
+    def _transform_desired_outputs(
+        self,
+        t: torch.Tensor,
+        y_pos: torch.Tensor,
+        y_vel: torch.Tensor,
+        env_ids: torch.Tensor = None,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Optional hook to transform desired outputs before storage.
+
+        Default is identity.  Subclasses override to apply a user heuristic
+        or other post-processing.
+        """
+        return y_pos, y_vel
+
     def get_desired_outputs(self, t: torch.Tensor, env_ids: torch.Tensor = None) -> None:
         """Get the desired output from the trajectory manager.
 
@@ -501,9 +452,8 @@ class BaseTrajectoryCommand(CommandTerm):
             t: Time tensor of shape ``[N]``.
             env_ids: Optional environment indices.
         """
-        phi = self.update_phasing_var(t, env_ids)
-
         y_pos, y_vel = self.manager.get_output(t, env_ids)
+        y_pos, y_vel = self._transform_desired_outputs(t, y_pos, y_vel, env_ids)
 
         if env_ids is None:
             self.y_des = y_pos
@@ -514,6 +464,7 @@ class BaseTrajectoryCommand(CommandTerm):
 
         # Zero velocities at the end of episodic trajectories
         if self.manager.get_trajectory_type() == TrajectoryType.EPISODIC:
+            phi = self.manager.get_phasing_var(t, env_ids)
             if env_ids is None:
                 self.dy_des[phi == 1] *= 0
             else:
@@ -552,25 +503,31 @@ class BaseTrajectoryCommand(CommandTerm):
         """Resample the command (delegates to ``_update_command``)."""
         self._update_command()
 
-    def _update_command(self):
-        """Main per-step update: measured outputs, desired outputs, CLF."""
-        self.manager.invalidate_cache()
+    def _compute_time(self) -> torch.Tensor:
+        """Compute the per-env trajectory time.
 
-        # Time in each env
+        Base implementation applies ``random_start_time_max`` and
+        ``init_time_offset``.  Subclasses may override to apply further
+        masking (e.g. :class:`PhasedTrajectoryCommand` applies hold-phi).
+
+        Returns:
+            Time tensor of shape ``[N]``.
+        """
         t = self.env.episode_length_buf * self.env.step_dt
 
-        # Random start time offset for episodic trajectories
         if self.cfg.random_start_time_max > 0:
             mask = torch.where(self.env.episode_length_buf == 0)[0]
             self.time_offset[mask] = torch.rand(mask.shape, device=self.device) * self.cfg.random_start_time_max
 
         t = torch.maximum(t - self.time_offset, torch.zeros_like(t))
         t = t + self.init_time_offset
+        return t
 
-        if self.cfg.percent_hold_phi > 0:
-            mask = torch.where(self.env.episode_length_buf == 0)[0]
-            self.hold_envs[mask] = (torch.rand(len(mask), device=self.device) > self.cfg.percent_hold_phi).float()
-            t *= self.hold_envs
+    def _update_command(self):
+        """Main per-step update: measured outputs, desired outputs, CLF."""
+        self.manager.invalidate_cache()
+
+        t = self._compute_time()
 
         self.get_measured_outputs(t)
         self.get_desired_outputs(t)
@@ -579,8 +536,6 @@ class BaseTrajectoryCommand(CommandTerm):
 
         self.vdot = vdot
         self.v = vcur
-
-        self.manager.log_v_on_phasing_var(self.get_phasing_var(), self.v)
 
     def _update_metrics(self):
         """Log tracking errors and CLF values."""

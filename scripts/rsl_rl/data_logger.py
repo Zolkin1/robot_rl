@@ -26,6 +26,7 @@ _TRAJ_TERM_NAMES = ("traj_ref", "hlip_ref")
 _TRAJ_ATTRS = (
     "y_des", "y_act", "dy_des", "dy_act",
     "v", "vdot", "current_domain", "phasing_var",
+    "ref_poses", "cur_ref_frame_idx",
 )
 
 
@@ -97,6 +98,17 @@ class DataLogger:
                     elif val is None:
                         self._warn(f"traj_attr:{attr}",
                                    f"Trajectory term '{self._traj_term_name}' has no attribute '{attr}'")
+
+                # Fallback: if the command doesn't expose phasing_var (e.g.
+                # multiskill, which has no phase state), query phi from the
+                # manager using the command's per-env trajectory clock so
+                # downstream plots still work.
+                if "phasing_var" not in step and hasattr(ref, "traj_time") and hasattr(ref, "manager"):
+                    try:
+                        step["phasing_var"] = ref.manager.get_phasing_var(ref.traj_time).clone()
+                    except Exception as exc:
+                        self._warn("phasing_var_fallback",
+                                   f"Could not compute fallback phasing_var: {exc}")
             except Exception as exc:
                 self._warn("traj_term", f"Failed to read trajectory term: {exc}")
 
@@ -177,6 +189,8 @@ class DataLogger:
                     self.metadata["pos_names"] = list(ref.ordered_pos_output_names)
                 if hasattr(ref, "ordered_vel_output_names"):
                     self.metadata["vel_names"] = list(ref.ordered_vel_output_names)
+                if hasattr(ref, "ref_frames"):
+                    self.metadata["ref_frames"] = list(ref.ref_frames)
             except Exception as exc:
                 print(f"[WARN DataLogger] Could not read trajectory metadata: {exc}")
         else:

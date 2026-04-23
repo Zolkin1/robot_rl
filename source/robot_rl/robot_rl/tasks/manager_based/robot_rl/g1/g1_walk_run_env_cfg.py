@@ -51,6 +51,9 @@ class G1WalkRunCLFEnvCfg(G1MultiSkillCLFEnvCfg):
         self.scene.terrain.terrain_generator = None
         self.scene.height_scanner = None
 
+        self.commands.base_velocity.debug_vis = False
+
+
 @configclass
 class G1WalkRunCLFDistillationEnvCfg(G1WalkRunCLFEnvCfg):
     def __post_init__(self):
@@ -97,7 +100,7 @@ class G1WalkRunCLFTransformerDistillationEnvCfg(G1WalkRunCLFDistillationEnvCfg):
         # One hot testing
         # self.observations.student.skill_one_hot.history_length = history_length
 
-        # For the privledged student test
+        # For the privileged student test
         # self.observations.student.ref_traj.history_length = history_length
         self.observations.student.act_traj.history_length = history_length
         # self.observations.student.ref_traj_vel.history_length = history_length
@@ -117,9 +120,10 @@ class G1WalkRunCLFEnvCfgPlay(G1WalkRunCLFEnvCfg):
         # self.commands.base_velocity.ranges.lin_vel_y = (-0.75, 0.75)
         # self.commands.base_velocity.ranges.ang_vel_z = (-0.75, 0.75)
         self.commands.base_velocity.ranges.resampling_time_range=(2.0, 2.0) #(4.0, 4.0) #(3.0, 4.0)
+        self.commands.base_velocity.skill_transition_prob = 1.0
         self.commands.base_velocity.debug_vis = False
 
-        self.episode_length_s = 10.0 #4.0 #6.0
+        self.episode_length_s = 15.0 #10.0 #4.0 #6.0
 
 
         self.scene.num_envs = 2

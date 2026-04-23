@@ -166,7 +166,6 @@ class G1BowingCommandsCfg(HumanoidCommandsCfg):
         path = "trajectories/bowing/bow_forward_config_solution.yaml",
 
         conditioner_generator_name = "base_velocity",
-        num_outputs = 45, #25, #31, #27,
         Q_weights = BOWING_Q_weights,
         R_weights = BOWING_R_weights,
         random_start_time_max = -1.0, #1.0,

@@ -332,7 +332,7 @@ class TrajectoryManager(ManagerBase):
             return torch.clamp(t / self.traj_data.total_time, 0, 1)
         elif self.traj_data.trajectory_type == TrajectoryType.PERPETUAL:
             # For now all perpetual motions are assumed to have no phasing associated with them
-            return torch.clamp(torch.zeros(t.shape[0], self.device), 0, 1)
+            return torch.zeros(t.shape[0], device=self.device)
         else:
             raise NotImplementedError(f"Trajectory type {self.traj_data.trajectory_type} is not implemented.")
 

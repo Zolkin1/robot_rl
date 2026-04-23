@@ -647,6 +647,22 @@ class MultiSkillManager(ManagerBase):
         self._ensure_cache(env_ids)
         return self._cached_global_indices
 
+    def get_current_trajectory_indices(self, env_ids: Tensor | None = None) -> Tensor:
+        """Public wrapper around the trajectory assignment cache.
+
+        Resolves the current trajectory index per environment without
+        computing any outputs.  Callers can use this to detect skill/
+        trajectory changes between steps.
+
+        Args:
+            env_ids: Optional environment index subset.  ``None`` resolves
+                the full batch.
+
+        Returns:
+            ``[N]`` global trajectory indices for the selected envs.
+        """
+        return self._get_global_indices(env_ids)
+
     def _get_domain_indices(self, t: Tensor, traj_idx: Tensor) -> Tensor:
         """Batched domain lookup via searchsorted on per-trajectory boundaries.
 
@@ -1197,6 +1213,70 @@ class MultiSkillManager(ManagerBase):
             The input positions unchanged.
         """
         return positions
+
+    def compute_transition_time(
+        self,
+        old_traj_idx: Tensor,
+        old_t: Tensor,
+        new_traj_idx: Tensor,
+    ) -> Tensor:
+        """Compute a new trajectory time that matches the old trajectory's state.
+
+        On a skill change, the new trajectory's raw elapsed time usually
+        maps to a phi that is unrelated to where the robot is in the old
+        trajectory.  This method returns a target time for the new
+        trajectory so that:
+
+        1. The fractional phase matches — phi in new == phi in old.
+        2. For half-periodic-to-half-periodic transitions, if the reference
+           frame at that phi in the new trajectory disagrees with the old
+           reference frame (i.e. the "first half" convention is opposite),
+           phi is shifted by 0.5 so the stance foot matches.  The second
+           half of a half-periodic trajectory is the sagittal reflection
+           of the first, so shifting by 0.5 preserves the fractional
+           position within the stance while swapping feet.
+
+        For other trajectory-type combinations the method falls through
+        with ``candidate_phi = old_phi`` (no shift).
+
+        Requires ``_ref_frame_domain_map`` to be populated (via
+        :meth:`build_ref_frame_map`).
+
+        Args:
+            old_traj_idx: ``[N]`` global indices of the previous-step trajectory.
+            old_t: ``[N]`` trajectory time in the previous-step trajectory.
+            new_traj_idx: ``[N]`` global indices of the current-step trajectory.
+
+        Returns:
+            ``[N]`` target trajectory time for the new trajectory.
+        """
+        # Old phi — same definition the manager uses internally.
+        old_phi = self._compute_phasing_var(old_t, old_traj_idx)
+
+        # Candidate: same phi in the new trajectory.
+        new_total = self.data["total_time"][new_traj_idx]
+        candidate_t = old_phi * new_total
+
+        # Only half-periodic <-> half-periodic gets the ref-frame shift.
+        both_half = (
+            (self.data["traj_type"][old_traj_idx] == _HALF_PERIODIC_INT)
+            & (self.data["traj_type"][new_traj_idx] == _HALF_PERIODIC_INT)
+        )
+
+        if both_half.any() and hasattr(self, "_ref_frame_domain_map"):
+            old_domain = self._get_domain_indices(old_t, old_traj_idx)
+            candidate_domain = self._get_domain_indices(candidate_t, new_traj_idx)
+
+            old_frame = self._ref_frame_domain_map[old_traj_idx, old_domain]
+            candidate_frame = self._ref_frame_domain_map[new_traj_idx, candidate_domain]
+
+            mismatch = both_half & (candidate_frame != old_frame)
+            if mismatch.any():
+                shifted_phi = (old_phi + 0.5) % 1.0
+                shifted_t = shifted_phi * new_total
+                candidate_t = torch.where(mismatch, shifted_t, candidate_t)
+
+        return candidate_t
 
     def interpolate_skill_transition(
         self, output_a: Tensor, output_b: Tensor, alpha: Tensor

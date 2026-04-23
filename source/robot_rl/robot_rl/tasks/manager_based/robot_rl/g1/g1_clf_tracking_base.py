@@ -128,7 +128,6 @@ class G1ClfTrackingCommandCfg:
         path = "trajectories/walking",
 
         conditioner_generator_name = "base_velocity",
-        num_outputs = 54,
         Q_weights = WALKING_Q_weights,
         R_weights = WALKING_R_weights,
         hold_phi_threshold = 0.1,

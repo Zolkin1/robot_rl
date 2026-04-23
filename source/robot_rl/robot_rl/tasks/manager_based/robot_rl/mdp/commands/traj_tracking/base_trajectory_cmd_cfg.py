@@ -20,6 +20,3 @@ class BaseTrajectoryCommandCfg(CommandTermCfg):
     R_weights: list[float] = None
     resampling_time_range: tuple[float, float] = (5.0, 15.0)
     random_start_time_max: float = -1
-    percent_hold_phi: float = -1
-    hold_phi_threshold: float = -1
-    phasing_boundaries: float = 1

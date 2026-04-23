@@ -214,7 +214,8 @@ def plot_base_velocity(
         return
 
     bv = data["base_velocity"]
-    time_steps = np.arange(bv.shape[0])
+    dt = metadata.get("dt", 1.0)
+    time_s = np.arange(bv.shape[0]) * dt
     labels = ["Linear X", "Linear Y", "Angular Z"]
     units = ["m/s", "m/s", "rad/s"]
     n_dims = min(bv.shape[2], 3)
@@ -225,9 +226,9 @@ def plot_base_velocity(
         if n_dims == 1:
             axs = [axs]
         for i in range(n_dims):
-            axs[i].plot(time_steps, bv[:, env_id, i], linewidth=2)
+            axs[i].plot(time_s, bv[:, env_id, i], linewidth=2)
             axs[i].set_title(labels[i])
-            axs[i].set_xlabel("Time Steps")
+            axs[i].set_xlabel("Time (s)")
             axs[i].set_ylabel(f"Velocity ({units[i]})")
             axs[i].grid(True, alpha=0.3)
         plt.tight_layout(rect=[0, 0.03, 1, 0.95])
@@ -317,6 +318,81 @@ def plot_domain_info(
 
         plt.tight_layout(rect=[0, 0.03, 1, 0.95])
         plt.savefig(os.path.join(save_dir, f"domain_info_env{env_id}.png"),
+                     dpi=300, bbox_inches="tight")
+        plt.close(fig)
+
+
+def plot_reference_frame(
+    data: dict[str, np.ndarray],
+    metadata: dict[str, Any],
+    save_dir: str,
+    env_ids: list[int],
+) -> None:
+    """Reference-frame position and identity over time, for debugging skill transitions.
+
+    Produces a 4-row figure per env:
+      1-3. World-frame x/y/z of the current reference frame.
+      4. Which reference frame is in use (step plot, y-ticks labelled with frame names).
+
+    Background spans in the top three rows are colour-coded by the active
+    frame, so transitions show up as a colour change at a stance boundary.
+    This makes it easy to spot weird switches (e.g. left-foot ref becoming
+    right-foot mid-swing after a skill change).
+    """
+    if "ref_poses" not in data or "cur_ref_frame_idx" not in data:
+        print("[WARN plot_reference_frame] Missing ref_poses or cur_ref_frame_idx, skipping.")
+        return
+
+    ref_poses = data["ref_poses"]            # [T, N_envs, 7]
+    ref_idx = data["cur_ref_frame_idx"]      # [T, N_envs]
+    dt = metadata.get("dt", 1.0)
+    time_s = np.arange(ref_poses.shape[0]) * dt
+    frame_names = metadata.get("ref_frames", [])
+    n_frames = max(int(ref_idx.max()) + 1, len(frame_names), 1)
+    axis_labels = ("X", "Y", "Z")
+    cmap = plt.cm.tab10
+
+    for env_id in env_ids:
+        idx_env = ref_idx[:, env_id].astype(int)
+        pos_env = ref_poses[:, env_id, :3]
+
+        fig, axs = plt.subplots(4, 1, figsize=(10, 8), sharex=True)
+        fig.suptitle(f"Reference Frame (Env {env_id})", fontsize=16)
+
+        # Identify frame-change boundaries for axvspan shading
+        changes = np.where(np.diff(idx_env) != 0)[0] + 1
+        segment_starts = np.concatenate([[0], changes])
+        segment_ends = np.concatenate([changes, [len(idx_env)]])
+
+        # Top 3 rows: x, y, z over time with colour-shaded spans per segment
+        for i in range(3):
+            ax = axs[i]
+            for s, e in zip(segment_starts, segment_ends):
+                ax.axvspan(time_s[s], time_s[min(e, len(time_s) - 1)],
+                           color=cmap(idx_env[s] % 10), alpha=0.15, linewidth=0)
+            ax.plot(time_s, pos_env[:, i], color="black", linewidth=1.5)
+            ax.set_ylabel(f"{axis_labels[i]} (m)")
+            ax.set_title(f"Ref Frame Position — {axis_labels[i]}", fontsize=10)
+            ax.grid(True, alpha=0.3)
+
+        # Bottom row: ref frame identity step plot
+        ax = axs[3]
+        ax.step(time_s, idx_env, where="post", color="black", linewidth=1.5)
+        # Colour each segment
+        for s, e in zip(segment_starts, segment_ends):
+            ax.axvspan(time_s[s], time_s[min(e, len(time_s) - 1)],
+                       color=cmap(idx_env[s] % 10), alpha=0.3, linewidth=0)
+        ax.set_yticks(range(n_frames))
+        if frame_names:
+            ax.set_yticklabels(frame_names[:n_frames])
+        ax.set_ylim(-0.5, n_frames - 0.5)
+        ax.set_ylabel("Ref Frame")
+        ax.set_xlabel("Time (s)")
+        ax.set_title("Reference Frame In Use", fontsize=10)
+        ax.grid(True, alpha=0.3)
+
+        plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+        plt.savefig(os.path.join(save_dir, f"reference_frame_env{env_id}.png"),
                      dpi=300, bbox_inches="tight")
         plt.close(fig)
 
@@ -563,6 +639,7 @@ PLOT_REGISTRY: dict[str, Callable] = {
     "torques": plot_torques,
     "base_velocity": plot_base_velocity,
     "domain_info": plot_domain_info,
+    "reference_frame": plot_reference_frame,
     "clf": plot_clf,
     "moe_weights": plot_moe_weights,
     "moe_weights_vs_velocity": plot_moe_weights_vs_velocity,

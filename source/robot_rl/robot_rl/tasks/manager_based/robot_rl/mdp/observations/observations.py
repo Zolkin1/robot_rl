@@ -7,6 +7,10 @@ from typing import TYPE_CHECKING
 from isaaclab.managers import SceneEntityCfg
 from isaaclab.envs.mdp.observations import generated_commands
 
+from robot_rl.tasks.manager_based.robot_rl.mdp.commands.traj_tracking.phased_trajectory_cmd import (
+    PhasedTrajectoryCommand,
+)
+
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedRLEnv
 
@@ -31,8 +35,18 @@ def act_traj_vel(env: ManagerBasedRLEnv, command_name:str = "hlip_ref") -> torch
     return act_traj_vel
 
 
-def ref_sin_phase(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
+def _phased_cmd(env: ManagerBasedRLEnv, command_name: str) -> PhasedTrajectoryCommand:
     cmd = env.command_manager.get_term(command_name)
+    if not isinstance(cmd, PhasedTrajectoryCommand):
+        raise TypeError(
+            f"Phase observation requires a PhasedTrajectoryCommand for "
+            f"'{command_name}', got {type(cmd).__name__}."
+        )
+    return cmd
+
+
+def ref_sin_phase(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
+    cmd = _phased_cmd(env, command_name)
 
     phase = 2*torch.pi * cmd.get_phasing_var()
 
@@ -44,7 +58,7 @@ def ref_sin_phase(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
     return sphase
 
 def ref_cos_phase(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
-    cmd = env.command_manager.get_term(command_name)
+    cmd = _phased_cmd(env, command_name)
 
     phase = 2*torch.pi * cmd.get_phasing_var()
 
