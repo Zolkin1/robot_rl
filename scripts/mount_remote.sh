@@ -95,7 +95,8 @@ mount_remote() {
     
     # Mount using SSHFS
     print_info "Mounting $REMOTE_HOST:$REMOTE_PATH to $LOCAL_MOUNT_POINT"
-    sshfs "$REMOTE_USER@$REMOTE_HOST:$REMOTE_PATH" "$LOCAL_MOUNT_POINT" -o follow_symlinks,default_permissions
+    sshfs "$REMOTE_USER@$REMOTE_HOST:$REMOTE_PATH" "$LOCAL_MOUNT_POINT" \
+        -o follow_symlinks,idmap=user,uid=$(id -u),gid=$(id -g)
     
     if check_mount_status; then
         print_success "Remote directory mounted successfully!"

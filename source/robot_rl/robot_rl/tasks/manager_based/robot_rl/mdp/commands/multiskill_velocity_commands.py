@@ -102,9 +102,9 @@ class MultiskillVelocityTrackingCommand(VelocityTrackingCommand):
 
             if len(bucket_env_ids) > 0:
                 br = torch.empty(len(bucket_env_ids), device=self.device)
-                self.vel_target_b[bucket_env_ids, 0] = br.uniform_(*bucket.lin_vel_x)
-                self.vel_target_b[bucket_env_ids, 1] = br.uniform_(*bucket.lin_vel_y)
-                self.vel_target_b[bucket_env_ids, 2] = br.uniform_(*bucket.ang_vel_z)
+                self.vel_target_sampled_b[bucket_env_ids, 0] = br.uniform_(*bucket.lin_vel_x)
+                self.vel_target_sampled_b[bucket_env_ids, 1] = br.uniform_(*bucket.lin_vel_y)
+                self.vel_target_sampled_b[bucket_env_ids, 2] = br.uniform_(*bucket.ang_vel_z)
 
                 heading_range = bucket.heading if bucket.heading is not None else self.cfg.ranges.heading
                 self.heading_target[bucket_env_ids] = br.uniform_(*heading_range)
@@ -114,9 +114,9 @@ class MultiskillVelocityTrackingCommand(VelocityTrackingCommand):
 
         if len(default_env_ids) > 0:
             dr = torch.empty(len(default_env_ids), device=self.device)
-            self.vel_target_b[default_env_ids, 0] = dr.uniform_(*self.cfg.ranges.lin_vel_x)
-            self.vel_target_b[default_env_ids, 1] = dr.uniform_(*self.cfg.ranges.lin_vel_y)
-            self.vel_target_b[default_env_ids, 2] = dr.uniform_(*self.cfg.ranges.ang_vel_z)
+            self.vel_target_sampled_b[default_env_ids, 0] = dr.uniform_(*self.cfg.ranges.lin_vel_x)
+            self.vel_target_sampled_b[default_env_ids, 1] = dr.uniform_(*self.cfg.ranges.lin_vel_y)
+            self.vel_target_sampled_b[default_env_ids, 2] = dr.uniform_(*self.cfg.ranges.ang_vel_z)
             self.heading_target[default_env_ids] = dr.uniform_(*self.cfg.ranges.heading)
 
         # y position target and gains (shared across all buckets)

@@ -72,6 +72,14 @@ parser.add_argument(
 )
 parser.add_argument("--plot_envs", type=int, default=1, help="Number of envs to generate plots for.")
 parser.add_argument("--max_steps", type=int, default=None, help="Exit after this many steps (None = run forever).")
+parser.add_argument(
+    "--train_mode",
+    action="store_true",
+    default=False,
+    help="Run the policy as it behaves during training: actor/critic kept in torch .train() "
+         "mode (dropout/batchnorm active) AND stochastic action sampling enabled. "
+         "Default play is .eval() mode with deterministic actions.",
+)
 cli_args.add_rsl_rl_args(parser)
 add_launcher_args(parser)
 args_cli, hydra_args = parser.parse_known_args()
@@ -190,6 +198,10 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         # obtain the trained policy for inference
         policy = runner.get_inference_policy(device=env.unwrapped.device)
 
+        if args_cli.train_mode:
+            runner.alg.train_mode()
+            print("[INFO] Running policy in torch .train() mode with stochastic actions.")
+
         # export the trained policy to JIT and ONNX formats
         export_model_dir = os.path.join(os.path.dirname(resume_path), "exported")
 
@@ -257,8 +269,11 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
                 # run everything in inference mode
                 with torch.inference_mode():
                     # agent stepping
-                    actions = policy(obs)
-                    teacher_actions = teacher_model(obs) if teacher_model is not None else None
+                    actions = policy(obs, stochastic_output=args_cli.train_mode)
+                    teacher_actions = (
+                        teacher_model(obs, stochastic_output=args_cli.train_mode)
+                        if teacher_model is not None else None
+                    )
                     # env stepping
                     obs, _, dones, _ = env.step(actions)
                     # reset recurrent states for episodes that have terminated

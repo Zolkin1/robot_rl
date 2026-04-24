@@ -65,14 +65,15 @@ class G1WalkRunCLFDistillationEnvCfg(G1WalkRunCLFEnvCfg):
         # TODO: Just for debugging
         # self.observations.student.enable_corruption = False
 
-        self.commands.base_velocity.resampling_time_range = (2.0, 4.0)
+        self.commands.base_velocity.resampling_time_range = (2.0, 6.0)
         self.commands.base_velocity.velocity_buckets = [
             VelocityBucketCfg(percentage=0.45, lin_vel_x=(0.11, 1.49)),     # Walking
             VelocityBucketCfg(percentage=0.45, lin_vel_x=(1.51, 3.7)),      # Running
             VelocityBucketCfg(percentage=0.10, lin_vel_x=(0, 0.09)),        # Standing
         ]
+        self.commands.base_velocity.max_acc = 1.0
 
-        self.commands.base_velocity.skill_transition_prob = 0.9
+        self.commands.base_velocity.skill_transition_prob = 0.6
 
         # For now just distill walking — override velocity buckets
         # (ranges.lin_vel_x alone has no effect because buckets consume 100% of envs)
@@ -102,9 +103,9 @@ class G1WalkRunCLFTransformerDistillationEnvCfg(G1WalkRunCLFDistillationEnvCfg):
 
         # For the privileged student test
         # self.observations.student.ref_traj.history_length = history_length
-        self.observations.student.act_traj.history_length = history_length
+        # self.observations.student.act_traj.history_length = history_length
         # self.observations.student.ref_traj_vel.history_length = history_length
-        self.observations.student.act_traj_vel.history_length = history_length
+        # self.observations.student.act_traj_vel.history_length = history_length
 
 @configclass
 class G1WalkRunCLFEnvCfgPlay(G1WalkRunCLFEnvCfg):

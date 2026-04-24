@@ -193,7 +193,7 @@ class G1MultiskillMLP2LSTMDistillationRunnerCfg(G1MulitskillMLP2MLPDistillationR
 class RslRlCausalTransformerModelCfg(RslRlMLPModelCfg):
     """Configuration for the Causal Transformer model."""
     class_name: str = "robot_rl.network.transformer_network:CausalTransformerModel"
-    single_obs_dim: int = 179 #286 #179 for just ref or just act #72 for no ref and no act
+    single_obs_dim: int = 72 #286 #179 for just ref or just act #72 for no ref and no act
     history_length: int = 50
     d_model: int = 128
     nhead: int = 4
@@ -262,7 +262,7 @@ class G1MultiskillMixedPolicyMLP2TransformerDistillationRunnerCfg(G1MultiskillML
         num_learning_epochs=2,
         learning_rate=5.0e-4,
         gradient_length=1,
-        loss_type="huber",
+        loss_type="mse",
         teacher_action_probability=0.2,
     )
 
@@ -284,7 +284,7 @@ class HybridDistillationAlgorithmCfg:
     """The algorithm class name."""
 
     # Distillation params
-    loss_type: Literal["mse", "huber"] = "huber" #"mse"
+    loss_type: Literal["mse", "huber"] = "mse"
     """Loss type for the behavior cloning term."""
 
     behavior_loss_coef: float = 10.0 #1.0
@@ -294,7 +294,7 @@ class HybridDistillationAlgorithmCfg:
     num_learning_epochs: int = 2
     """Number of learning epochs per update."""
 
-    num_mini_batches: int = 4 #20 #4
+    num_mini_batches: int = 96 #4
     """Number of mini-batches per epoch."""
 
     learning_rate: float = 3e-4
@@ -334,7 +334,7 @@ class HybridDistillationAlgorithmCfg:
     """Target KL divergence for adaptive LR."""
 
     # Curriculum params
-    curriculum_end_iteration: int = 1000 #10000
+    curriculum_end_iteration: int = 10000
     """Iteration at which lambda_D reaches its minimum value."""
 
     min_dagger_weight: float = 0.1
@@ -372,7 +372,7 @@ class G1HybridDistillationRunnerCfg(RslRlDistillationRunnerCfg):
     student = RslRlCausalTransformerModelCfg(
         hidden_dims=[256, 128],
         activation="elu",
-        distribution_cfg=RslRlMLPModelCfg.GaussianDistributionCfg(init_std=0.1),
+        distribution_cfg=RslRlMLPModelCfg.GaussianDistributionCfg(init_std=0.01),
         obs_normalization=False,
     )
     teacher = RslRlMLPModelCfg(

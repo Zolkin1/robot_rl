@@ -34,8 +34,8 @@ class VelocityTrackingCommand(UniformVelocityCommand):
         self.is_closed_loop_yaw_env = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
 
         self.command_dt = env.cfg.sim.dt * env.cfg.decimation
-        self.current_vel_b = torch.zeros(env.num_envs, 3, device=self.device)
         self.vel_target_b = torch.zeros(env.num_envs, 3, device=self.device)
+        self.vel_target_sampled_b = torch.zeros(env.num_envs, 3, device=self.device)
 
         rel_sum = (cfg.rel_open_loop + cfg.rel_closed_loop
                    + cfg.rel_closed_loop_yaw + cfg.rel_standing_envs)
@@ -75,7 +75,7 @@ class VelocityTrackingCommand(UniformVelocityCommand):
         resample_env_ids = (self.time_left[env_ids] <= 0.0).nonzero().flatten()
         if len(resample_env_ids) > 0:
             self._resample(env_ids[resample_env_ids])
-            self.current_vel_b[env_ids[resample_env_ids]] = self.vel_target_b[env_ids[resample_env_ids]]
+            self.vel_target_b[env_ids[resample_env_ids]] = self.vel_target_sampled_b[env_ids[resample_env_ids]]
 
         return extras
 
@@ -93,11 +93,11 @@ class VelocityTrackingCommand(UniformVelocityCommand):
             r >= self.cfg.rel_closed_loop_yaw + self.cfg.rel_open_loop)
 
         # -- linear velocity - x direction
-        self.vel_target_b[env_ids, 0] = r.uniform_(*self.cfg.ranges.lin_vel_x)
+        self.vel_target_sampled_b[env_ids, 0] = r.uniform_(*self.cfg.ranges.lin_vel_x)
         # -- linear velocity - y direction
-        self.vel_target_b[env_ids, 1] = r.uniform_(*self.cfg.ranges.lin_vel_y)
+        self.vel_target_sampled_b[env_ids, 1] = r.uniform_(*self.cfg.ranges.lin_vel_y)
         # -- ang vel yaw - rotation around z
-        self.vel_target_b[env_ids, 2] = r.uniform_(*self.cfg.ranges.ang_vel_z)
+        self.vel_target_sampled_b[env_ids, 2] = r.uniform_(*self.cfg.ranges.ang_vel_z)
 
         # # -- linear velocity - x direction
         # self.vel_command_b[env_ids, 0] = r.uniform_(*self.cfg.ranges.lin_vel_x)
@@ -122,7 +122,15 @@ class VelocityTrackingCommand(UniformVelocityCommand):
         cl_env_ids = self.is_closed_loop_env.nonzero(as_tuple=False).flatten()
         standing_env_ids = self.is_standing_env.nonzero(as_tuple=False).flatten()
 
-        self.vel_command_b = self.vel_target_b
+        # Ramp the active target toward the latest sampled target at the configured
+        # max acceleration. PD overrides below act on the ramped target.
+        self.vel_target_b = torch.clamp(
+            self.vel_target_sampled_b,
+            min=self.vel_target_b - self.cfg.max_acc * self.command_dt,
+            max=self.vel_target_b + self.cfg.max_acc * self.command_dt,
+        )
+
+        self.vel_command_b[:] = self.vel_target_b
 
         # yaw only envs
         heading_error = math_utils.wrap_to_pi(self.heading_target[yaw_env_ids] - wp.to_torch(self.robot.data.heading_w)[yaw_env_ids])
@@ -149,15 +157,6 @@ class VelocityTrackingCommand(UniformVelocityCommand):
 
         # standing
         self.vel_command_b[standing_env_ids, :] = 0.0
-
-        # TODO: This needs more testing to see if needed
-        # self.vel_command_b = torch.clamp(
-        #     self.vel_command_b,
-        #     min=self.current_vel_b - self.cfg.max_acc * self.command_dt,
-        #     max=self.current_vel_b + self.cfg.max_acc * self.command_dt,
-        # )
-
-        self.current_vel_b = self.vel_command_b
 
 # class TreadmillVelocityCommand(UniformVelocityCommand):
 #     """Base velocity command that also does PD control about a y position."""
