@@ -20,6 +20,9 @@ class RLPolicy:
 
         self.action_isaac = np.zeros(self.get_num_actions())
 
+        # Ramped velocity target (matches training-time vel_target_b ramping)
+        self.vel_target_b = np.zeros(3)
+
         # History buffers for observation terms with history_length > 0
         # Maps term_name -> list of np.ndarray (oldest to newest)
         self.history_buffers: dict[str, list[np.ndarray]] = {}
@@ -54,9 +57,11 @@ class RLPolicy:
         """Reset the policy's recurrent hidden states to zero.
 
         For LSTM policies this zeros the hidden and cell state buffers.
-        For MLP policies this is a no-op.
+        For MLP policies this is a no-op. Also resets the ramped velocity
+        target so the next step starts from zero, matching training.
         """
         self.policy.reset()
+        self.vel_target_b = np.zeros(3)
 
     def create_obs(self,
                    qfb: np.ndarray,
@@ -232,9 +237,19 @@ class RLPolicy:
         clipped_cmd[1] = np.clip(cmd_vel[1], vel_ranges['v_y_min'], vel_ranges['v_y_max'])
         clipped_cmd[2] = np.clip(cmd_vel[2], vel_ranges['w_z_min'], vel_ranges['w_z_max'])
 
-        # print(f"clipped_cmd: {clipped_cmd}")
+        # Ramp toward the clipped target at max_acc if available (matches training).
+        max_acc = self.get_max_acc()
+        if max_acc is not None:
+            delta = max_acc * self.get_dt()
+            self.vel_target_b = np.clip(
+                clipped_cmd,
+                self.vel_target_b - delta,
+                self.vel_target_b + delta,
+            )
+        else:
+            self.vel_target_b = clipped_cmd
 
-        return clipped_cmd
+        return self.vel_target_b.copy()
 
     def create_joint_pos_obs(self, qjoints: np.ndarray) -> np.ndarray:
         """Create the joint position observation.
@@ -498,3 +513,7 @@ class RLPolicy:
     def get_max_vyaw(self) -> float:
         """Get the max vx from the policy_params file."""
         return self.policy_params.get('w_z_max')
+
+    def get_max_acc(self) -> float | None:
+        """Get the velocity command max acceleration (m/s^2), or None if not set."""
+        return self.policy_params.get('max_acc')

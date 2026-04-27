@@ -42,9 +42,11 @@ class BatchedMultiSkillCommandCfg(BaseTrajectoryCommandCfg):
     period for full-periodic / episodic) over which the next expected foot
     contact will trigger advancement to the next period.  Inside the window
     a contact event snaps the clock to the period boundary; past the
-    boundary without contact, the clock holds at the boundary until contact
-    lands.  Set to ``None`` to disable contact gating (clock advances purely
-    on time, original behaviour)."""
+    boundary without contact the clock continues advancing (and may wrap),
+    and the next contact event still snaps the clock back to the boundary.
+    Set ``hold_on_late_contact=True`` to restore the legacy
+    hold-at-boundary behaviour.  Set to ``None`` to disable contact gating
+    (clock advances purely on time, original behaviour)."""
 
     contact_sensor_names: list[str] = ("left_foot_contact", "right_foot_contact")
     """Names of the ContactSensor scene entities used by the contact gate.
@@ -56,3 +58,16 @@ class BatchedMultiSkillCommandCfg(BaseTrajectoryCommandCfg):
     contact_force_threshold: float = 1.0
     """Net contact-force magnitude (N) above which a contact body is
     considered in contact for gating purposes."""
+
+    hold_on_late_contact: bool = False
+    """If ``True``, restore the legacy behaviour: when phi advances past
+    ``target_phi`` without an expected contact, pull the trajectory clock
+    back to ``target_phi`` and hold there until contact lands; period wraps
+    reset the armed gate to gate 0 of the new period.  When ``False``
+    (default), the clock keeps advancing past ``target_phi`` naturally and
+    the armed gate persists across the period wrap — the next contact
+    event still snaps the clock back to the gate's original boundary,
+    which can produce a backward jump in phi.  If contact never lands and
+    ``t`` advances one full period past the gate, the gate auto-rearms at
+    its next instance.  Only used when ``contact_gate_window_frac`` is not
+    ``None``."""

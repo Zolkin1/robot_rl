@@ -169,7 +169,7 @@ class Robot:
         if self.use_pd:
             self.pd_control(qpos, qvel)
 
-        return policy.create_obs(
+        obs = policy.create_obs(
             qpos[:7],
             qvel[3:6],
             qpos[7:],
@@ -178,6 +178,11 @@ class Robot:
             self.commanded_vel,
             self.joint_names
         )
+
+        # Log what the policy actually saw (clipped, ramped if max_acc is set).
+        self.commanded_vel = policy.vel_target_b.copy()
+
+        return obs
 
     def get_log_data(self, policy, obs, action):
         """Get data to be logged."""

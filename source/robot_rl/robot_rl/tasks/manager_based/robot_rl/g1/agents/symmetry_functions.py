@@ -107,7 +107,14 @@ def _symmetric_data_augmentation(
         # Original observations (first half already correct)
         obs_aug["policy"][:batch_size] = obs["policy"][:batch_size]
 
-        for group in ["policy", "critic"]:
+        # Iterate every obs group present in the env's observation manager.
+        # PPO uses ``policy``/``critic``; distillation also uses ``student`` (and
+        # sometimes ``unpriv_policy``). Skipping a group present in the obs but
+        # missing from this loop would leave the student input un-mirrored.
+        active_groups = list(env.unwrapped.observation_manager.active_terms.keys())
+        for group in active_groups:
+            if group not in obs_aug.keys():
+                continue
             obs_idx = 0
             for i, name in enumerate(env.unwrapped.observation_manager.active_terms[group]):
                 obs_size = env.unwrapped.observation_manager.group_obs_term_dim[group][i][0]

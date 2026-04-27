@@ -89,6 +89,8 @@ def export_policy_parameters(env, obs, actions, save_dir):
         params["v_y_min"] = base_vel_cfg.ranges.lin_vel_y[0]
         params["w_z_max"] = base_vel_cfg.ranges.ang_vel_z[1]
         params["w_z_min"] = base_vel_cfg.ranges.ang_vel_z[0]
+        if hasattr(base_vel_cfg, "max_acc"):
+            params["max_acc"] = base_vel_cfg.max_acc
     except KeyError:
         pass
 

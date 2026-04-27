@@ -7,7 +7,32 @@ from isaaclab_rl.rsl_rl import (
     RslRlDistillationRunnerCfg,
     RslRlMLPModelCfg,
     RslRlRNNModelCfg,
+    RslRlSymmetryCfg,
 )
+
+from .symmetry_functions import (
+    symmetric_data_augmentation_episodic,
+    symmetric_data_augmentation_half_periodic,
+)
+
+
+@configclass
+class SymmetricDistillationAlgorithmCfg(RslRlDistillationAlgorithmCfg):
+    """Distillation with sagittal-plane symmetry data augmentation."""
+
+    class_name: str = "robot_rl.algorithms:DistillationWithSymmetry"
+
+    symmetry_cfg: RslRlSymmetryCfg | None = None
+    """Symmetry data-augmentation config. ``None`` disables augmentation."""
+
+    teacher_target_mode: Literal["mirror", "requery"] = "mirror"
+    """How to obtain the teacher target for mirrored observations.
+
+    ``"mirror"`` reflects the stored teacher action (assumes the teacher is
+    approximately symmetric — true when the teacher was trained with PPO +
+    symmetry). ``"requery"`` re-runs the frozen teacher on the mirrored obs at
+    each minibatch (no symmetry assumption; one extra teacher forward).
+    """
 
 ##
 # MLP -> MLP Multiskill Distillation
@@ -228,6 +253,26 @@ class G1MultiskillMLP2TransformerDistillationRunnerCfg(G1MulitskillMLP2MLPDistil
         learning_rate=5.0e-4,
         gradient_length=1,
         loss_type="mse",
+    )
+
+
+##
+# MLP -> Transformer Distillation with Sagittal Symmetry
+##
+@configclass
+class G1MultiskillMLP2TransformerSymmetricDistillationRunnerCfg(G1MultiskillMLP2TransformerDistillationRunnerCfg):
+    """Distillation runner config with sagittal-plane symmetry augmentation."""
+
+    algorithm = SymmetricDistillationAlgorithmCfg(
+        num_learning_epochs=2,
+        learning_rate=5.0e-4,
+        gradient_length=1,
+        loss_type="mse",
+        symmetry_cfg=RslRlSymmetryCfg(
+            use_data_augmentation=True,
+            data_augmentation_func=symmetric_data_augmentation_episodic,
+        ),
+        teacher_target_mode="mirror",
     )
 
 

@@ -64,7 +64,7 @@ class G1MultiSkillCommandsCfg(G1ClfTrackingCommandCfg):
         Q_weights = WALKING_Q_weights,
         R_weights = WALKING_R_weights,
 
-        contact_gate_window_frac=0.05,
+        contact_gate_window_frac=0.1,
     )
 
     base_velocity = MultiskillVelocityTrackingCommandCfg(

@@ -24,6 +24,9 @@ class G1WalkRunCLFEnvCfg(G1MultiSkillCLFEnvCfg):
         self.commands.base_velocity.ranges.heading = (-3.14,3.14)
         self.commands.base_velocity.resampling_time_range = (4.0, 8.0)
 
+        # TODO: Put in the max acc or the teacher will be OOD when distlling!!
+        self.commands.base_velocity.max_acc = 1.0
+
         ##
         # Rewards
         ##

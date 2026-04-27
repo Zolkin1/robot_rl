@@ -101,6 +101,12 @@ def main():
     policy = RLPolicy(param_path, policy_path)
     policy.load()
 
+    max_acc = policy.get_max_acc()
+    if max_acc is not None:
+        print(f"[INFO] Ramping velocity command with max_acc={max_acc} m/s^2")
+    else:
+        print("[INFO] No max_acc set in policy params; passing velocity commands without ramping")
+
     # Create robot instance
     gains = {"kp_y": 1.5, "kd_y": 0.3, "kp_yaw": 0.8, "kd_yaw": 0.3}
     robot_instance = Robot(
