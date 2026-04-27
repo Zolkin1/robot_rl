@@ -63,6 +63,8 @@ class G1MultiSkillCommandsCfg(G1ClfTrackingCommandCfg):
         conditioner_generator_name = "base_velocity",
         Q_weights = WALKING_Q_weights,
         R_weights = WALKING_R_weights,
+
+        contact_gate_window_frac=0.05,
     )
 
     base_velocity = MultiskillVelocityTrackingCommandCfg(
