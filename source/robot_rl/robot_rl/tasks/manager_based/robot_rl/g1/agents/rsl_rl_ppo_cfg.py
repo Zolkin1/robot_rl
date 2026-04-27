@@ -169,7 +169,7 @@ class RslRlCausalTransformerModelCfg(RslRlMLPModelCfg):
     """Configuration for the Causal Transformer model."""
     class_name: str = "robot_rl.network.transformer_network:CausalTransformerModel"
     single_obs_dim: int = 72
-    history_length: int = 10
+    history_length: int = 50
     d_model: int = 128
     nhead: int = 4
     num_layers: int = 4
@@ -187,6 +187,10 @@ class RslRlCausalTransformerModelCfg(RslRlMLPModelCfg):
 class CausalTransformerPPORunnerCfg(PPORunnerCfg):
     """PPO runner config using a causal transformer actor."""
     experiment_name = "g1_causal_transformer"
+    obs_groups = {
+        "actor": ["unpriv_policy"],
+        "critic": ["critic"],
+    }
     actor = RslRlCausalTransformerModelCfg(
         hidden_dims=[256, 128],
         activation="elu",

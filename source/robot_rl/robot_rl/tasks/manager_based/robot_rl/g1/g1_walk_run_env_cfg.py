@@ -53,6 +53,21 @@ class G1WalkRunCLFEnvCfg(G1MultiSkillCLFEnvCfg):
 
         self.commands.base_velocity.debug_vis = False
 
+@configclass
+class G1WalkRunCLFTransformerRLEnvCfg(G1WalkRunCLFEnvCfg):
+    """Env cfg to run RL with the transformer."""
+    def __post_init__(self):
+        # Post init of parent
+        super().__post_init__()
+
+        # Set uniform history for all policy obs terms (each timestep = 1 token)
+        history_length = 50
+        self.observations.unpriv_policy.base_ang_vel.history_length = history_length
+        self.observations.unpriv_policy.projected_gravity.history_length = history_length
+        self.observations.unpriv_policy.velocity_commands.history_length = history_length
+        self.observations.unpriv_policy.joint_pos.history_length = history_length
+        self.observations.unpriv_policy.joint_vel.history_length = history_length
+        self.observations.unpriv_policy.actions.history_length = history_length
 
 @configclass
 class G1WalkRunCLFDistillationEnvCfg(G1WalkRunCLFEnvCfg):
