@@ -230,6 +230,9 @@ class MultiSkillManager(ManagerBase):
         self._prev_skill_indices: Tensor | None = None
         self._skill_changed: Tensor | None = None
 
+        # --- Contact-gate metadata ----------------------------------------
+        self._build_gate_tables()
+
     # ------------------------------------------------------------------
     # Loading helpers
     # ------------------------------------------------------------------
@@ -1277,6 +1280,89 @@ class MultiSkillManager(ManagerBase):
                 candidate_t = torch.where(mismatch, shifted_t, candidate_t)
 
         return candidate_t
+
+    # ------------------------------------------------------------------
+    # Contact-gate tables
+    # ------------------------------------------------------------------
+
+    def _build_gate_tables(self) -> None:
+        """Pre-compute contact-gate phi values and per-gate body name lists.
+
+        Gate points per trajectory type:
+
+        - Half-periodic: 2 gates (phi=0.5 entering reflected second half;
+          phi=1.0 wrapping back to first half).
+        - Full-periodic: 1 gate at phi=1.0 (cycle wrap).
+        - Episodic: 1 gate at phi=1.0 (end of trajectory).
+        - Perpetual: 0 gates.
+
+        The expected-contact body names at each gate are taken from the
+        first domain of the next period — for half-periodic phi=0.5 this is
+        the sagittally reflected first domain.  The boolean mask in the
+        command-term's contact-body ordering is materialised lazily via
+        :meth:`set_gate_contact_layout`.
+        """
+        T = self.num_trajectories
+        MAX_GATES = 2
+
+        gate_phi = torch.zeros(T, MAX_GATES, device=self.device)
+        gate_active = torch.zeros(T, MAX_GATES, dtype=torch.bool, device=self.device)
+        num_gates = torch.zeros(T, dtype=torch.long, device=self.device)
+        gate_body_names: list[list[list[str]]] = [
+            [[] for _ in range(MAX_GATES)] for _ in range(T)
+        ]
+
+        for ti in range(T):
+            tt = self.data["traj_type"][ti].item()
+            first_domain_bodies = list(self._contact_bodies_per_domain[ti][0])
+
+            if tt == _HALF_PERIODIC_INT:
+                gate_phi[ti, 0] = 0.5
+                gate_active[ti, 0] = True
+                gate_body_names[ti][0] = [swap_left_right(b) for b in first_domain_bodies]
+
+                gate_phi[ti, 1] = 1.0
+                gate_active[ti, 1] = True
+                gate_body_names[ti][1] = list(first_domain_bodies)
+                num_gates[ti] = 2
+            elif tt == _FULL_PERIODIC_INT or tt == _EPISODIC_INT:
+                gate_phi[ti, 0] = 1.0
+                gate_active[ti, 0] = True
+                gate_body_names[ti][0] = list(first_domain_bodies)
+                num_gates[ti] = 1
+            # Perpetual: no gates.
+
+        self._gate_phi_table = gate_phi
+        self._gate_active_table = gate_active
+        self._num_gates_per_traj = num_gates
+        self._gate_body_names_per_gate = gate_body_names
+        self._max_gates = MAX_GATES
+        self._gate_contact_mask: Tensor | None = None
+
+    def set_gate_contact_layout(self, contact_bodies: list[str]) -> None:
+        """Materialise the [T, MAX_GATES, B] expected-contact mask in the
+        ordering of *contact_bodies*.
+
+        Args:
+            contact_bodies: Ordered list of contact body names matching the
+                command term's runtime contact tensor layout.
+        """
+        T = self.num_trajectories
+        MAX_GATES = self._max_gates
+        B = len(contact_bodies)
+
+        mask = torch.zeros(T, MAX_GATES, B, dtype=torch.bool, device=self.device)
+        body_to_idx = {n: i for i, n in enumerate(contact_bodies)}
+
+        for ti in range(T):
+            for gi in range(MAX_GATES):
+                if not self._gate_active_table[ti, gi].item():
+                    continue
+                for body in self._gate_body_names_per_gate[ti][gi]:
+                    if body in body_to_idx:
+                        mask[ti, gi, body_to_idx[body]] = True
+
+        self._gate_contact_mask = mask
 
     def interpolate_skill_transition(
         self, output_a: Tensor, output_b: Tensor, alpha: Tensor
