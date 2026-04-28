@@ -113,7 +113,7 @@ class SymmetricHalfPeriodicPPORunnerCfg(PPORunnerCfg):
 @configclass
 class MultiSkillSymmetricHalfPeriodicPPORunnerCfg(PPORunnerCfg):
     actor = RslRlMLPModelCfg(
-        hidden_dims=[1024, 512, 256, 128],
+        hidden_dims=[512, 256, 128],
         activation="elu",
         distribution_cfg=RslRlMLPModelCfg.GaussianDistributionCfg(init_std=1.0, std_type="log"),
         obs_normalization=False,

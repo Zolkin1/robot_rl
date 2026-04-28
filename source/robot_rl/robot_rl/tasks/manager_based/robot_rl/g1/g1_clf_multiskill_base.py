@@ -58,7 +58,7 @@ class G1MultiSkillObservationCfg(G1ClfTrackingObservationsCfg):
 class G1MultiSkillRewardCfg(G1ClfTrackingRewardCfg):
     undesired_contacts = RewTerm(
         func=mdp.multiple_undesired_contacts,
-        weight=-1.0,
+        weight=-0.5,
         params={
             "sensor_cfgs": [SceneEntityCfg("left_thigh_contact",),
                             SceneEntityCfg("right_thigh_contact",),

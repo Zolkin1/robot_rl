@@ -24,8 +24,9 @@ class G1WalkRunCLFEnvCfg(G1MultiSkillCLFEnvCfg):
         self.commands.base_velocity.ranges.heading = (-3.14,3.14)
         self.commands.base_velocity.resampling_time_range = (4.0, 8.0)
 
-        # TODO: Put in the max acc or the teacher will be OOD when distlling!!
-        self.commands.base_velocity.max_acc = 1.0
+        # Note: Having the accerletaion in the teacher training seems to hurt the behavior
+        # TODO: Consider using a max acc on some % (like 10) of the teacher so its not OOD
+        # self.commands.base_velocity.max_acc = 1.0
 
         ##
         # Rewards
@@ -80,8 +81,6 @@ class G1WalkRunCLFDistillationEnvCfg(G1WalkRunCLFEnvCfg):
 
         self.observations.policy.enable_corruption = False
         self.observations.critic.enable_corruption = False
-        # TODO: Just for debugging
-        # self.observations.student.enable_corruption = False
 
         self.commands.base_velocity.resampling_time_range = (2.0, 6.0)
         velocity_buckets=[
@@ -93,13 +92,8 @@ class G1WalkRunCLFDistillationEnvCfg(G1WalkRunCLFEnvCfg):
 
         self.commands.base_velocity.skill_transition_prob = 0.6
 
-        # For now just distill walking — override velocity buckets
-        # (ranges.lin_vel_x alone has no effect because buckets consume 100% of envs)
-        # self.commands.base_velocity.velocity_buckets = [
-        #     VelocityBucketCfg(percentage=0.95, lin_vel_x=(0.11, 1.4)),   # Walking
-        #     VelocityBucketCfg(percentage=0.05, lin_vel_x=(0.0, 0.10)),   # Standing
-        # ]
-        # self.commands.base_velocity.ranges.lin_vel_x = (0.0, 1.4)
+        self.commands.traj_ref.contact_gate_window_frac = 0.1
+
 
 @configclass
 class G1WalkRunCLFTransformerDistillationEnvCfg(G1WalkRunCLFDistillationEnvCfg):
@@ -115,15 +109,6 @@ class G1WalkRunCLFTransformerDistillationEnvCfg(G1WalkRunCLFDistillationEnvCfg):
         self.observations.student.joint_pos.history_length = history_length
         self.observations.student.joint_vel.history_length = history_length
         self.observations.student.actions.history_length = history_length
-
-        # One hot testing
-        # self.observations.student.skill_one_hot.history_length = history_length
-
-        # For the privileged student test
-        # self.observations.student.ref_traj.history_length = history_length
-        # self.observations.student.act_traj.history_length = history_length
-        # self.observations.student.ref_traj_vel.history_length = history_length
-        # self.observations.student.act_traj_vel.history_length = history_length
 
 @configclass
 class G1WalkRunCLFEnvCfgPlay(G1WalkRunCLFEnvCfg):
