@@ -3,11 +3,13 @@ import math
 from isaaclab.utils import configclass
 
 from isaaclab.managers import ObservationTermCfg as ObsTerm
-from isaaclab.utils.noise import UniformNoiseCfg as Unoise
+from isaaclab.managers import RewardTermCfg as RewTerm
+from isaaclab.managers import SceneEntityCfg
 
 from robot_rl.tasks.manager_based.robot_rl import mdp
 
-from .g1_clf_tracking_base import G1ClfTrackingEnvCfg, G1ClfTrackingObservationsCfg, G1ClfTrackingCommandCfg
+from .g1_clf_tracking_base import G1ClfTrackingEnvCfg, G1ClfTrackingObservationsCfg, G1ClfTrackingCommandCfg, \
+    G1ClfTrackingRewardCfg
 from ..mdp.commands.traj_tracking.batched_multiskill_cmd_cfg import BatchedMultiSkillCommandCfg
 from ..mdp.commands.multiskill_velocity_commands_cfg import MultiskillVelocityTrackingCommandCfg, VelocityBucketCfg
 from ..mdp.commands.velocity_commands_cfg import VelocityTrackingCommandCfg
@@ -53,6 +55,20 @@ class G1MultiSkillObservationCfg(G1ClfTrackingObservationsCfg):
     student: StudentCfg = StudentCfg()
 
 @configclass
+class G1MultiSkillRewardCfg(G1ClfTrackingRewardCfg):
+    undesired_contacts = RewTerm(
+        func=mdp.multiple_undesired_contacts,
+        weight=-1.0,
+        params={
+            "sensor_cfgs": [SceneEntityCfg("left_thigh_contact",),
+                            SceneEntityCfg("right_thigh_contact",),
+                            SceneEntityCfg("torso_contact",),
+                            SceneEntityCfg("left_elbow_contact",),
+                            SceneEntityCfg("right_elbow_contact",),],
+            "threshold": 1.0,
+        },
+    )
+@configclass
 class G1MultiSkillCommandsCfg(G1ClfTrackingCommandCfg):
     traj_ref = BatchedMultiSkillCommandCfg(
         contact_bodies = [".*_ankle_roll_link"],
@@ -83,10 +99,10 @@ class G1MultiSkillCommandsCfg(G1ClfTrackingCommandCfg):
             y_kp=(1.2, 1.8),
             y_kd=(0.2, 0.4),
         ),
-        velocity_buckets = [
-            VelocityBucketCfg(percentage=0.48, lin_vel_x=(0.11, 1.49)),     # Walking
-            VelocityBucketCfg(percentage=0.48, lin_vel_x=(1.51, 3.7)),      # Running
-            VelocityBucketCfg(percentage=0.04, lin_vel_x=(0, 0.09)),        # Standing
+        velocity_buckets=[
+            VelocityBucketCfg(percentage=0.10, lin_vel_x=(0.0, 0.1)),   # Standing
+            VelocityBucketCfg(percentage=0.45, lin_vel_x=(0.1, 1.5)),   # Walking
+            VelocityBucketCfg(percentage=0.45, lin_vel_x=(1.5, 3.7)),   # Running
         ]
     )
 

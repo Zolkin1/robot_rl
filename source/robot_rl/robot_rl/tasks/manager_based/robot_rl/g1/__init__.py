@@ -134,7 +134,7 @@ if not _registered:
         disable_env_checker=True,
         kwargs={
             "env_cfg_entry_point": f"{__name__}.g1_walk_run_env_cfg:G1WalkRunCLFEnvCfg",
-            "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_rl_ppo_cfg:SymmetricHalfPeriodicPPORunnerCfg",
+            "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_rl_ppo_cfg:MultiSkillSymmetricHalfPeriodicPPORunnerCfg",
         }
     )
 
