@@ -44,6 +44,11 @@ class MultiskillVelocityTrackingCommand(VelocityTrackingCommand):
                 f"skill_transition_prob must be in [0, 1], got {cfg.skill_transition_prob}."
             )
 
+        if cfg.max_acc_frac is not None and not 0.0 <= cfg.max_acc_frac <= 1.0:
+            raise ValueError(
+                f"max_acc_frac must be in [0, 1] or None, got {cfg.max_acc_frac}."
+            )
+
         self.bucket_id = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
 
         # Full bucket probability vector including the virtual default-uniform bucket at the last
@@ -55,6 +60,18 @@ class MultiskillVelocityTrackingCommand(VelocityTrackingCommand):
             dtype=torch.float,
         )
         self._warned_no_transition = False
+
+        # Per-env max-acc clamp assignment (persists for the episode, re-rolled on reset).
+        if cfg.max_acc_frac is None:
+            self.max_acc_per_env.fill_(float("inf"))
+        else:
+            rand = torch.empty(self.num_envs, device=self.device).uniform_(0.0, 1.0)
+            has_max_acc = rand < cfg.max_acc_frac
+            self.max_acc_per_env = torch.where(
+                has_max_acc,
+                torch.full_like(rand, float(cfg.max_acc)),
+                torch.full_like(rand, float("inf")),
+            )
 
     def __str__(self) -> str:
         """Return a string representation of the command."""
@@ -72,6 +89,10 @@ class MultiskillVelocityTrackingCommand(VelocityTrackingCommand):
             msg += f"\tDefault uniform: {remainder:.1%} of envs\n"
         if self.cfg.skill_transition_prob is not None:
             msg += f"\tSkill transition probability: {self.cfg.skill_transition_prob:.1%}\n"
+        if self.cfg.max_acc_frac is not None:
+            msg += f"\tMax-acc fraction: {self.cfg.max_acc_frac:.1%} (max_acc={self.cfg.max_acc})\n"
+        else:
+            msg += "\tMax-acc disabled for all envs\n"
         return msg
 
     def _resample_command(self, env_ids: Sequence[int]):
@@ -126,6 +147,20 @@ class MultiskillVelocityTrackingCommand(VelocityTrackingCommand):
         )
         self.y_kp[env_ids] = r.uniform_(*self.cfg.ranges.y_kp)
         self.y_kd[env_ids] = r.uniform_(*self.cfg.ranges.y_kd)
+
+        # Per-env max-acc clamp: re-roll only on episode reset so each env's
+        # clamped/unclamped state persists for the duration of the episode.
+        if self.cfg.max_acc_frac is not None:
+            reset_mask = self._env.episode_length_buf[env_ids] == 0
+            if reset_mask.any():
+                reset_ids = env_ids[reset_mask]
+                rand = torch.empty(len(reset_ids), device=self.device).uniform_(0.0, 1.0)
+                has_max_acc = rand < self.cfg.max_acc_frac
+                self.max_acc_per_env[reset_ids] = torch.where(
+                    has_max_acc,
+                    torch.full_like(rand, float(self.cfg.max_acc)),
+                    torch.full_like(rand, float("inf")),
+                )
 
     def _assign_buckets(self, env_ids: Sequence[int], num_buckets: int) -> torch.Tensor:
         """Pick a bucket for each env in ``env_ids`` and return the resulting ids tensor.

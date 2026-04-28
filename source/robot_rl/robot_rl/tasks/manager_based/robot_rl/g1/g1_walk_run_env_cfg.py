@@ -15,6 +15,7 @@ class G1WalkRunCLFEnvCfg(G1MultiSkillCLFEnvCfg):
         ##
         # Commands
         ##
+        # TODO: Pull the updated trajectory so the stand frame aligns with the walk/run frames
         self.commands.traj_ref.path = "trajectories/retargeted/2026-04-10_11-41-19_merged"
 
         # Configure velocity ranges for different gaits
@@ -26,7 +27,8 @@ class G1WalkRunCLFEnvCfg(G1MultiSkillCLFEnvCfg):
 
         # Note: Having the accerletaion in the teacher training seems to hurt the behavior
         # TODO: Consider using a max acc on some % (like 10) of the teacher so its not OOD
-        # self.commands.base_velocity.max_acc = 1.0
+        self.commands.base_velocity.max_acc = 1.0
+        self.commands.base_velocity.max_acc_frac = 0.2
 
         ##
         # Rewards
@@ -89,6 +91,7 @@ class G1WalkRunCLFDistillationEnvCfg(G1WalkRunCLFEnvCfg):
             VelocityBucketCfg(percentage=0.45, lin_vel_x=(1.5, 3.7)),   # Running
         ]
         self.commands.base_velocity.max_acc = 1.0
+        self.commands.base_velocity.max_acc_frac = 1.0
 
         self.commands.base_velocity.skill_transition_prob = 0.6
 

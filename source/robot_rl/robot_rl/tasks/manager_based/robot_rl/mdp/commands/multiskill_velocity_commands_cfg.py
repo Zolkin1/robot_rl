@@ -46,5 +46,11 @@ class MultiskillVelocityTrackingCommandCfg(VelocityTrackingCommandCfg):
     only resamples the velocity within that bucket. If None, buckets are sampled independently from
     the configured percentages each resample."""
 
+    max_acc_frac: float | None = None
+    """Fraction of envs that have the ``max_acc`` clamp applied. If None, no envs are clamped
+    (commanded velocity snaps directly to the sampled target). If set, must be in [0, 1] and that
+    fraction of envs use ``max_acc`` while the rest are unclamped. The per-env assignment persists
+    for the duration of an episode and is re-rolled on reset."""
+
     rel_standing_envs: float = 0.0
     """Not used -- standing is a zero-velocity bucket. Kept for parent compatibility."""

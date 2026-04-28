@@ -37,6 +37,10 @@ class VelocityTrackingCommand(UniformVelocityCommand):
         self.vel_target_b = torch.zeros(env.num_envs, 3, device=self.device)
         self.vel_target_sampled_b = torch.zeros(env.num_envs, 3, device=self.device)
 
+        self.max_acc_per_env = torch.full(
+            (self.num_envs,), float(cfg.max_acc), device=self.device
+        )
+
         rel_sum = (cfg.rel_open_loop + cfg.rel_closed_loop
                    + cfg.rel_closed_loop_yaw + cfg.rel_standing_envs)
 
@@ -124,10 +128,11 @@ class VelocityTrackingCommand(UniformVelocityCommand):
 
         # Ramp the active target toward the latest sampled target at the configured
         # max acceleration. PD overrides below act on the ramped target.
+        limit = (self.max_acc_per_env * self.command_dt).unsqueeze(-1)
         self.vel_target_b = torch.clamp(
             self.vel_target_sampled_b,
-            min=self.vel_target_b - self.cfg.max_acc * self.command_dt,
-            max=self.vel_target_b + self.cfg.max_acc * self.command_dt,
+            min=self.vel_target_b - limit,
+            max=self.vel_target_b + limit,
         )
 
         self.vel_command_b[:] = self.vel_target_b
