@@ -32,11 +32,6 @@ class G1MultiSkillObservationCfg(G1ClfTrackingObservationsCfg):
         act_traj_vel = ObsTerm(func=mdp.act_traj_vel, params={"command_name": "traj_ref"}, clip=(-20.0, 20.0,))
 
     @configclass
-    class UnPrivilegedPolicyCfg(G1ClfTrackingObservationsCfg.PolicyCfg):
-        sin_phase = None
-        cos_phase = None
-
-    @configclass
     class CriticCfg(G1ClfTrackingObservationsCfg.CriticCfg):
         sin_phase = None
         cos_phase = None
@@ -50,7 +45,6 @@ class G1MultiSkillObservationCfg(G1ClfTrackingObservationsCfg):
         act_traj_vel = None
 
     policy: PolicyCfg = PolicyCfg()
-    unpriv_policy: UnPrivilegedPolicyCfg = UnPrivilegedPolicyCfg()
     critic: CriticCfg = CriticCfg()
     student: StudentCfg = StudentCfg()
 
@@ -80,7 +74,8 @@ class G1MultiSkillCommandsCfg(G1ClfTrackingCommandCfg):
         Q_weights = WALKING_Q_weights,
         R_weights = WALKING_R_weights,
 
-        contact_gate_window_frac=0.1,
+        contact_gate_window_frac=0.2,
+        hold_on_late_contact=True,
     )
 
     base_velocity = MultiskillVelocityTrackingCommandCfg(

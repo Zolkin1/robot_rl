@@ -27,8 +27,8 @@ class G1WalkRunCLFEnvCfg(G1MultiSkillCLFEnvCfg):
 
         # Note: Having the accerletaion in the teacher training seems to hurt the behavior
         # TODO: Consider using a max acc on some % (like 10) of the teacher so its not OOD
-        self.commands.base_velocity.max_acc = 1.0
-        self.commands.base_velocity.max_acc_frac = 0.2
+        # self.commands.base_velocity.max_acc = 1.0
+        # self.commands.base_velocity.max_acc_frac = 0.2
 
         ##
         # Rewards
