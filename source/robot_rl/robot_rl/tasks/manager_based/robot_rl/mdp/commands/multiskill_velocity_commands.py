@@ -49,6 +49,11 @@ class MultiskillVelocityTrackingCommand(VelocityTrackingCommand):
                 f"max_acc_frac must be in [0, 1] or None, got {cfg.max_acc_frac}."
             )
 
+        if not 0.0 <= cfg.adaptive_sample_fraction <= 1.0:
+            raise ValueError(
+                f"adaptive_sample_fraction must be in [0, 1], got {cfg.adaptive_sample_fraction}."
+            )
+
         self.bucket_id = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
 
         # Full bucket probability vector including the virtual default-uniform bucket at the last
@@ -161,6 +166,85 @@ class MultiskillVelocityTrackingCommand(VelocityTrackingCommand):
                     torch.full_like(rand, float(self.cfg.max_acc)),
                     torch.full_like(rand, float("inf")),
                 )
+
+        # --- Phase C: adaptive trajectory sampling --------------------------
+        # For a configurable fraction of the envs being resampled, override
+        # the velocity to one drawn from trajectories with high mean V.
+        if self.cfg.adaptive_sample_fraction > 0.0:
+            self._apply_adaptive_sampling(env_ids)
+
+    def _apply_adaptive_sampling(self, env_ids: torch.Tensor) -> None:
+        """Override velocities for a subset of envs to oversample hard trajectories.
+
+        Picks ``floor(adaptive_sample_fraction * n)`` envs uniformly at
+        random from ``env_ids``. For each chosen env, samples a global
+        trajectory weighted by ``(mean_v + eps) ** beta`` (restricted to
+        flat-terrain trajectories — the only ones reachable through
+        velocity-only conditioning) and sets that env's
+        ``vel_target_sampled_b`` to the trajectory's conditioning velocity.
+
+        Silent no-op if the multiskill manager / stats tracker is
+        unavailable, so this can be enabled in cfg without crashing
+        non-multiskill tasks.
+        """
+        manager = self._get_multiskill_manager()
+        if manager is None or manager.traj_stats is None:
+            return
+
+        n = len(env_ids)
+        n_adaptive = int(self.cfg.adaptive_sample_fraction * n)
+        if n_adaptive <= 0:
+            return
+
+        # Random subset of env_ids gets the override.
+        perm = torch.randperm(n, device=self.device)
+        adaptive_local = perm[:n_adaptive]
+        adaptive_env_ids = env_ids[adaptive_local]
+
+        # Restrict to flat-terrain trajectories — adaptive sampling only
+        # adjusts velocity dims, so terrain-conditioned trajectories cannot
+        # be directly targeted this way.
+        flat_mask = ~manager._terrain_mask
+        flat_indices = flat_mask.nonzero(as_tuple=False).flatten()
+        if flat_indices.numel() == 0:
+            return
+
+        mean_v = manager.traj_stats.get_means()[flat_indices]
+        weights = (mean_v + self.cfg.adaptive_sample_eps).clamp(min=0.0)
+        if self.cfg.adaptive_sample_beta != 1.0:
+            weights = weights ** self.cfg.adaptive_sample_beta
+        if not torch.isfinite(weights).all() or weights.sum() <= 0.0:
+            return  # Cold start with bad numerics — skip this resample.
+
+        # One multinomial draw per adaptive env.
+        probs = weights / weights.sum()
+        sampled_local = torch.multinomial(
+            probs, num_samples=n_adaptive, replacement=True,
+        )  # indices into flat_indices
+        sampled_global = flat_indices[sampled_local]  # global trajectory indices
+
+        cond = manager._global_conditioning[sampled_global]  # [n_adaptive, 6]
+        # Override the sampled velocities; heading_target stays as-is so the
+        # bucket-driven heading distribution is preserved.
+        self.vel_target_sampled_b[adaptive_env_ids, 0] = cond[:, 0]  # vel_x
+        self.vel_target_sampled_b[adaptive_env_ids, 1] = cond[:, 1]  # vel_y
+        self.vel_target_sampled_b[adaptive_env_ids, 2] = cond[:, 2]  # vel_yaw
+
+    def _get_multiskill_manager(self):
+        """Look up the :class:`MultiSkillManager` from the command manager.
+
+        Cached after the first successful lookup. Returns ``None`` when the
+        configured command term is not present (e.g. non-multiskill task).
+        """
+        if hasattr(self, "_cached_multiskill_manager"):
+            return self._cached_multiskill_manager
+        try:
+            term = self._env.command_manager.get_term(self.cfg.multiskill_term_name)
+        except Exception:
+            self._cached_multiskill_manager = None
+            return None
+        self._cached_multiskill_manager = getattr(term, "manager", None)
+        return self._cached_multiskill_manager
 
     def _assign_buckets(self, env_ids: Sequence[int], num_buckets: int) -> torch.Tensor:
         """Pick a bucket for each env in ``env_ids`` and return the resulting ids tensor.

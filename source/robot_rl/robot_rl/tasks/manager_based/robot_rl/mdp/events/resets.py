@@ -109,9 +109,19 @@ def reset_on_reference(
             f"The following robot joints are missing from the trajectory outputs: {missing_joints}"
         )
 
-    # Sample random times for each environment
-    total_time = cmd.manager.get_total_time()
-    random_times = (torch.rand(num_ref_envs, device=env.device) * total_time) #* 0.0 # TODO: Remove the multiply by zero when I fix the multiskill phase obs
+    # Sample random times for each environment.  For phase-based managers
+    # (multi-skill) total_time is per-trajectory, so we sample a phase
+    # first and convert; for the single-trajectory legacy path we keep the
+    # original scalar-total_time sampling.
+    _phase_based = hasattr(cmd.manager, "set_phase")
+    if _phase_based:
+        ref_traj_idx = cmd.manager.get_current_trajectory_indices()[ref_ids]
+        ref_total = cmd.manager.data["total_time"][ref_traj_idx]
+        random_phase_ref = torch.rand(num_ref_envs, device=env.device)
+        random_times = random_phase_ref * ref_total
+    else:
+        total_time = cmd.manager.get_total_time()
+        random_times = torch.rand(num_ref_envs, device=env.device) * total_time
 
     # Get trajectory outputs at sampled times
     cmd.get_desired_outputs(random_times, env_ids=ref_ids)
@@ -169,8 +179,13 @@ def reset_on_reference(
     #     joint_pos = joint_pos * scale_factors
     #     joint_vel = joint_vel * scale_factors
 
-    # Store time offset in command so it knows the current phase
-    cmd.init_time_offset[ref_ids] = random_times
+    # Anchor the trajectory clock so the next step evaluates from the
+    # sampled state.  Phase-based managers persist the phase directly;
+    # the legacy time-based commands additively store an init offset.
+    if _phase_based:
+        cmd.manager.set_phase(random_phase_ref, ref_ids)
+    else:
+        cmd.init_time_offset[ref_ids] = random_times
 
     # Write states to simulation
     asset.write_root_pose_to_sim_index(root_pose=base_pose, env_ids=ref_ids)
@@ -237,8 +252,17 @@ def reset_on_reference(
         asset.write_joint_position_to_sim_index(position=joint_pos, env_ids=nonref_ids)
         asset.write_joint_velocity_to_sim_index(velocity=joint_vel, env_ids=nonref_ids)
 
-        # Reset the time offset
-        cmd.init_time_offset[nonref_ids] = 0.0
+        # Anchor the non-ref envs' clock too.  Phase-based managers use a
+        # uniform random phase when ``cfg.random_start_phase`` is set;
+        # otherwise zero.  Legacy time-based commands always reset to 0.
+        if _phase_based:
+            if getattr(cmd.cfg, "random_start_phase", False):
+                nonref_phase = torch.rand(num_nonref_envs, device=env.device)
+            else:
+                nonref_phase = torch.zeros(num_nonref_envs, device=env.device)
+            cmd.manager.set_phase(nonref_phase, nonref_ids)
+        else:
+            cmd.init_time_offset[nonref_ids] = 0.0
 
 
 

@@ -54,3 +54,32 @@ class MultiskillVelocityTrackingCommandCfg(VelocityTrackingCommandCfg):
 
     rel_standing_envs: float = 0.0
     """Not used -- standing is a zero-velocity bucket. Kept for parent compatibility."""
+
+    adaptive_sample_fraction: float = 0.0
+    """Fraction of envs (per resample) whose commanded velocity is overridden
+    to oversample trajectories the policy currently struggles with.
+
+    For the chosen subset, a global trajectory is sampled with probability
+    proportional to ``(mean_v + eps) ** adaptive_sample_beta`` (read from
+    ``MultiSkillManager.traj_stats``), and the env's
+    ``(lin_vel_x, lin_vel_y, ang_vel_z)`` are set to that trajectory's
+    conditioning values. The deterministic argmin in
+    ``MultiSkillManager._select_trajectories`` then assigns that trajectory.
+
+    Set to ``0.0`` (default) to disable adaptive sampling — the resample
+    behaves exactly as before. Must be in ``[0, 1]``.
+    """
+
+    adaptive_sample_beta: float = 1.0
+    """Temperature for the adaptive sampler: weights are
+    ``(mean_v + eps) ** beta``. ``beta=0`` collapses to uniform sampling
+    over flat-terrain trajectories (useful for ablation); ``beta=1`` is
+    proportional to mean V; larger values sharpen further."""
+
+    adaptive_sample_eps: float = 1e-3
+    """Small constant added to ``mean_v`` before exponentiation, so cold
+    start (all zero) gives a uniform distribution rather than NaN."""
+
+    multiskill_term_name: str = "traj_ref"
+    """Name of the multiskill trajectory command term in the command manager.
+    Used to look up the :class:`MultiSkillManager` for adaptive sampling."""

@@ -19,6 +19,7 @@ from torch import Tensor
 
 from .manager_base import ManagerBase
 from .sagittal_reflector import swap_left_right
+from .traj_clf_stats import TrajectoryCLFStats
 from .trajectory_manager import TrajectoryManager, TrajectoryType
 
 
@@ -102,6 +103,10 @@ class MultiSkillManager(ManagerBase):
         env: Any = None,
         conditioner_generator_name: str | None = None,
         hf_repo: str | None = None,
+        track_traj_stats: bool = True,
+        traj_stats_alpha: float = 0.005,
+        traj_stats_reset_warmup: int = 2,
+        traj_stats_transition_warmup: int = 3,
     ):
         """Load trajectory YAMLs from a top-level folder containing per-skill subfolders.
 
@@ -130,6 +135,18 @@ class MultiSkillManager(ManagerBase):
             hf_repo: Optional HuggingFace repo ID (e.g. ``"zolkin/robot_rl"``).
                 When set, ``path`` is treated as a path within the repo and
                 downloaded to a local ``hf/`` cache directory.
+            track_traj_stats: If ``True``, allocate a per-trajectory CLF
+                stats tracker (:class:`TrajectoryCLFStats`) that is updated
+                from :meth:`log_v_on_phasing_var`. Required for adaptive
+                trajectory sampling.
+            traj_stats_alpha: EMA factor for the per-trajectory tracker.
+            traj_stats_reset_warmup: Number of frames after each env reset
+                that are excluded from the per-trajectory tracker. The CLF
+                buffer needs a couple of frames before V is meaningful.
+            traj_stats_transition_warmup: Number of frames after each skill
+                transition that are excluded from the per-trajectory
+                tracker. Transition phase causes V spikes unrelated to the
+                new trajectory's true difficulty.
         """
         self.device = torch.device(device)
         self.env = env
@@ -164,6 +181,11 @@ class MultiSkillManager(ManagerBase):
         managers = [c[0] for c in combined]
         skill_labels = [c[1] for c in combined]
         conditioner_datas = [c[2] for c in combined]
+
+        # --- Capture per-trajectory names (for stats reporting) ------------
+        # Stored in the same global order as ``self._global_conditioning``.
+        self.trajectory_names: list[str] = [m.traj_data.name for m in managers]
+        self.skill_labels: list[str] = list(skill_labels)
 
         # --- Verify compatibility across all trajectories ------------------
         ref = managers[0]
@@ -230,8 +252,36 @@ class MultiSkillManager(ManagerBase):
         self._prev_skill_indices: Tensor | None = None
         self._skill_changed: Tensor | None = None
 
+        # --- Per-trajectory CLF stats tracker -----------------------------
+        # Allocated lazily-but-eagerly here so adaptive sampling can read
+        # mean_v at any point. Per-env warmup counters are allocated lazily
+        # on first update because we don't know num_envs until env-side
+        # construction is done.
+        self.traj_stats: TrajectoryCLFStats | None = None
+        self._traj_stats_reset_warmup = int(traj_stats_reset_warmup)
+        self._traj_stats_transition_warmup = int(traj_stats_transition_warmup)
+        if track_traj_stats:
+            self.traj_stats = TrajectoryCLFStats(
+                num_trajectories=self.num_trajectories,
+                device=self.device,
+                mode="ema",
+                alpha=float(traj_stats_alpha),
+            )
+        self._steps_since_reset: Tensor | None = None
+        self._steps_since_transition: Tensor | None = None
+        self._prev_episode_length: Tensor | None = None
+
         # --- Contact-gate metadata ----------------------------------------
         self._build_gate_tables()
+
+        # --- Per-env phase + gate state -----------------------------------
+        # Allocated lazily (we may not know num_envs at construction time
+        # for offline / test usage).  ``phase`` lives in [0, 1]; advances
+        # by ``step_dt / total_time`` each step (wrap for periodic, clamp
+        # for episodic, perpetual stays at 0).  ``next_gate_idx`` is the
+        # contact-gate currently armed per env, or -1 if none.
+        self.phase: Tensor | None = None
+        self.next_gate_idx: Tensor | None = None
 
     # ------------------------------------------------------------------
     # Loading helpers
@@ -822,13 +872,6 @@ class MultiSkillManager(ManagerBase):
         pos_out = self._compute_bezier_batched(tau, env_coeffs_pos, T_dom, derivative=False)
         vel_out = self._compute_bezier_batched(tau, env_coeffs_vel, T_dom, derivative=False)
 
-        # --- Skill transition hook ----------------------------------------
-        # When a skill change is detected, call the interpolation function.
-        # Currently a pass-through; future work will blend old/new outputs.
-        if self._skill_changed is not None and self._skill_changed.any():
-            pos_out = self.interpolate_skill_transition(pos_out, pos_out, None)
-            vel_out = self.interpolate_skill_transition(vel_out, vel_out, None)
-
         return pos_out, vel_out
 
     # TODO: Should be able to remove this function as we don't use accelerations anymore
@@ -1138,6 +1181,9 @@ class MultiSkillManager(ManagerBase):
     def log_v_on_phasing_var(self, phi: Tensor, v: Tensor) -> None:
         """Log CLF values binned by phasing variable, per skill.
 
+        Also folds ``v`` into the per-trajectory stats tracker (if enabled),
+        gating envs that recently reset or just transitioned skills.
+
         Args:
             phi: ``[N]`` phasing variable values.
             v: ``[N]`` CLF values.
@@ -1145,6 +1191,10 @@ class MultiSkillManager(ManagerBase):
         self._ensure_cache()
         traj_idx = self._cached_global_indices
         skill_indices = self.data["skill_idx"][traj_idx]
+
+        # Per-trajectory tracker update — piggyback on this once-per-step site.
+        if self.traj_stats is not None:
+            self._update_traj_stats(traj_idx, v)
 
         for skill in self.skills:
             si = self.skill_name_to_idx[skill.name]
@@ -1170,6 +1220,63 @@ class MultiSkillManager(ManagerBase):
                 (1 - alpha) * self.skill_v_logs[skill.name][valid] + alpha * batch_means
             )
             self.skill_num_v_logs[skill.name] += batch_counts
+
+    def _update_traj_stats(self, traj_idx: Tensor, v: Tensor) -> None:
+        """Fold one step of CLF values into the per-trajectory tracker.
+
+        Builds an active mask that excludes envs that just reset or just
+        transitioned skills, then forwards to ``self.traj_stats.update``.
+
+        Args:
+            traj_idx: ``[N]`` long tensor of global trajectory indices.
+            v: ``[N]`` float tensor of CLF values.
+        """
+        n = v.shape[0]
+        device = v.device
+
+        # Allocate per-env warmup counters lazily (we need num_envs).
+        if self._steps_since_reset is None or self._steps_since_reset.shape[0] != n:
+            self._steps_since_reset = torch.full(
+                (n,), self._traj_stats_reset_warmup + 1,
+                dtype=torch.long, device=device,
+            )
+            self._steps_since_transition = torch.full(
+                (n,), self._traj_stats_transition_warmup + 1,
+                dtype=torch.long, device=device,
+            )
+            self._prev_episode_length = torch.zeros(n, dtype=torch.long, device=device)
+
+        # Detect resets via episode_length_buf decreasing (or zero).
+        ep_len = None
+        if self.env is not None and hasattr(self.env, "episode_length_buf"):
+            ep_len = self.env.episode_length_buf.to(dtype=torch.long, device=device)
+            reset_mask = ep_len < self._prev_episode_length
+            # Also treat episode_length_buf==0 as a reset frame to be safe.
+            reset_mask = reset_mask | (ep_len == 0)
+        else:
+            reset_mask = torch.zeros(n, dtype=torch.bool, device=device)
+
+        if reset_mask.any():
+            self._steps_since_reset[reset_mask] = 0
+
+        # Skill transition mask is populated by ``_ensure_cache``.
+        if self._skill_changed is not None and self._skill_changed.shape[0] == n:
+            trans_mask = self._skill_changed
+            if trans_mask.any():
+                self._steps_since_transition[trans_mask] = 0
+
+        active = (
+            (self._steps_since_reset >= self._traj_stats_reset_warmup)
+            & (self._steps_since_transition >= self._traj_stats_transition_warmup)
+        )
+
+        self.traj_stats.update(traj_idx, v, active=active)
+
+        # Advance counters for the next step.
+        self._steps_since_reset += 1
+        self._steps_since_transition += 1
+        if ep_len is not None:
+            self._prev_episode_length = ep_len.clone()
 
     def get_v_log(self) -> tuple[Tensor, Tensor]:
         """Get the aggregated V log across all skills.
@@ -1216,70 +1323,6 @@ class MultiSkillManager(ManagerBase):
             The input positions unchanged.
         """
         return positions
-
-    def compute_transition_time(
-        self,
-        old_traj_idx: Tensor,
-        old_t: Tensor,
-        new_traj_idx: Tensor,
-    ) -> Tensor:
-        """Compute a new trajectory time that matches the old trajectory's state.
-
-        On a skill change, the new trajectory's raw elapsed time usually
-        maps to a phi that is unrelated to where the robot is in the old
-        trajectory.  This method returns a target time for the new
-        trajectory so that:
-
-        1. The fractional phase matches — phi in new == phi in old.
-        2. For half-periodic-to-half-periodic transitions, if the reference
-           frame at that phi in the new trajectory disagrees with the old
-           reference frame (i.e. the "first half" convention is opposite),
-           phi is shifted by 0.5 so the stance foot matches.  The second
-           half of a half-periodic trajectory is the sagittal reflection
-           of the first, so shifting by 0.5 preserves the fractional
-           position within the stance while swapping feet.
-
-        For other trajectory-type combinations the method falls through
-        with ``candidate_phi = old_phi`` (no shift).
-
-        Requires ``_ref_frame_domain_map`` to be populated (via
-        :meth:`build_ref_frame_map`).
-
-        Args:
-            old_traj_idx: ``[N]`` global indices of the previous-step trajectory.
-            old_t: ``[N]`` trajectory time in the previous-step trajectory.
-            new_traj_idx: ``[N]`` global indices of the current-step trajectory.
-
-        Returns:
-            ``[N]`` target trajectory time for the new trajectory.
-        """
-        # Old phi — same definition the manager uses internally.
-        old_phi = self._compute_phasing_var(old_t, old_traj_idx)
-
-        # Candidate: same phi in the new trajectory.
-        new_total = self.data["total_time"][new_traj_idx]
-        candidate_t = old_phi * new_total
-
-        # Only half-periodic <-> half-periodic gets the ref-frame shift.
-        both_half = (
-            (self.data["traj_type"][old_traj_idx] == _HALF_PERIODIC_INT)
-            & (self.data["traj_type"][new_traj_idx] == _HALF_PERIODIC_INT)
-        )
-
-        if both_half.any() and hasattr(self, "_ref_frame_domain_map"):
-            old_domain = self._get_domain_indices(old_t, old_traj_idx)
-            candidate_domain = self._get_domain_indices(candidate_t, new_traj_idx)
-
-            old_frame = self._ref_frame_domain_map[old_traj_idx, old_domain]
-            candidate_frame = self._ref_frame_domain_map[new_traj_idx, candidate_domain]
-
-            mismatch = both_half & (candidate_frame != old_frame)
-            if mismatch.any():
-                shifted_phi = (old_phi + 0.5) % 1.0
-                shifted_t = shifted_phi * new_total
-                candidate_t = torch.where(mismatch, shifted_t, candidate_t)
-
-        return candidate_t
 
     # ------------------------------------------------------------------
     # Contact-gate tables
@@ -1364,24 +1407,229 @@ class MultiSkillManager(ManagerBase):
 
         self._gate_contact_mask = mask
 
-    def interpolate_skill_transition(
-        self, output_a: Tensor, output_b: Tensor, alpha: Tensor
-    ) -> Tensor:
-        """Interpolate between two skill outputs during a transition.
+    # ------------------------------------------------------------------
+    # Per-env phase state and snap operations
+    # ------------------------------------------------------------------
 
-        Currently a no-op stub that returns ``output_a``.  Future
-        implementation will perform linear interpolation:
-        ``(1 - alpha) * output_a + alpha * output_b``.
+    def _ensure_phase_state(self, num_envs: int) -> None:
+        """Lazily allocate ``phase`` and ``next_gate_idx`` to size ``num_envs``."""
+        if (
+            self.phase is not None
+            and self.phase.shape[0] == num_envs
+        ):
+            return
+        self.phase = torch.zeros(num_envs, device=self.device)
+        self.next_gate_idx = -torch.ones(num_envs, dtype=torch.long, device=self.device)
+
+    def _eps_phi(self, traj_idx: Tensor) -> Tensor:
+        """One step's worth of phi for each trajectory.
 
         Args:
-            output_a: ``[N, ...]`` output from the current skill.
-            output_b: ``[N, ...]`` output from the target skill.
-            alpha: ``[N]`` interpolation weight in [0, 1].
+            traj_idx: ``[N]`` global trajectory indices.
 
         Returns:
-            ``output_a`` unchanged.
+            ``[N]`` ``step_dt / total_time[traj_idx]``.
         """
-        return output_a
+        if self.env is None or not hasattr(self.env, "step_dt"):
+            raise RuntimeError("Manager has no env; cannot compute eps_phi.")
+        total = self.data["total_time"][traj_idx]
+        return self.env.step_dt / total
+
+    def _reseed_gate_for_envs(self, env_ids: Tensor) -> None:
+        """Re-arm ``next_gate_idx`` for the given envs based on their current phase.
+
+        Picks the smallest active gate whose ``gate_phi >= phase``;  if no
+        upcoming gate this period, arms gate 0 of the next period.  If the
+        trajectory has no gates at all, sets ``-1``.
+        """
+        if env_ids.numel() == 0:
+            return
+        traj_idx = self._get_global_indices()[env_ids]
+        phi = self.phase[env_ids]
+        gates = self._gate_phi_table[traj_idx]                # [n, MAX_GATES]
+        gate_active = self._gate_active_table[traj_idx]       # [n, MAX_GATES]
+        upcoming = gate_active & (gates >= phi.unsqueeze(1))
+        has_upcoming = upcoming.any(dim=1)
+        first_upcoming_idx = upcoming.to(torch.long).argmax(dim=1)
+        init_idx = torch.where(
+            has_upcoming, first_upcoming_idx, torch.zeros_like(first_upcoming_idx)
+        )
+        num_gates = self._num_gates_per_traj[traj_idx]
+        init_idx = torch.where(num_gates > 0, init_idx, -torch.ones_like(init_idx))
+        self.next_gate_idx[env_ids] = init_idx
+
+    def _advance_gate_for_envs(self, env_ids: Tensor) -> None:
+        """Advance ``next_gate_idx`` after a fire / expiry.
+
+        Wraps to gate 0 for periodic; sets to -1 once the last gate of an
+        episodic trajectory has been processed.
+        """
+        if env_ids.numel() == 0:
+            return
+        traj_idx = self._get_global_indices()[env_ids]
+        cur_idx = self.next_gate_idx[env_ids]
+        new_idx = cur_idx + 1
+        num_gates = self._num_gates_per_traj[traj_idx]
+        traj_type = self.data["traj_type"][traj_idx]
+
+        last = new_idx >= num_gates
+        is_episodic = traj_type == _EPISODIC_INT
+
+        new_idx = torch.where(
+            last & ~is_episodic, torch.zeros_like(new_idx), new_idx
+        )
+        new_idx = torch.where(
+            last & is_episodic, -torch.ones_like(new_idx), new_idx
+        )
+        self.next_gate_idx[env_ids] = new_idx
+
+    def update_phase(
+        self, step_dt: float, env_ids: Tensor | None = None
+    ) -> None:
+        """Advance ``self.phase`` by ``step_dt / total_time[traj_idx]``.
+
+        Half/full periodic phases wrap mod 1.0.  Episodic phases clamp at
+        1.0.  Perpetual phases stay at 0.  When a periodic env's phase
+        wraps past a gate at ``phi == 1.0`` without that gate having
+        fired, ``next_gate_idx`` is advanced so the gate logic doesn't
+        keep checking against a wrapped-past gate.
+
+        Args:
+            step_dt: Sim step duration (seconds).
+            env_ids: Optional subset; if ``None``, advances all envs.
+        """
+        traj_idx_full = self._get_global_indices()
+        n_total = traj_idx_full.shape[0]
+        self._ensure_phase_state(n_total)
+
+        if env_ids is None:
+            sel = torch.arange(n_total, device=self.device)
+        else:
+            sel = env_ids
+        if sel.numel() == 0:
+            return
+
+        traj_idx = traj_idx_full[sel]
+        total = self.data["total_time"][traj_idx]
+        tt = self.data["traj_type"][traj_idx]
+
+        delta = step_dt / total
+        prev_phase = self.phase[sel].clone()
+        new_phase = prev_phase + delta
+
+        is_periodic = (tt == _HALF_PERIODIC_INT) | (tt == _FULL_PERIODIC_INT)
+        is_episodic = tt == _EPISODIC_INT
+        is_perpetual = tt == _PERPETUAL_INT
+
+        new_phase = torch.where(is_periodic, new_phase % 1.0, new_phase)
+        new_phase = torch.where(
+            is_episodic, torch.clamp(new_phase, 0.0, 1.0), new_phase
+        )
+        new_phase = torch.where(
+            is_perpetual, torch.zeros_like(new_phase), new_phase
+        )
+
+        self.phase[sel] = new_phase
+
+        # Advance ``next_gate_idx`` when the natural phase wrap passes a
+        # gate at phi=1.0 (the "wrap gate").  Without this, the gate
+        # logic would keep checking against a gate the phase has
+        # silently passed via the wrap.
+        wrapped = is_periodic & (new_phase < prev_phase)
+        if wrapped.any():
+            cur_gate_idx = self.next_gate_idx[sel]
+            active = cur_gate_idx >= 0
+            safe_idx = torch.clamp(cur_gate_idx, min=0)
+            cur_gate_phi = self._gate_phi_table[traj_idx, safe_idx]
+            is_wrap_gate = active & (cur_gate_phi >= 1.0 - 1e-6)
+            wrap_advance = wrapped & is_wrap_gate
+            if wrap_advance.any():
+                self._advance_gate_for_envs(sel[wrap_advance])
+
+    def reset_phase(self, env_ids: Tensor, randomize: bool = True) -> None:
+        """Reset phase for the given envs.
+
+        Args:
+            env_ids: Env indices to reset.
+            randomize: If True, sample uniform phase ∈ [0, 1).  Otherwise
+                set to 0.
+        """
+        if env_ids.numel() == 0:
+            return
+        n_total = self._get_global_indices().shape[0]
+        self._ensure_phase_state(n_total)
+
+        if randomize:
+            new_phase = torch.rand(env_ids.shape[0], device=self.device)
+        else:
+            new_phase = torch.zeros(env_ids.shape[0], device=self.device)
+        self.phase[env_ids] = new_phase
+        self._reseed_gate_for_envs(env_ids)
+
+    def set_phase(self, phase: Tensor, env_ids: Tensor) -> None:
+        """Explicitly set phase for the given envs.
+
+        Used by ``reset_on_reference`` to align the phase with a sampled
+        reference pose.
+
+        Args:
+            phase: ``[len(env_ids)]`` phase values in [0, 1].
+            env_ids: Env indices to set.
+        """
+        if env_ids.numel() == 0:
+            return
+        n_total = self._get_global_indices().shape[0]
+        self._ensure_phase_state(n_total)
+        self.phase[env_ids] = phase
+        self._reseed_gate_for_envs(env_ids)
+
+    def snap_phase_to_new_domain(self, env_ids: Tensor) -> None:
+        """Early-contact snap.  Phase currently in old domain (before gate);
+        jump *forward* to ``(gate_phi + eps_phi) % 1.0`` — start of the new
+        domain — and advance ``next_gate_idx``.
+        """
+        if env_ids.numel() == 0:
+            return
+        traj_idx = self._get_global_indices()[env_ids]
+        gate_idx = self.next_gate_idx[env_ids]
+        gate_phi = self._gate_phi_table[traj_idx, gate_idx]
+        eps_phi = self._eps_phi(traj_idx)
+        self.phase[env_ids] = (gate_phi + eps_phi) % 1.0
+        self._advance_gate_for_envs(env_ids)
+
+    def snap_phase_to_start_of_current_domain(self, env_ids: Tensor) -> None:
+        """Late-contact snap (hold-off).  Phase already past the gate (in
+        the new domain); pull *backward* a small amount to
+        ``(gate_phi + eps_phi) % 1.0`` — start of the same new domain —
+        and advance ``next_gate_idx``.
+
+        Same numerical target as :meth:`snap_phase_to_new_domain` but the
+        domain-membership intent (already inside vs. crossing into) is
+        different at the call site.
+        """
+        if env_ids.numel() == 0:
+            return
+        traj_idx = self._get_global_indices()[env_ids]
+        gate_idx = self.next_gate_idx[env_ids]
+        gate_phi = self._gate_phi_table[traj_idx, gate_idx]
+        eps_phi = self._eps_phi(traj_idx)
+        self.phase[env_ids] = (gate_phi + eps_phi) % 1.0
+        self._advance_gate_for_envs(env_ids)
+
+    def snap_phase_to_end_of_previous_domain(self, env_ids: Tensor) -> None:
+        """Hold-on-late-contact snap.  Phase has just crossed the gate
+        boundary into the new domain; pull *backward* to
+        ``(gate_phi - eps_phi) % 1.0`` — end of the old (previous) domain.
+        Does NOT advance ``next_gate_idx`` — we're still waiting for this
+        gate's contact event.
+        """
+        if env_ids.numel() == 0:
+            return
+        traj_idx = self._get_global_indices()[env_ids]
+        gate_idx = self.next_gate_idx[env_ids]
+        gate_phi = self._gate_phi_table[traj_idx, gate_idx]
+        eps_phi = self._eps_phi(traj_idx)
+        self.phase[env_ids] = (gate_phi - eps_phi) % 1.0
 
     # ------------------------------------------------------------------
     # Ref frame map building (needs stored metadata)

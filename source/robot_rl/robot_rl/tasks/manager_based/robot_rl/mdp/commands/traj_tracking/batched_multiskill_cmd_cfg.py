@@ -30,23 +30,21 @@ class BatchedMultiSkillCommandCfg(BaseTrajectoryCommandCfg):
         ".batched_multiskill_cmd:BatchedMultiSkillCommand"
     )
 
-    smooth_transitions: bool = True
-    """Align the trajectory clock on skill changes so the new skill starts at
-    a phi that matches the current reference frame in contact and preserves
-    the fractional period position.  When ``False``, the per-env clock keeps
-    advancing linearly and the new trajectory is evaluated at that raw time
-    (the old pre-smoothing behaviour)."""
+    random_start_phase: bool = True
+    """If ``True``, sample a uniform phase ∈ [0, 1) for each env at the
+    start of an episode (replaces the time-based ``random_start_time_max``
+    for this command).  If ``False``, every env starts at phase 0."""
 
     contact_gate_window_frac: float | None = 0.2
     """Fraction of the gated period (half-period for half-periodic, full
-    period for full-periodic / episodic) over which the next expected foot
-    contact will trigger advancement to the next period.  Inside the window
-    a contact event snaps the clock to the period boundary; past the
-    boundary without contact the clock continues advancing (and may wrap),
-    and the next contact event still snaps the clock back to the boundary.
-    Set ``hold_on_late_contact=True`` to restore the legacy
-    hold-at-boundary behaviour.  Set to ``None`` to disable contact gating
-    (clock advances purely on time, original behaviour)."""
+    period for full-periodic / episodic) on each side of the gate boundary
+    in which a contact event triggers a phase snap.  Inside the early
+    window (phi just before the gate) an expected contact snaps the phase
+    forward into the new domain.  Inside the late window (phi just past
+    the gate) an expected contact snaps the phase backward to the start of
+    the new domain — same numerical target, no domain change.  Set
+    ``hold_on_late_contact=True`` for the hold-at-boundary variant.  Set
+    to ``None`` to disable contact gating entirely."""
 
     contact_sensor_names: list[str] = ("left_foot_contact", "right_foot_contact")
     """Names of the ContactSensor scene entities used by the contact gate.
@@ -60,14 +58,28 @@ class BatchedMultiSkillCommandCfg(BaseTrajectoryCommandCfg):
     considered in contact for gating purposes."""
 
     hold_on_late_contact: bool = False
-    """If ``True``, restore the legacy behaviour: when phi advances past
-    ``target_phi`` without an expected contact, pull the trajectory clock
-    back to ``target_phi`` and hold there until contact lands; period wraps
-    reset the armed gate to gate 0 of the new period.  When ``False``
-    (default), the clock keeps advancing past ``target_phi`` naturally and
-    the armed gate persists across the period wrap — the next contact
-    event still snaps the clock back to the gate's original boundary,
-    which can produce a backward jump in phi.  If contact never lands and
-    ``t`` advances one full period past the gate, the gate auto-rearms at
-    its next instance.  Only used when ``contact_gate_window_frac`` is not
-    ``None``."""
+    """If ``True``, when phase has crossed the gate boundary without an
+    expected contact each step pulls the phase back to
+    ``gate_phi - eps_phi`` — end of the previous (old) domain — until
+    contact arrives, at which point the phase snaps forward into the new
+    domain.  If ``False`` (default), phase advances naturally past the
+    gate; an expected contact landing in the late window still produces a
+    backward snap to the start of the new domain (no domain change).  If
+    contact never lands in the late window the gate auto-expires and
+    advances to the next instance.  Only used when
+    ``contact_gate_window_frac`` is not ``None``."""
+
+    track_traj_stats: bool = True
+    """If ``True``, the underlying :class:`MultiSkillManager` allocates a
+    per-trajectory CLF stats tracker (:class:`TrajectoryCLFStats`) updated
+    once per step from :meth:`log_v_on_phasing_var`. Required for adaptive
+    trajectory sampling."""
+
+    traj_stats_alpha: float = 0.005
+    """EMA factor for the per-trajectory tracker (matches ``skill_v_logs``)."""
+
+    traj_stats_reset_warmup: int = 2
+    """Frames after each env reset that are excluded from the tracker."""
+
+    traj_stats_transition_warmup: int = 3
+    """Frames after each skill transition that are excluded from the tracker."""

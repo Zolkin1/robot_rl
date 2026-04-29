@@ -99,6 +99,15 @@ class DataLogger:
                         self._warn(f"traj_attr:{attr}",
                                    f"Trajectory term '{self._traj_term_name}' has no attribute '{attr}'")
 
+                # Per-step trajectory indices (multiskill only — others have
+                # a single global trajectory and don't need this).
+                manager = getattr(ref, "manager", None)
+                if manager is not None and hasattr(manager, "get_current_trajectory_indices"):
+                    try:
+                        step["traj_idx"] = manager.get_current_trajectory_indices().clone()
+                    except Exception as exc:
+                        self._warn("traj_idx", f"Could not read traj_idx: {exc}")
+
                 # Fallback: if the command doesn't expose phasing_var (e.g.
                 # multiskill, which has no phase state), query phi from the
                 # manager using the command's per-env trajectory clock so
@@ -163,7 +172,73 @@ class DataLogger:
         for key, tensors in self._data.items():
             stacked = torch.stack(tensors, dim=0)
             data[key] = stacked.cpu().numpy()
+
+        # Per-trajectory V summary (multiskill only).
+        if "traj_idx" in self._data and "v" in self._data:
+            self._compute_per_traj_summary(data)
+
         return data, self.metadata
+
+    def _compute_per_traj_summary(self, data: dict[str, np.ndarray]) -> None:
+        """Aggregate per-trajectory mean V across the rollout.
+
+        Replays collected ``(traj_idx, v)`` through a fresh
+        :class:`TrajectoryCLFStats` in ``mean`` mode and writes
+        ``per_traj_v_mean``, ``per_traj_v_count``, ``per_traj_names`` into
+        ``data``. Uses the same gating as the live training tracker:
+        skip a few frames after env reset (detected via ``v == 0`` on the
+        first reset frame, or ``dones`` if available later) and after
+        skill transitions.
+        """
+        try:
+            from robot_rl.tasks.manager_based.robot_rl.mdp.commands.traj_tracking.traj_clf_stats import (
+                TrajectoryCLFStats,
+            )
+        except Exception as exc:
+            self._warn("per_traj_summary", f"Could not import TrajectoryCLFStats: {exc}")
+            return
+
+        traj_idx_np = data["traj_idx"]  # [T, N]
+        v_np = data["v"]                # [T, N]
+        if traj_idx_np.size == 0:
+            return
+
+        T = self._num_trajectories
+        if T is None:
+            T = int(traj_idx_np.max()) + 1
+
+        traj_idx_t = torch.from_numpy(traj_idx_np).long()
+        v_t = torch.from_numpy(v_np).float()
+
+        # Active mask: skip the first `warmup` frames of the rollout (CLF
+        # buffer warmup) and any frame where the trajectory changed in the
+        # last `warmup` steps (covers both resets and skill transitions
+        # for one bookkeeping pass).
+        warmup = 3
+        T_steps, N = traj_idx_t.shape
+        traj_changed = torch.zeros((T_steps, N), dtype=torch.bool)
+        traj_changed[1:] = traj_idx_t[1:] != traj_idx_t[:-1]
+
+        active = torch.ones_like(traj_changed)
+        active[:warmup] = False
+        # Roll-and-OR over the last `warmup` frames of traj_changed.
+        recent_change = traj_changed.clone()
+        for offset in range(1, warmup):
+            recent_change[offset:] |= traj_changed[: T_steps - offset]
+        active &= ~recent_change
+
+        stats = TrajectoryCLFStats(
+            num_trajectories=T, device="cpu", mode="mean",
+        )
+        for t in range(T_steps):
+            stats.update(traj_idx_t[t], v_t[t], active[t])
+
+        means = stats.get_means().numpy()
+        counts = stats.get_counts().numpy()
+        data["per_traj_v_mean"] = means
+        data["per_traj_v_count"] = counts
+        if self._traj_names is not None:
+            self.metadata["per_traj_names"] = list(self._traj_names)
 
     # ------------------------------------------------------------------
     # Private helpers
@@ -182,6 +257,10 @@ class DataLogger:
                 self._traj_term_name = name
                 break
 
+        # Multiskill trajectory metadata for per-trajectory summary.
+        self._num_trajectories: int | None = None
+        self._traj_names: list[str] | None = None
+
         if self._traj_term_name is not None:
             try:
                 ref = unwrapped.command_manager.get_term(self._traj_term_name)
@@ -191,6 +270,13 @@ class DataLogger:
                     self.metadata["vel_names"] = list(ref.ordered_vel_output_names)
                 if hasattr(ref, "ref_frames"):
                     self.metadata["ref_frames"] = list(ref.ref_frames)
+                manager = getattr(ref, "manager", None)
+                if manager is not None and hasattr(manager, "num_trajectories"):
+                    self._num_trajectories = int(manager.num_trajectories)
+                    self._traj_names = self._collect_traj_names(manager)
+                    self.metadata["num_trajectories"] = self._num_trajectories
+                    if self._traj_names is not None:
+                        self.metadata["per_traj_names"] = list(self._traj_names)
             except Exception as exc:
                 print(f"[WARN DataLogger] Could not read trajectory metadata: {exc}")
         else:
@@ -225,6 +311,36 @@ class DataLogger:
             self.metadata["joint_names"] = list(robot.data.joint_names)
         except Exception as exc:
             print(f"[WARN DataLogger] Could not read joint names: {exc}")
+
+    def _collect_traj_names(self, manager) -> list[str] | None:
+        """Build a per-trajectory display name list from the multiskill manager.
+
+        Format: ``"<skill>/vx=<vel_x>"`` so trajectories that share a YAML
+        name (very common) remain distinguishable. Falls back to
+        ``"<skill>/<idx>"`` or ``"traj_<idx>"`` when conditioning data is
+        missing.
+        """
+        T = int(getattr(manager, "num_trajectories", 0))
+        if T <= 0:
+            return None
+
+        skills = list(getattr(manager, "skill_labels", []) or [])
+        cond = getattr(manager, "_global_conditioning", None)
+        vel_x: list[float] | None = None
+        if cond is not None:
+            try:
+                vel_x = cond[:, 0].detach().cpu().tolist()
+            except Exception:
+                vel_x = None
+
+        names: list[str] = []
+        for i in range(T):
+            skill = skills[i] if i < len(skills) else "?"
+            if vel_x is not None:
+                names.append(f"{skill}/vx={vel_x[i]:.2f}")
+            else:
+                names.append(f"{skill}/{i}")
+        return names
 
     def _warn(self, source: str, msg: str) -> None:
         """Print a warning once per source key."""
