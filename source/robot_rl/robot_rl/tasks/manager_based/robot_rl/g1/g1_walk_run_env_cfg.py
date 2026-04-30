@@ -85,7 +85,7 @@ class G1WalkRunCLFDistillationEnvCfg(G1WalkRunCLFEnvCfg):
         self.observations.critic.enable_corruption = False
 
         self.commands.base_velocity.resampling_time_range = (2.0, 6.0)
-        velocity_buckets=[
+        self.commands.base_velocity.velocity_buckets=[
             VelocityBucketCfg(percentage=0.10, lin_vel_x=(0.0, 0.1)),   # Standing
             VelocityBucketCfg(percentage=0.45, lin_vel_x=(0.1, 1.5)),   # Walking
             VelocityBucketCfg(percentage=0.45, lin_vel_x=(1.5, 3.7)),   # Running

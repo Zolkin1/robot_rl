@@ -115,9 +115,17 @@ def reset_on_reference(
     # original scalar-total_time sampling.
     _phase_based = hasattr(cmd.manager, "set_phase")
     if _phase_based:
+        # The manager caches its trajectory assignments across steps and
+        # only invalidates inside ``BatchedMultiSkillCommand._compute_time``.
+        # Reset events fire between steps, so by default the cache here
+        # holds the *previous* step's traj_idx — built from the
+        # pre-resample conditioner.  Invalidate so the read below picks
+        # the trajectory matching the freshly-resampled conditioner (incl.
+        # any ``special_envs`` override above).
+        cmd.manager.invalidate_cache()
         ref_traj_idx = cmd.manager.get_current_trajectory_indices()[ref_ids]
         ref_total = cmd.manager.data["total_time"][ref_traj_idx]
-        random_phase_ref = torch.rand(num_ref_envs, device=env.device)
+        random_phase_ref = 0.7421 * torch.ones(num_ref_envs, device=env.device) #torch.rand(num_ref_envs, device=env.device)
         random_times = random_phase_ref * ref_total
     else:
         total_time = cmd.manager.get_total_time()
@@ -213,6 +221,21 @@ def reset_on_reference(
     #         env_idx = 1
     #     else:
     #         env_idx = 0
+    #
+    #     # Phase per env (only available for phase-based managers; for legacy
+    #     # time-based commands compute on the fly from random_times / total).
+    #     if _phase_based:
+    #         phase_per_env = cmd.manager.phase
+    #     else:
+    #         phase_per_env = random_times / cmd.manager.get_total_time()
+    #
+    #     # Domain index of the env at the sampled state.  ``get_measured_outputs``
+    #     # has already updated ``cmd.current_domain`` for ref_ids.
+    #     current_domain = cmd.current_domain
+    #     cur_ref_frame_idx = cmd.cur_ref_frame_idx
+    #     ref_frame_names = cmd.ref_frames
+    #     ref_pose = cmd.ref_poses
+    #
     #     _pretty_print_reset_state(
     #         cmd.ordered_pos_output_names,
     #         cmd.ordered_vel_output_names,
@@ -226,6 +249,11 @@ def reset_on_reference(
     #         cmd.clf.v_subgroups,
     #         cmd_vel,
     #         cmd.clf,
+    #         phase_per_env,
+    #         current_domain,
+    #         cur_ref_frame_idx,
+    #         ref_frame_names,
+    #         ref_pose,
     #         env_idx=env_idx, #ref_ids[0].item(),
     #     )
 
@@ -298,6 +326,11 @@ def _pretty_print_reset_state(
     v_subgroups: dict[str, torch.Tensor],
     cmd_vel: torch.Tensor,
     clf,
+    phase: torch.Tensor,
+    current_domain: torch.Tensor,
+    cur_ref_frame_idx: torch.Tensor,
+    ref_frame_names: list[str],
+    ref_pose: torch.Tensor,
     env_idx: int = 0,
 ):
     """
@@ -314,12 +347,24 @@ def _pretty_print_reset_state(
         vdot: Lyapunov derivative, shape [num_envs].
         v_subgroups: Dict mapping subgroup names to their V contributions, each shape [num_envs].
         cmd_vel: Commanded velocity, shape [num_envs, vel_dim].
+        phase: Per-env trajectory phase, shape [num_envs].
+        current_domain: Per-env domain index after reset, shape [num_envs].
+        cur_ref_frame_idx: Per-env index into ``ref_frame_names``, shape [num_envs].
+        ref_frame_names: Ordered reference-frame names (matches ``cur_ref_frame_idx``).
+        ref_pose: Per-env reference-frame pose ``[x, y, z, qx, qy, qz, qw]``, shape [num_envs, 7].
         env_idx: Index of the environment to print (default 0).
     """
     # Header
     print(f"\n{'='*94}")
     print(f"Reset State for Environment {env_idx}")
-    print(f"Time: {times[0].item():.4f} s")
+    print(f"Time: {times[0].item():.4f} s    Phase: {phase[env_idx].item():.4f}")
+    print(f"Domain Index: {current_domain[env_idx].item()}")
+    ref_idx = cur_ref_frame_idx[env_idx].item()
+    ref_name = ref_frame_names[ref_idx] if 0 <= ref_idx < len(ref_frame_names) else "<oob>"
+    ref_xyz = ref_pose[env_idx, :3].tolist()
+    print(f"Reference Frame: {ref_name} (idx {ref_idx})")
+    print(f"Reference Frame Pos (x,y,z): "
+          f"({ref_xyz[0]:.4f}, {ref_xyz[1]:.4f}, {ref_xyz[2]:.4f})")
     print(f"Commanded Velocity: {cmd_vel[env_idx].tolist()} m/s")
     print(f"{'='*94}")
 

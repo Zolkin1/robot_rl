@@ -226,33 +226,7 @@ class BaseTrajectoryCommand(CommandTerm):
         else:
             changed = new_domains != self.current_domain[env_ids]
 
-        # For single-domain trajectories, force update at stepping cadence by
-        # detecting phase wrap / half-crossing in the raw (unheld) phi.
-        cur_phi = self.manager.get_phasing_var(t, env_ids)
-        if env_ids is None:
-            prev_phi = self._prev_phi
-            single_dom_mask = (
-                (self.manager.get_num_domains() == 1)
-                & (
-                    (prev_phi > cur_phi)
-                    | ((prev_phi < 0.5) & (0.5 < cur_phi))
-                )
-            )
-            changed[single_dom_mask] = True
-            self.current_domain = new_domains
-            self._prev_phi = cur_phi
-        else:
-            prev_phi = self._prev_phi[env_ids]
-            single_dom_mask = (
-                (self.manager.get_num_domains()[env_ids] == 1)
-                & (
-                    (prev_phi > cur_phi)
-                    | ((prev_phi < 0.5) & (0.5 < cur_phi))
-                )
-            )
-            changed[single_dom_mask] = True
-            self.current_domain[env_ids] = new_domains
-            self._prev_phi[env_ids] = cur_phi
+        self.current_domain = new_domains
 
         # Which reference frame each env should use
         if env_ids is None:
@@ -262,14 +236,6 @@ class BaseTrajectoryCommand(CommandTerm):
             ref_frame_indices = self.manager.get_ref_frames_in_use(t, self.ref_frames, env_ids)
             self.cur_ref_frame_idx[env_ids] = ref_frame_indices
 
-        # Contact-gating: only update ref_poses when the reference frame body
-        # is actually in contact with the ground. This prevents snapping to a
-        # foot that is mid-swing (e.g. during a skill transition).
-        # TODO: On a skill switch the new trajectory may be out of phase with the
-        #   robot (e.g. right foot is currently on the ground but the new skill's
-        #   domain expects left foot down). We may want to phase-align the new
-        #   trajectory so the stance foot matches, or offset the time into the
-        #   new trajectory by half a period.
         contact_state = self.get_contact_state(t, env_ids)
         contact_frame_indices = self.ref_to_contact_idx[ref_frame_indices]
         ref_in_contact = torch.gather(

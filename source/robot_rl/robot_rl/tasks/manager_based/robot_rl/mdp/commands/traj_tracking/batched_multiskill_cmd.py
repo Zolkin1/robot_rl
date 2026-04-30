@@ -143,6 +143,15 @@ class BatchedMultiSkillCommand(BaseTrajectoryCommand):
 
         Operates on ``manager.phase`` and ``manager.next_gate_idx``.
 
+        Just-reset envs (``episode_length_buf == 0``) are excluded from
+        the gate logic: their contact-sensor reading on this first step
+        is the *pre-reset* physics force (no physics step runs between
+        the reset event and this command compute), so a standing prev
+        episode would leak both-feet-in-contact into ``contact_now`` and
+        cause a false ``expected_landed`` for the new episode's first
+        gate.  The phase was just set by :meth:`set_phase` in the reset
+        event, so no contact-driven snap is needed on step 0 anyway.
+
         Args:
             contact_now: ``[N, B]`` boolean tensor of current per-env
                 contact state in ``self.contact_bodies`` order.
@@ -151,6 +160,8 @@ class BatchedMultiSkillCommand(BaseTrajectoryCommand):
         next_gate_idx = self.manager.next_gate_idx
 
         active = next_gate_idx >= 0
+        # Mask out envs that just reset — their contact reading is stale.
+        active = active & (self.env.episode_length_buf > 0)
         if not active.any():
             return
 
@@ -234,7 +245,7 @@ class BatchedMultiSkillCommand(BaseTrajectoryCommand):
         ):
             return self._cached_t
 
-        advancing_mask = ep_len > 0
+        advancing_mask = ep_len < self.env.max_episode_length
         if advancing_mask.any():
             adv_ids = torch.where(advancing_mask)[0]
             self.manager.update_phase(self.env.step_dt, env_ids=adv_ids)

@@ -53,12 +53,22 @@ def _grid_plot(
     label_a: str = "Reference",
     label_b: str = "Actual",
     n_cols: int = 4,
+    dt: float | None = None,
 ) -> None:
-    """Shared helper for grid-of-subplots plots (positions, velocities, joints, torques)."""
+    """Shared helper for grid-of-subplots plots (positions, velocities, joints, torques).
+
+    When ``dt`` is provided the x-axis is rendered in seconds; otherwise it
+    falls back to integer time steps.
+    """
     arr_a = data[key_a]
     n_dims = arr_a.shape[2] if arr_a.ndim >= 3 else arr_a.shape[1]
     n_rows = max(1, (n_dims + n_cols - 1) // n_cols)
-    time_steps = np.arange(arr_a.shape[0])
+    if dt is not None:
+        x_axis = np.arange(arr_a.shape[0]) * dt
+        x_label = "Time (s)"
+    else:
+        x_axis = np.arange(arr_a.shape[0])
+        x_label = "Time Steps"
 
     for env_id in env_ids:
         fig, axs = plt.subplots(n_rows, n_cols, figsize=(5 * n_cols, 3 * n_rows))
@@ -68,15 +78,15 @@ def _grid_plot(
         for i in range(n_dims):
             ax = axs_flat[i]
             y_a = arr_a[:, env_id, i] if arr_a.ndim >= 3 else arr_a[:, env_id]
-            ax.plot(time_steps, y_a, label=label_a, linewidth=2)
+            ax.plot(x_axis, y_a, label=label_a, linewidth=2)
             if key_b is not None:
                 y_b = data[key_b][:, env_id, i] if data[key_b].ndim >= 3 else data[key_b][:, env_id]
-                ax.plot(time_steps, y_b, label=label_b, linestyle="--", linewidth=2)
+                ax.plot(x_axis, y_b, label=label_b, linestyle="--", linewidth=2)
 
             name = names[i] if i < len(names) else f"Dim {i}"
             unit = _unit_for_name(name)
             ax.set_title(name, fontsize=10)
-            ax.set_xlabel("Time Steps")
+            ax.set_xlabel(x_label)
             ax.set_ylabel(y_label_fmt.format(unit=unit) if unit else y_label_fmt.format(unit=""))
             ax.grid(True, alpha=0.3)
             if i == 0 and key_b is not None:
@@ -113,6 +123,7 @@ def plot_positions(
         y_label_fmt="Position ({unit})",
         filename_fmt="positions_env{env_id}.png",
         save_dir=save_dir, env_ids=env_ids,
+        dt=metadata.get("dt"),
     )
 
 
@@ -133,6 +144,7 @@ def plot_velocities(
         y_label_fmt="Velocity ({unit}/s)",
         filename_fmt="velocities_env{env_id}.png",
         save_dir=save_dir, env_ids=env_ids,
+        dt=metadata.get("dt"),
     )
 
 
