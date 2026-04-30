@@ -124,42 +124,45 @@ def fit_camera(sim: SimulationContext, generator_cfg: TerrainGeneratorCfg) -> No
     sim.set_camera_view(eye=eye, target=(0.0, 0.0, 0.0))
 
 
-def spawn_probe_balls(sim: SimulationContext, importer: TerrainImporter, num: int) -> None:
-    """Clone a sphere over every env origin and place each one above its terrain origin.
+def spawn_probe_balls(sim: SimulationContext, importer: TerrainImporter) -> None:
+    """Clone a sphere over every terrain cell and drop it above the cell's origin.
 
-    The balls free-fall once the sim starts; we don't reset them, so the script just spawns
-    once and lets physics run.
+    Places exactly one ball per ``(row, col)`` sub-terrain so each cell has a probe.
     """
-    cloner = GridCloner(spacing=2.0, stage=sim.stage)
-    cloner.define_base_env("/World/envs")
-    sim.stage.DefinePrim("/World/envs/env_0", "Xform")
-
     physics_material_cfg = sim_utils.RigidBodyMaterialCfg(
         static_friction=0.2, dynamic_friction=1.0, restitution=0.0,
     )
     visual_material_cfg = sim_utils.PreviewSurfaceCfg(diffuse_color=(0.0, 0.4, 1.0))
     sphere_cfg = sim_utils.MeshSphereCfg(
-        radius=0.25,
+        radius=0.1,
         rigid_props=sim_utils.RigidBodyPropertiesCfg(),
         mass_props=sim_utils.MassPropertiesCfg(mass=0.5),
         collision_props=sim_utils.CollisionPropertiesCfg(collision_enabled=True),
         visual_material=visual_material_cfg,
         physics_material=physics_material_cfg,
     )
+
+    if importer.terrain_origins is not None:
+        targets = importer.terrain_origins.reshape(-1, 3).clone()
+    else:
+        targets = importer.env_origins.clone()
+    num_balls = int(targets.shape[0])
+
+    cloner = GridCloner(spacing=2.0, stage=sim.stage)
+    cloner.define_base_env("/World/envs")
+    sim.stage.DefinePrim("/World/envs/env_0", "Xform")
     sphere_cfg.func("/World/envs/env_0/ball", sphere_cfg, translation=(0.0, 0.0, 0.5))
 
-    paths = cloner.generate_paths("/World/envs/env", num_paths=num)
+    paths = cloner.generate_paths("/World/envs/env", num_paths=num_balls)
     cloner.clone(source_prim_path="/World/envs/env_0", prim_paths=paths, replicate_physics=True)
     cloner.filter_collisions(
         sim.cfg.physics_prim_path, "/World/collisions",
         prim_paths=paths, global_paths=["/World/ground"],
     )
 
-    init_pos = importer.env_origins.clone()
-    init_pos[:, 2] += 5.0
-
+    targets[:, 2] += 0.5
     xform_view = sim_utils.XformPrimView("/World/envs/env_.*/ball")
-    xform_view.set_world_poses(positions=init_pos)
+    xform_view.set_world_poses(positions=targets)
 
 
 def main() -> None:
@@ -193,7 +196,7 @@ def main() -> None:
     light_cfg.func("/World/Light", light_cfg)
 
     if not args_cli.no_balls:
-        spawn_probe_balls(sim, importer, args_cli.num_envs)
+        spawn_probe_balls(sim, importer)
 
     sim.reset()
     while simulation_app.is_running() and not sim.is_stopped():

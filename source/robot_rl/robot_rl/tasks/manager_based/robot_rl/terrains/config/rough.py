@@ -9,28 +9,56 @@ import isaaclab.terrains as terrain_gen
 
 from isaaclab.terrains.terrain_generator_cfg import TerrainGeneratorCfg
 
-from robot_rl.tasks.manager_based.robot_rl.terrains.trimesh.stair_cfg import MeshUniformXStairsTerrainCfg
+from robot_rl.tasks.manager_based.robot_rl.terrains.meta_stair_importer import (
+    MetaStairTerrainImporterCfg,
+)
+from robot_rl.tasks.manager_based.robot_rl.terrains.meta_terrain_generator_cfg import (
+    MetaTerrainGeneratorCfg,
+)
+from robot_rl.tasks.manager_based.robot_rl.terrains.trimesh.stair_cfg import (
+    MeshXStairsDownTerrainCfg,
+    MeshXStairsUpTerrainCfg,
+)
 
-CUSTOM_STAIR_CFG = TerrainGeneratorCfg(
+# _STAIR_DIM_OPTIONS = [(0.10, 0.30), (0.15, 0.30), (0.18, 0.25)]
+_STAIR_DIM_OPTIONS = [(0.18, 0.25)]
+
+CUSTOM_STAIR_CFG = MetaTerrainGeneratorCfg(
     size=(10.0, 10.0),
-    num_rows=10,
+    num_rows=5,
+    num_cols=2,
     border_width=0.0,
     sub_terrains={
-        "stairs": MeshUniformXStairsTerrainCfg(
+        "stairs_up": MeshXStairsUpTerrainCfg(
             proportion=0.5,
             size=(5.0, 10.0),
-            border_width=0.5,
-            step_height_range=(0.02, 0.20),
-            step_width=0.25,
+            step_dim_options=_STAIR_DIM_OPTIONS,
+            stair_width_range=(2.0, 4.0),
+            origin_distance_from_back=1.0,
+            float_prob=0.0,
+            wall_prob=0.0,
+            pole_prob=0.0,
         ),
-        "flat": MeshUniformXStairsTerrainCfg(
+        "stairs_down": MeshXStairsDownTerrainCfg(
             proportion=0.5,
             size=(5.0, 10.0),
-            border_width=0.5,
-            step_height_range=(0.0, 0.0),
-            step_width=0.25,
+            step_dim_options=_STAIR_DIM_OPTIONS,
+            stair_width_range=(2.0, 4.0),
+            origin_distance_from_back=1.0,
+            float_prob=0.0,
+            wall_prob=0.0,
+            pole_prob=0.0,
         ),
     },
+)
+
+CUSTOM_STAIR_IMPORTER_CFG = MetaStairTerrainImporterCfg(
+    prim_path="/World/ground",
+    terrain_type="generator",
+    terrain_generator=CUSTOM_STAIR_CFG,
+    max_init_terrain_level=5,
+    collision_group=-1,
+    debug_vis=False,
 )
 
 
