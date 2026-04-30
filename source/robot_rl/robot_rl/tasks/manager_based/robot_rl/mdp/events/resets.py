@@ -125,7 +125,7 @@ def reset_on_reference(
         cmd.manager.invalidate_cache()
         ref_traj_idx = cmd.manager.get_current_trajectory_indices()[ref_ids]
         ref_total = cmd.manager.data["total_time"][ref_traj_idx]
-        random_phase_ref = 0.7421 * torch.ones(num_ref_envs, device=env.device) #torch.rand(num_ref_envs, device=env.device)
+        random_phase_ref = torch.rand(num_ref_envs, device=env.device)
         random_times = random_phase_ref * ref_total
     else:
         total_time = cmd.manager.get_total_time()

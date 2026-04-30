@@ -78,7 +78,7 @@ _PERPETUAL_INT = _TRAJ_TYPE_TO_INT[TrajectoryType.PERPETUAL]
 # ---------------------------------------------------------------------------
 # MultiSkillManager
 # ---------------------------------------------------------------------------
-
+# TODO: Go through for bugs and see if it can be cleaned
 class MultiSkillManager(ManagerBase):
     """Manages trajectories across multiple skills with fully batched evaluation.
 
@@ -1350,6 +1350,13 @@ class MultiSkillManager(ManagerBase):
 
         gate_phi = torch.zeros(T, MAX_GATES, device=self.device)
         gate_active = torch.zeros(T, MAX_GATES, dtype=torch.bool, device=self.device)
+        # Phi-distance from the previous gate (wrapping for periodic types)
+        # to this gate, and from this gate to the next.  Used to scale the
+        # contact-gate window in the command term so a configured
+        # ``contact_gate_window_frac`` is interpreted as "fraction of the
+        # local domain", not raw phi.
+        gate_pre_size = torch.ones(T, MAX_GATES, device=self.device)
+        gate_post_size = torch.ones(T, MAX_GATES, device=self.device)
         num_gates = torch.zeros(T, dtype=torch.long, device=self.device)
         gate_body_names: list[list[list[str]]] = [
             [[] for _ in range(MAX_GATES)] for _ in range(T)
@@ -1363,20 +1370,28 @@ class MultiSkillManager(ManagerBase):
                 gate_phi[ti, 0] = 0.5
                 gate_active[ti, 0] = True
                 gate_body_names[ti][0] = [swap_left_right(b) for b in first_domain_bodies]
+                gate_pre_size[ti, 0] = 0.5
+                gate_post_size[ti, 0] = 0.5
 
                 gate_phi[ti, 1] = 1.0
                 gate_active[ti, 1] = True
                 gate_body_names[ti][1] = list(first_domain_bodies)
+                gate_pre_size[ti, 1] = 0.5
+                gate_post_size[ti, 1] = 0.5
                 num_gates[ti] = 2
             elif tt == _FULL_PERIODIC_INT or tt == _EPISODIC_INT:
                 gate_phi[ti, 0] = 1.0
                 gate_active[ti, 0] = True
                 gate_body_names[ti][0] = list(first_domain_bodies)
+                gate_pre_size[ti, 0] = 1.0
+                gate_post_size[ti, 0] = 1.0
                 num_gates[ti] = 1
             # Perpetual: no gates.
 
         self._gate_phi_table = gate_phi
         self._gate_active_table = gate_active
+        self._gate_pre_size_table = gate_pre_size
+        self._gate_post_size_table = gate_post_size
         self._num_gates_per_traj = num_gates
         self._gate_body_names_per_gate = gate_body_names
         self._max_gates = MAX_GATES

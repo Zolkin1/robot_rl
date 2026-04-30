@@ -36,13 +36,15 @@ class BatchedMultiSkillCommandCfg(BaseTrajectoryCommandCfg):
     for this command).  If ``False``, every env starts at phase 0."""
 
     contact_gate_window_frac: float | None = 0.2
-    """Fraction of the gated period (half-period for half-periodic, full
-    period for full-periodic / episodic) on each side of the gate boundary
-    in which a contact event triggers a phase snap.  Inside the early
-    window (phi just before the gate) an expected contact snaps the phase
-    forward into the new domain.  Inside the late window (phi just past
-    the gate) an expected contact snaps the phase backward to the start of
-    the new domain — same numerical target, no domain change.  Set
+    """Fraction of the local domain (phi distance from the previous gate to
+    this gate) used as the early-fire window.  With ``W=0.1`` a half-period
+    gate gets a 0.05 phi early window and a full-period / episodic gate
+    gets 0.10.  Inside the early window an expected contact snaps the
+    phase forward into the new domain.  The late side is unbounded for
+    fire purposes — any expected contact past the gate snaps the phase
+    backward to the start of the new domain (same numerical target, no
+    domain change).  A gate that ages out almost a full domain past
+    its boundary without firing auto-advances to its next instance.  Set
     ``hold_on_late_contact=True`` for the hold-at-boundary variant.  Set
     to ``None`` to disable contact gating entirely."""
 
@@ -63,11 +65,11 @@ class BatchedMultiSkillCommandCfg(BaseTrajectoryCommandCfg):
     ``gate_phi - eps_phi`` — end of the previous (old) domain — until
     contact arrives, at which point the phase snaps forward into the new
     domain.  If ``False`` (default), phase advances naturally past the
-    gate; an expected contact landing in the late window still produces a
+    gate; an expected contact at any point past the gate produces a
     backward snap to the start of the new domain (no domain change).  If
-    contact never lands in the late window the gate auto-expires and
-    advances to the next instance.  Only used when
-    ``contact_gate_window_frac`` is not ``None``."""
+    contact never lands the gate auto-expires once phase has aged nearly
+    a full domain past it, and the next instance becomes armed.  Only
+    used when ``contact_gate_window_frac`` is not ``None``."""
 
     track_traj_stats: bool = True
     """If ``True``, the underlying :class:`MultiSkillManager` allocates a

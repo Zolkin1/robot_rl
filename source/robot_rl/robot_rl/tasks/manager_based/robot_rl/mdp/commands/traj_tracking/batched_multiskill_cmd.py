@@ -170,27 +170,44 @@ class BatchedMultiSkillCommand(BaseTrajectoryCommand):
         gate_phi = self.manager._gate_phi_table[cur_traj, safe_idx]
         target_active = self.manager._gate_active_table[cur_traj, safe_idx]
         target_mask = self.manager._gate_contact_mask[cur_traj, safe_idx]
+        # Per-env early window scales with the size of the domain *before*
+        # this gate (the phi distance from the previous gate to this one).
+        # ``contact_gate_window_frac`` is therefore interpreted as a
+        # fraction of the local domain, not raw phi: with W=0.1 a
+        # half-period gate gets a 0.05 phi early window and a full-period
+        # gate gets 0.10.  ``post_size`` (size of the domain *after* this
+        # gate) only sets the auto-expiry threshold so the gate stays
+        # armed until just before its next instance.
+        pre_size = self.manager._gate_pre_size_table[cur_traj, safe_idx]
+        post_size = self.manager._gate_post_size_table[cur_traj, safe_idx]
 
         expected_landed = (contact_now & target_mask).any(dim=1)
         usable = active & target_active
 
         W = self.cfg.contact_gate_window_frac
+        W_early = W * pre_size
+        # Auto-expire just before the gate's next instance, mirroring the
+        # legacy persist behaviour (late side is unbounded for fire).
+        expire_threshold = post_size - W * pre_size
+
         # Signed distance from gate (no wrap): positive past, negative
         # before.  We deliberately do NOT wrap with mod 1.0 here so a
         # post-wrap phase isn't mistaken for "just past" the previous
-        # cycle's gate (per the user's "no wrap on late contact"
-        # requirement).  Wrap-driven gate advancement is handled inside
+        # cycle's gate.  Wrap-driven gate advancement is handled inside
         # ``update_phase``.
         signed = phase - gate_phi
 
-        in_early = (signed <= 0.0) & (signed >= -W)
-        in_late = (signed > 0.0) & (signed <= W)
-        # Past the late window without firing — gate has aged out.
-        expired_window = signed > W
+        in_early = (signed <= 0.0) & (signed >= -W_early)
+        # Late side is unbounded for fire purposes — any expected contact
+        # past the gate snaps phase back to the start of the new domain.
+        in_late = signed > 0.0
+        # Past nearly a full domain past the gate without firing — gate
+        # has aged out and the next instance is about to arrive.
+        expired_window = signed > expire_threshold
 
         if not self.cfg.hold_on_late_contact:
             early_fire_mask = usable & in_early & expected_landed
-            late_fire_mask = usable & in_late & expected_landed
+            late_fire_mask = usable & in_late & expected_landed & ~expired_window
             # Auto-advance gates that have aged past the late window
             # without firing.
             auto_adv_mask = usable & expired_window
@@ -205,10 +222,9 @@ class BatchedMultiSkillCommand(BaseTrajectoryCommand):
         else:
             # Hold-on mode: phase that crossed the gate without contact is
             # pulled back to the end of the old domain each step.  Contact
-            # in the early window OR landing while held releases via
-            # snap_phase_to_new_domain.
-            crossed_no_contact = usable & (in_late | expired_window) & ~expected_landed
-            crossed_with_contact = usable & (in_late | expired_window) & expected_landed
+            # anywhere past the gate releases via snap_phase_to_new_domain.
+            crossed_no_contact = usable & in_late & ~expected_landed
+            crossed_with_contact = usable & in_late & expected_landed
             early_fire_mask = usable & in_early & expected_landed
 
             end_prev_ids = torch.where(crossed_no_contact)[0]
@@ -237,6 +253,7 @@ class BatchedMultiSkillCommand(BaseTrajectoryCommand):
         directly).  We cache the result keyed by ``episode_length_buf``
         and short-circuit the second call.
         """
+        # TODO: Should probably check all of this again
         ep_len = self.env.episode_length_buf
         if (
             self._last_compute_step is not None
