@@ -1099,6 +1099,8 @@ class MultiSkillManager(ManagerBase):
         traj_type = torch.zeros(T, dtype=torch.long, device=self.device)
         skill_idx_tensor = torch.zeros(T, dtype=torch.long, device=self.device)
         num_original_domains = torch.zeros(T, dtype=torch.long, device=self.device)
+        ref_frame_offset = torch.zeros(T, D_max, 3, device=self.device)
+        origin_relative_to_stair_center = torch.zeros(T, 3, device=self.device)
 
         unique_skills = list(dict.fromkeys(skill_labels))
         skill_name_to_idx = {name: i for i, name in enumerate(unique_skills)}
@@ -1140,12 +1142,19 @@ class MultiSkillManager(ManagerBase):
             # Contact bodies per domain (original domains only)
             bodies_list: list[list[str]] = []
             frames_list: list[str] = []
-            for domain_name in mgr.traj_data.domain_order:
+            for di, domain_name in enumerate(mgr.traj_data.domain_order):
                 dd = mgr.traj_data.domain_data[domain_name]
                 bodies_list.append(list(dd.contact_bodies))
                 frames_list.append(dd.bezier_frame)
+                ref_frame_offset[i, di, :] = dd.ref_frame_offset
+                if mgr.traj_data.trajectory_type == TrajectoryType.HALF_PERIODIC:
+                    # Reflected half reuses the same offset.
+                    ref_frame_offset[i, di + mgr.num_domains, :] = dd.ref_frame_offset
             contact_bodies_per_domain.append(bodies_list)
             ref_frame_per_domain.append(frames_list)
+
+            # Per-trajectory stair-origin offset (top-level YAML field).
+            origin_relative_to_stair_center[i] = mgr.traj_data.origin_relative_to_stair_center
 
         self.data = TensorDict(
             {
@@ -1158,6 +1167,8 @@ class MultiSkillManager(ManagerBase):
                 "num_original_domains": num_original_domains,
                 "traj_type": traj_type,
                 "skill_idx": skill_idx_tensor,
+                "ref_frame_offset": ref_frame_offset,
+                "origin_relative_to_stair_center": origin_relative_to_stair_center,
             },
             batch_size=[T],
             device=self.device,

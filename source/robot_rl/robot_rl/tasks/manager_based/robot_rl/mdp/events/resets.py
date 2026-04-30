@@ -141,10 +141,25 @@ def reset_on_reference(
     base_ori_quat_w = y_sampled[:, ori_indices]  # Shape: [num_env, 4] - quaternion (x, y, z, w)
 
     # Add the ground->ankle_roll_link offset
-    base_pos_rel[:, 2] += base_z_offset
+    # base_pos_rel[:, 2] += base_z_offset   # TODO: Delete
+
+    # Per-env spawn offset = stair-origin offset (per-trajectory, top-level YAML)
+    # + ref-frame offset (per-domain). Spline outputs are ref-frame-relative, so
+    # both the spawn pose and the stored ref pose must shift by the same amount —
+    # keeps ``robot_body - ref_frame == trajectory_value`` after the reset.
+    # Assumes the stair origin lives at the env origin (= 0 in stair-local coords).
+    if _phase_based:
+        domain_idx = cmd.manager.get_current_domains(random_times, env_ids=ref_ids)
+        ref_offset = cmd.manager.data["ref_frame_offset"][ref_traj_idx, domain_idx]
+        stair_offset = cmd.manager.data["origin_relative_to_stair_center"][ref_traj_idx]
+    else:
+        domain_idx = cmd.manager.get_current_domains(random_times)
+        ref_offset = cmd.manager.ref_frame_offset_per_domain[domain_idx]
+        stair_offset = cmd.manager.origin_relative_to_stair_center.expand(num_ref_envs, -1)
+    spawn_offset = ref_offset + stair_offset
 
     # Compute world-frame base pose
-    base_pos_w = base_pos_rel + env.scene.env_origins[ref_ids]
+    base_pos_w = base_pos_rel + env.scene.env_origins[ref_ids] + spawn_offset
 
     # Build pose tensor: [x, y, z, qx, qy, qz, qw]
     base_pose = torch.cat([base_pos_w, base_ori_quat_w], dim=-1)
@@ -161,8 +176,8 @@ def reset_on_reference(
     base_vel = torch.cat([dy_sampled[:, lin_vel_indices], dy_sampled[:, ang_vel_indices]], dim=-1) #torch.zeros(num_env, 6, device=env.device)
 
 
-    # Set the reference frame to env origin with identity quaternion (x,y,z,w)
-    cmd.ref_poses[ref_ids, :3] = env.scene.env_origins[ref_ids]
+    # Set the reference frame at env_origin + spawn_offset (identity quaternion).
+    cmd.ref_poses[ref_ids, :3] = env.scene.env_origins[ref_ids] + spawn_offset
     cmd.ref_poses[ref_ids, 3:6] = 0.0
     cmd.ref_poses[ref_ids, 6] = 1.0
 

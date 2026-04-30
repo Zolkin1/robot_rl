@@ -30,6 +30,7 @@ class DomainData:
     time: float
     bezier_frame: str           # Frame of reference used for the splines
     bezier_frame_domain: str    # Domain in which the frame was measured
+    ref_frame_offset: torch.Tensor  # [3] world-frame offset added to env_origin at spawn
 
 @dataclass
 class TrajectoryData:
@@ -45,6 +46,7 @@ class TrajectoryData:
     total_time: float
     conditioner: list[float]
     reference_frames: list[str]     # List of the bezier frames
+    origin_relative_to_stair_center: torch.Tensor  # [3] world offset to stair origin
 
 
 class TrajectoryManager(ManagerBase):
@@ -82,6 +84,23 @@ class TrajectoryManager(ManagerBase):
             self.domain_boundaries = torch.cumsum(torch.cat([torch.tensor([0.0], device=self.device), self.T]), dim=0)
         else:
             self.domain_boundaries = torch.cumsum(torch.cat([torch.tensor([0.0], device=self.device), self.T, self.T]), dim=0)
+
+        # Per-trajectory stair-origin offset (top-level YAML field). Shape [3].
+        self.origin_relative_to_stair_center = self.traj_data.origin_relative_to_stair_center
+
+        # Per-(expanded-)domain reference-frame offset, [expanded_num_domains, 3].
+        # Half-periodic trajectories reuse the same offset for the reflected half;
+        # if a future trajectory ever needs a sagittal-mirrored offset, flip the y
+        # component for indices >= num_domains.
+        self.ref_frame_offset_per_domain = torch.zeros(
+            self.expanded_num_domains, 3, device=self.device
+        )
+        for i, domain in enumerate(self.traj_data.domain_order):
+            self.ref_frame_offset_per_domain[i] = self.traj_data.domain_data[domain].ref_frame_offset
+            if self.traj_data.trajectory_type == TrajectoryType.HALF_PERIODIC:
+                self.ref_frame_offset_per_domain[i + self.num_domains] = (
+                    self.traj_data.domain_data[domain].ref_frame_offset
+                )
 
         # Pre-compute relabeling matrices as tensors (separate for pos and vel)
         R_pos_numpy = self.relable_ee_stance_coeffs(self.traj_data.pos_output_names)
@@ -273,7 +292,12 @@ class TrajectoryManager(ManagerBase):
                 time=domain_yaml['T'][0],
                 contact_bodies=domain_yaml.get('contact_bodies', []),
                 bezier_frame=domain_yaml['ref_frame'],
-                bezier_frame_domain=domain_yaml['ref_frame_domain']
+                bezier_frame_domain=domain_yaml['ref_frame_domain'],
+                ref_frame_offset=torch.tensor(
+                    domain_yaml.get('ref_frame_offset', [0.0, 0.0, 0.0]),
+                    dtype=torch.float32,
+                    device=self.device,
+                ),
             )
 
             domain_data_dict[domain] = domain_data
@@ -302,6 +326,12 @@ class TrajectoryManager(ManagerBase):
             conditioner=data['conditioner'],
             # Reference frames
             reference_frames=ref_frames,
+            # Stair origin offset (top-level YAML field; defaults to zero for non-stair trajectories).
+            origin_relative_to_stair_center=torch.tensor(
+                data.get('origin_relative_to_stair_center', [0.0, 0.0, 0.0]),
+                dtype=torch.float32,
+                device=self.device,
+            ),
         )
 
     def get_reference_frames(self) -> list[str]:

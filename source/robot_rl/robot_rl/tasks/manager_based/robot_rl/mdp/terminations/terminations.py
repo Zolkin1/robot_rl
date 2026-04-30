@@ -69,3 +69,26 @@ def base_orientation(env, cmd_name: str, roll_limit_deg: float = 30.0, pitch_lim
     orientation_flag = roll_exceeded | pitch_exceeded
 
     return orientation_flag
+
+
+def illegal_terrain_contact(
+    env, threshold: float, sensor_cfg: SceneEntityCfg
+) -> torch.Tensor:
+    """Terminate when the peak contact force on any of the sensor's bodies
+    exceeds ``threshold``.
+
+    Mirrors :func:`isaaclab.envs.mdp.terminations.illegal_contact` and reads
+    unfiltered :attr:`ContactSensor.data.net_forces_w_history`. Backend-level
+    filtering of contact partners (e.g. terrain-only) does not work reliably
+    against the static terrain mesh in the Newton backend, so instead we set
+    ``threshold`` high enough that incidental self-collision forces don't trip
+    the termination — only a hard impact (e.g. torso/thigh striking a stair)
+    will. The "terrain" in the name reflects the intent.
+    """
+    contact_sensor = env.scene.sensors[sensor_cfg.name]
+    net_contact_forces = wp.to_torch(contact_sensor.data.net_forces_w_history)
+    body_slice = sensor_cfg.body_ids if sensor_cfg.body_ids is not None else slice(None)
+    return torch.any(
+        torch.max(torch.norm(net_contact_forces[:, :, body_slice], dim=-1), dim=1)[0] > threshold,
+        dim=1,
+    )
