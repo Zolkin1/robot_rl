@@ -9,7 +9,7 @@ from isaaclab.utils import configclass
 
 from isaaclab.terrains.sub_terrain_cfg import SubTerrainBaseCfg
 from isaaclab.terrains.trimesh.utils import make_border
-from robot_rl.tasks.manager_based.robot_rl.terrains.stair import progressive_x_stairs_terrain, single_staircase_terrain
+from robot_rl.tasks.manager_based.robot_rl.terrains.trimesh.stair import progressive_x_stairs_terrain, single_staircase_terrain
 
 
 @configclass

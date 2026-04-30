@@ -9,7 +9,7 @@ import isaaclab.terrains as terrain_gen
 
 from isaaclab.terrains.terrain_generator_cfg import TerrainGeneratorCfg
 
-from robot_rl.tasks.manager_based.robot_rl.terrains.stair_cfg import MeshUniformXStairsTerrainCfg
+from robot_rl.tasks.manager_based.robot_rl.terrains.trimesh.stair_cfg import MeshUniformXStairsTerrainCfg
 
 CUSTOM_STAIR_CFG = TerrainGeneratorCfg(
     size=(10.0, 10.0),

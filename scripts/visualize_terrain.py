@@ -9,11 +9,11 @@ Examples:
 
     # robot_rl custom stair generator
     ./isaaclab.sh -p scripts/visualize_terrain.py \
-        --terrain=robot_rl.tasks.manager_based.robot_rl.terrains.rough:CUSTOM_STAIR_CFG
+        --terrain=robot_rl.tasks.manager_based.robot_rl.terrains.config.rough:CUSTOM_STAIR_CFG
 
     # one progressive stairs sub-terrain (auto-wrapped into a generator)
     ./isaaclab.sh -p scripts/visualize_terrain.py \
-        --terrain=robot_rl.tasks.manager_based.robot_rl.terrains.stair_cfg:MeshProgressiveXStairsTerrainCfg \
+        --terrain=robot_rl.tasks.manager_based.robot_rl.terrains.trimesh.stair_cfg:MeshProgressiveXStairsTerrainCfg \
         --num_rows=4 --num_cols=4 --color_scheme=random
 
     # IsaacLab's stock rough cfg as a sanity check

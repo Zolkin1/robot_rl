@@ -5,7 +5,7 @@ import numpy as np
 from isaaclab.terrains.trimesh.utils import make_border
 
 if TYPE_CHECKING:
-    from robot_rl.tasks.manager_based.robot_rl.terrains.stair_cfg import MeshProgressiveXStairsTerrainCfg, MeshUniformXStairsTerrainCfg
+    from robot_rl.tasks.manager_based.robot_rl.terrains.trimesh.stair_cfg import MeshProgressiveXStairsTerrainCfg, MeshUniformXStairsTerrainCfg
 
 
 def progressive_x_stairs_terrain(

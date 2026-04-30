@@ -3,4 +3,4 @@
 #
 # SPDX-License-Identifier: BSD-3-Clause
 
-from .stair_cfg import MeshProgressiveXStairsTerrainCfg, MeshUniformXStairsTerrainCfg
+from .trimesh.stair_cfg import MeshProgressiveXStairsTerrainCfg, MeshUniformXStairsTerrainCfg
