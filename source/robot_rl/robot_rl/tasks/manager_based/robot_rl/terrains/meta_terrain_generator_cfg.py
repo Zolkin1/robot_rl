@@ -19,7 +19,7 @@ from dataclasses import field
 from isaaclab.utils import configclass
 from isaaclab.terrains.terrain_generator_cfg import TerrainGeneratorCfg
 
-from . import MetaTerrainGenerator
+from .meta_terrain_generator import MetaTerrainGenerator
 
 
 @configclass

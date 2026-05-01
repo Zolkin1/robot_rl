@@ -143,7 +143,7 @@ class G1ClfTrackingCommandCfg:
         rel_closed_loop=0.5, #0.55,
         rel_closed_loop_yaw=0.25,
         rel_open_loop=0.2,
-        debug_vis=True,
+        debug_vis=False,
         ranges=VelocityTrackingCommandCfg.VelRanges(
             lin_vel_x=(-1.0, 1.0),
             lin_vel_y=(-1.0, 1.0),

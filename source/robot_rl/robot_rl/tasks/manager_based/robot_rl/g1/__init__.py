@@ -78,6 +78,49 @@ if not _registered:
     )
 
     ## =========================================
+    # Walking + Depth Camera (flat scan / image)
+    ## =========================================
+    gym.register(
+        id="G1-walking-clf-depth-scan",
+        entry_point="isaaclab.envs:ManagerBasedRLEnv",
+        disable_env_checker=True,
+        kwargs={
+            "env_cfg_entry_point": f"{__name__}.g1_depth_env_cfg:G1WalkingCLFDepthScanEnvCfg",
+            "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_rl_ppo_cfg:PPORunnerCfg",
+        },
+    )
+
+    gym.register(
+        id="G1-walking-clf-depth-image",
+        entry_point="isaaclab.envs:ManagerBasedRLEnv",
+        disable_env_checker=True,
+        kwargs={
+            "env_cfg_entry_point": f"{__name__}.g1_depth_env_cfg:G1WalkingCLFDepthImageEnvCfg",
+            "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_rl_ppo_cfg:PPORunnerCfg",
+        },
+    )
+
+    gym.register(
+        id="G1-walking-clf-depth-scan-play",
+        entry_point="isaaclab.envs:ManagerBasedRLEnv",
+        disable_env_checker=True,
+        kwargs={
+            "env_cfg_entry_point": f"{__name__}.g1_depth_env_cfg:G1WalkingCLFDepthScanEnvCfg_PLAY",
+            "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_rl_ppo_cfg:PPORunnerCfg",
+        },
+    )
+
+    gym.register(
+        id="G1-walking-clf-depth-image-play",
+        entry_point="isaaclab.envs:ManagerBasedRLEnv",
+        disable_env_checker=True,
+        kwargs={
+            "env_cfg_entry_point": f"{__name__}.g1_depth_env_cfg:G1WalkingCLFDepthImageEnvCfg_PLAY",
+            "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_rl_ppo_cfg:PPORunnerCfg",
+        },
+    )
+
+    ## =========================================
     # Running Trajectory Optimization
     ## =========================================
     gym.register(

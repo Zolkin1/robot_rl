@@ -105,3 +105,4 @@ hf/
 todo-report-*
 
 claude_plans/
+.claude/

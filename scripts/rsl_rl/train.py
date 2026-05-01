@@ -233,6 +233,11 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
             # Debug NaN
             obs = runner.env.get_observations()
             for key, tensor in obs.items():
+                if not isinstance(tensor, torch.Tensor):
+                    # Non-concatenated obs groups arrive as TensorDicts (e.g. CNN-shape
+                    # depth_image groups). torch.isnan doesn't dispatch on them; skip.
+                    print(f"[DEBUG] Pre-learn obs '{key}': non-tensor type={type(tensor).__name__}")
+                    continue
                 nan_count = torch.isnan(tensor).sum().item()
                 print(f"[DEBUG] Pre-learn obs '{key}': shape={tensor.shape}, NaN count={nan_count}")
 
