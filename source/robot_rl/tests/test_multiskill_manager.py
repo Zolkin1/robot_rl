@@ -616,3 +616,312 @@ class TestErrors:
         msm.invalidate_cache()
         with pytest.raises(RuntimeError, match="Cannot auto-populate"):
             msm._ensure_cache()
+
+
+# ---------------------------------------------------------------------------
+# Contact-gate state machinery: phase, next_gate_idx, gate_rel_phi
+# ---------------------------------------------------------------------------
+
+
+class _StubEnv:
+    """Minimal env stub exposing ``step_dt`` for the snap operations."""
+
+    def __init__(self, step_dt: float = 0.02):
+        self.step_dt = step_dt
+
+
+def _find_traj_of_type(msm: MultiSkillManager, type_int: int) -> int:
+    """Return the index of the first trajectory of the given type, or -1."""
+    for ti in range(msm.num_trajectories):
+        if msm.data["traj_type"][ti].item() == type_int:
+            return ti
+    return -1
+
+
+class TestGateState:
+    """Direct tests for gate-state primitives.
+
+    These exercise ``_refresh_gate_rel_phi``, ``update_phase``,
+    ``_advance_gate_for_envs``, and the three snap methods by manipulating
+    per-env phase state by hand — no IsaacLab env required, just a
+    ``_StubEnv`` exposing ``step_dt`` for the snap path.
+    """
+
+    @pytest.fixture
+    def msm(self) -> MultiSkillManager:
+        """Fresh MSM with a stub env so ``_eps_phi`` works for snap tests."""
+        return MultiSkillManager(
+            path=MERGED_LIBRARY_DIR,
+            device=DEVICE,
+            env=_StubEnv(step_dt=0.02),
+        )
+
+    @pytest.fixture
+    def half_periodic_idx(self, msm) -> int:
+        ti = _find_traj_of_type(msm, 0)  # _HALF_PERIODIC_INT
+        if ti < 0:
+            pytest.skip("No half-periodic trajectory in test data")
+        return ti
+
+    # --- _refresh_gate_rel_phi -------------------------------------------
+
+    def test_refresh_with_active_gate(self, msm, half_periodic_idx):
+        """gate_rel_phi = phase - gate_phi[armed] for active gates."""
+        ti = half_periodic_idx
+        N = 4
+        msm.set_trajectory_indices(torch.full((N,), ti, dtype=torch.long, device=DEVICE))
+        msm._ensure_phase_state(N)
+
+        # Half-periodic gates are at phi=0.5 (gate 0) and phi=1.0 (gate 1).
+        msm.phase[:] = torch.tensor([0.30, 0.50, 0.70, 0.95], device=DEVICE)
+        msm.next_gate_idx[:] = torch.tensor([0, 0, 1, 1], dtype=torch.long, device=DEVICE)
+        msm.gate_rel_phi[:] = -99.0  # poison to ensure refresh writes
+
+        msm._refresh_gate_rel_phi(torch.arange(N, device=DEVICE))
+
+        expected = torch.tensor(
+            [0.30 - 0.50, 0.50 - 0.50, 0.70 - 1.00, 0.95 - 1.00],
+            device=DEVICE,
+        )
+        assert torch.allclose(msm.gate_rel_phi, expected, atol=1e-6)
+
+    def test_refresh_with_inactive_gate_writes_zero(self, msm, half_periodic_idx):
+        """gate_rel_phi = 0 when next_gate_idx == -1, regardless of phase."""
+        ti = half_periodic_idx
+        N = 3
+        msm.set_trajectory_indices(torch.full((N,), ti, dtype=torch.long, device=DEVICE))
+        msm._ensure_phase_state(N)
+
+        msm.phase[:] = torch.tensor([0.10, 0.50, 0.90], device=DEVICE)
+        msm.next_gate_idx[:] = torch.tensor([-1, -1, -1], dtype=torch.long, device=DEVICE)
+        msm.gate_rel_phi[:] = 99.0  # poison
+
+        msm._refresh_gate_rel_phi(torch.arange(N, device=DEVICE))
+
+        assert torch.allclose(msm.gate_rel_phi, torch.zeros(N, device=DEVICE))
+
+    def test_refresh_subset_only(self, msm, half_periodic_idx):
+        """Refresh leaves non-targeted envs untouched."""
+        ti = half_periodic_idx
+        N = 3
+        msm.set_trajectory_indices(torch.full((N,), ti, dtype=torch.long, device=DEVICE))
+        msm._ensure_phase_state(N)
+
+        msm.phase[:] = 0.3
+        msm.next_gate_idx[:] = 0
+        msm.gate_rel_phi[:] = torch.tensor([1.0, 2.0, 3.0], device=DEVICE)
+
+        msm._refresh_gate_rel_phi(torch.tensor([1], device=DEVICE))
+
+        # Only env 1 was refreshed; envs 0 and 2 keep poisoned values.
+        assert msm.gate_rel_phi[0].item() == pytest.approx(1.0)
+        assert msm.gate_rel_phi[1].item() == pytest.approx(0.3 - 0.5, abs=1e-6)
+        assert msm.gate_rel_phi[2].item() == pytest.approx(3.0)
+
+    # --- update_phase: gate_rel_phi accumulation -------------------------
+
+    def test_update_phase_no_wrap(self, msm, half_periodic_idx):
+        """Without a wrap, gate_rel_phi advances by step_dt / total."""
+        ti = half_periodic_idx
+        N = 1
+        msm.set_trajectory_indices(torch.tensor([ti], dtype=torch.long, device=DEVICE))
+        msm._ensure_phase_state(N)
+
+        total = msm.data["total_time"][ti].item()
+        step_dt = 0.02
+        delta = step_dt / total
+
+        msm.phase[:] = 0.30
+        msm.next_gate_idx[:] = 0
+        msm.gate_rel_phi[:] = 0.30 - 0.50
+
+        msm.update_phase(step_dt)
+
+        assert msm.phase[0].item() == pytest.approx(0.30 + delta, abs=1e-6)
+        assert msm.gate_rel_phi[0].item() == pytest.approx((0.30 - 0.50) + delta, abs=1e-6)
+
+    def test_update_phase_wrap_unwraps_gate_rel_phi(self, msm, half_periodic_idx):
+        """Across a phase wrap, gate_rel_phi advances by the un-wrapped delta."""
+        ti = half_periodic_idx
+        N = 1
+        msm.set_trajectory_indices(torch.tensor([ti], dtype=torch.long, device=DEVICE))
+        msm._ensure_phase_state(N)
+
+        total = msm.data["total_time"][ti].item()
+        step_dt = 0.02
+        delta = step_dt / total
+
+        # Set up just before the wrap with gate 1 (phi=1.0) armed.
+        prev_phase = 1.0 - 0.5 * delta  # advancing will cross 1.0
+        msm.phase[:] = prev_phase
+        msm.next_gate_idx[:] = 1
+        msm.gate_rel_phi[:] = prev_phase - 1.0  # small negative
+
+        msm.update_phase(step_dt)
+
+        # phase wrapped to a small positive
+        assert msm.phase[0].item() < prev_phase
+        # gate_rel_phi advanced by exactly delta (no wrap effect)
+        expected = (prev_phase - 1.0) + delta
+        assert msm.gate_rel_phi[0].item() == pytest.approx(expected, abs=1e-6)
+        # The wrap moved us from before the gate to past it.
+        assert msm.gate_rel_phi[0].item() > 0.0
+
+    def test_update_phase_does_not_advance_next_gate_idx(self, msm, half_periodic_idx):
+        """update_phase must not call _advance_gate_for_envs (auto-advance gone)."""
+        ti = half_periodic_idx
+        N = 1
+        msm.set_trajectory_indices(torch.tensor([ti], dtype=torch.long, device=DEVICE))
+        msm._ensure_phase_state(N)
+
+        # Phase set up to wrap with gate 1 (phi=1.0) armed — historically
+        # would have triggered wrap-advance. Must NOT advance now.
+        total = msm.data["total_time"][ti].item()
+        step_dt = 0.02
+        delta = step_dt / total
+
+        msm.phase[:] = 1.0 - 0.5 * delta
+        msm.next_gate_idx[:] = 1
+        msm._refresh_gate_rel_phi(torch.tensor([0], device=DEVICE))
+
+        msm.update_phase(step_dt)
+
+        assert msm.next_gate_idx[0].item() == 1, (
+            "update_phase should no longer auto-advance the gate index — "
+            "gate hand-off now happens via late-fire on contact."
+        )
+
+    # --- _advance_gate_for_envs ------------------------------------------
+
+    def test_advance_half_periodic_0_to_1(self, msm, half_periodic_idx):
+        """Half-periodic gate 0 → 1; gate_rel_phi recomputed against phi=1.0."""
+        ti = half_periodic_idx
+        N = 1
+        msm.set_trajectory_indices(torch.tensor([ti], dtype=torch.long, device=DEVICE))
+        msm._ensure_phase_state(N)
+
+        msm.phase[:] = 0.60  # past gate 0
+        msm.next_gate_idx[:] = 0
+        msm.gate_rel_phi[:] = 0.10
+
+        msm._advance_gate_for_envs(torch.tensor([0], device=DEVICE))
+
+        assert msm.next_gate_idx[0].item() == 1
+        # gate_rel_phi = phase - gate_phi[1] = 0.6 - 1.0 = -0.4
+        assert msm.gate_rel_phi[0].item() == pytest.approx(-0.40, abs=1e-6)
+
+    def test_advance_half_periodic_1_to_0(self, msm, half_periodic_idx):
+        """Half-periodic gate 1 → 0 (wraps); gate_rel_phi against phi=0.5."""
+        ti = half_periodic_idx
+        N = 1
+        msm.set_trajectory_indices(torch.tensor([ti], dtype=torch.long, device=DEVICE))
+        msm._ensure_phase_state(N)
+
+        msm.phase[:] = 0.05  # post-wrap phase
+        msm.next_gate_idx[:] = 1
+
+        msm._advance_gate_for_envs(torch.tensor([0], device=DEVICE))
+
+        assert msm.next_gate_idx[0].item() == 0
+        assert msm.gate_rel_phi[0].item() == pytest.approx(0.05 - 0.50, abs=1e-6)
+
+    def test_advance_episodic_to_neg_one_zeros_gate_rel_phi(self, msm):
+        """Episodic last gate fire → gate_idx=-1, gate_rel_phi=0."""
+        ti = _find_traj_of_type(msm, 2)  # _EPISODIC_INT
+        if ti < 0:
+            pytest.skip("No episodic trajectory in test data")
+        N = 1
+        msm.set_trajectory_indices(torch.tensor([ti], dtype=torch.long, device=DEVICE))
+        msm._ensure_phase_state(N)
+
+        # Episodic has one gate at phi=1.0; advancing past it sets gate=-1.
+        msm.phase[:] = 1.0
+        msm.next_gate_idx[:] = 0
+        msm.gate_rel_phi[:] = 99.0  # poison
+
+        msm._advance_gate_for_envs(torch.tensor([0], device=DEVICE))
+
+        assert msm.next_gate_idx[0].item() == -1
+        assert msm.gate_rel_phi[0].item() == 0.0
+
+    # --- snap operations -------------------------------------------------
+
+    def test_snap_to_new_domain(self, msm, half_periodic_idx):
+        """Early-fire snap: phase → gate_phi+eps, gate advances, gate_rel_phi consistent."""
+        ti = half_periodic_idx
+        N = 1
+        msm.set_trajectory_indices(torch.tensor([ti], dtype=torch.long, device=DEVICE))
+        msm._ensure_phase_state(N)
+
+        msm.phase[:] = 0.46  # in early window of gate 0 (phi=0.5)
+        msm.next_gate_idx[:] = 0
+
+        total = msm.data["total_time"][ti].item()
+        eps = msm.env.step_dt / total
+
+        msm.snap_phase_to_new_domain(torch.tensor([0], device=DEVICE))
+
+        assert msm.next_gate_idx[0].item() == 1
+        assert msm.phase[0].item() == pytest.approx(0.50 + eps, abs=1e-6)
+        # gate_rel_phi = (0.5 + eps) - 1.0
+        assert msm.gate_rel_phi[0].item() == pytest.approx(-0.50 + eps, abs=1e-6)
+
+    def test_snap_to_start_of_current_domain(self, msm, half_periodic_idx):
+        """Late-fire snap: same numerical target as new-domain snap."""
+        ti = half_periodic_idx
+        N = 1
+        msm.set_trajectory_indices(torch.tensor([ti], dtype=torch.long, device=DEVICE))
+        msm._ensure_phase_state(N)
+
+        msm.phase[:] = 0.62  # past gate 0
+        msm.next_gate_idx[:] = 0
+
+        total = msm.data["total_time"][ti].item()
+        eps = msm.env.step_dt / total
+
+        msm.snap_phase_to_start_of_current_domain(torch.tensor([0], device=DEVICE))
+
+        assert msm.next_gate_idx[0].item() == 1
+        assert msm.phase[0].item() == pytest.approx(0.50 + eps, abs=1e-6)
+        assert msm.gate_rel_phi[0].item() == pytest.approx(-0.50 + eps, abs=1e-6)
+
+    def test_snap_to_end_of_previous_domain(self, msm, half_periodic_idx):
+        """Hold-on snap: phase pulls back, gate idx unchanged, gate_rel_phi=-eps."""
+        ti = half_periodic_idx
+        N = 1
+        msm.set_trajectory_indices(torch.tensor([ti], dtype=torch.long, device=DEVICE))
+        msm._ensure_phase_state(N)
+
+        msm.phase[:] = 0.55
+        msm.next_gate_idx[:] = 0
+
+        total = msm.data["total_time"][ti].item()
+        eps = msm.env.step_dt / total
+
+        msm.snap_phase_to_end_of_previous_domain(torch.tensor([0], device=DEVICE))
+
+        # Gate not advanced — still waiting for the contact.
+        assert msm.next_gate_idx[0].item() == 0
+        assert msm.phase[0].item() == pytest.approx(0.50 - eps, abs=1e-6)
+        # gate_rel_phi = (0.5 - eps) - 0.5 = -eps
+        assert msm.gate_rel_phi[0].item() == pytest.approx(-eps, abs=1e-6)
+
+    def test_snap_phi_1_gate_wraps_to_eps(self, msm, half_periodic_idx):
+        """Snap on phi=1.0 gate wraps phase to eps (mod 1.0)."""
+        ti = half_periodic_idx
+        N = 1
+        msm.set_trajectory_indices(torch.tensor([ti], dtype=torch.long, device=DEVICE))
+        msm._ensure_phase_state(N)
+
+        msm.phase[:] = 0.97  # in early window of gate 1 (phi=1.0)
+        msm.next_gate_idx[:] = 1
+
+        total = msm.data["total_time"][ti].item()
+        eps = msm.env.step_dt / total
+
+        msm.snap_phase_to_new_domain(torch.tensor([0], device=DEVICE))
+
+        assert msm.next_gate_idx[0].item() == 0
+        assert msm.phase[0].item() == pytest.approx(eps, abs=1e-6)
+        # gate_rel_phi = eps - 0.5
+        assert msm.gate_rel_phi[0].item() == pytest.approx(eps - 0.50, abs=1e-6)

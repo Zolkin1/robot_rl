@@ -40,11 +40,11 @@ class BatchedMultiSkillCommandCfg(BaseTrajectoryCommandCfg):
     this gate) used as the early-fire window.  With ``W=0.1`` a half-period
     gate gets a 0.05 phi early window and a full-period / episodic gate
     gets 0.10.  Inside the early window an expected contact snaps the
-    phase forward into the new domain.  The late side is unbounded for
-    fire purposes — any expected contact past the gate snaps the phase
-    backward to the start of the new domain (same numerical target, no
-    domain change).  A gate that ages out almost a full domain past
-    its boundary without firing auto-advances to its next instance.  Set
+    phase forward into the new domain.  The late side is unbounded — any
+    expected contact past the gate snaps the phase backward to the start
+    of the new domain, no matter how late.  The gate stays armed until
+    that contact lands; the manager's monotonic ``gate_rel_phi`` handles
+    cycle wraps so phi=1.0 gates work without special-casing.  Set
     ``hold_on_late_contact=True`` for the hold-at-boundary variant.  Set
     to ``None`` to disable contact gating entirely."""
 
@@ -66,10 +66,9 @@ class BatchedMultiSkillCommandCfg(BaseTrajectoryCommandCfg):
     contact arrives, at which point the phase snaps forward into the new
     domain.  If ``False`` (default), phase advances naturally past the
     gate; an expected contact at any point past the gate produces a
-    backward snap to the start of the new domain (no domain change).  If
-    contact never lands the gate auto-expires once phase has aged nearly
-    a full domain past it, and the next instance becomes armed.  Only
-    used when ``contact_gate_window_frac`` is not ``None``."""
+    backward snap to the start of the new domain (no domain change).
+    The gate stays armed indefinitely until contact lands.  Only used
+    when ``contact_gate_window_frac`` is not ``None``."""
 
     track_traj_stats: bool = True
     """If ``True``, the underlying :class:`MultiSkillManager` allocates a

@@ -2,8 +2,13 @@ from isaaclab.managers import SceneEntityCfg
 from isaaclab.managers import TerminationTermCfg as DoneTerm
 from isaaclab.utils import configclass
 
+from isaaclab.managers import ObservationTermCfg as ObsTerm
+from isaaclab.sensors import RayCasterCfg, patterns
+from isaaclab.utils.noise import UniformNoiseCfg as Unoise
+
 from robot_rl.tasks.manager_based.robot_rl import mdp
-from robot_rl.tasks.manager_based.robot_rl.g1.g1_clf_multiskill_base import G1MultiSkillCLFEnvCfg
+from robot_rl.tasks.manager_based.robot_rl.g1.g1_clf_tracking_base import G1ClfTrackingSceneCfg
+from robot_rl.tasks.manager_based.robot_rl.g1.g1_clf_multiskill_base import G1MultiSkillCLFEnvCfg, G1MultiSkillObservationCfg
 from robot_rl.tasks.manager_based.robot_rl.terrains import LONG_STAIRS_CFG
 
 # Body-contact sensors (declared on the base scene cfg) that should terminate the
@@ -16,10 +21,71 @@ _TERRAIN_CONTACT_TERMINATION_SENSORS = (
     "right_elbow_contact",
 )
 
+@configclass
+class G1StairsTrackingSceneCfg(G1ClfTrackingSceneCfg):
+    """Configuration for the terrain scene with a legged robot."""
+    # sensors
+    height_scanner = RayCasterCfg(
+        prim_path="{ENV_REGEX_NS}/Robot/Geometry/pelvis_link",
+        offset=RayCasterCfg.OffsetCfg(pos=(0.0, 0.0, 20.0)),
+        ray_alignment="yaw",
+        pattern_cfg=patterns.GridPatternCfg(resolution=0.1, size=[1.6, 1.0]),
+        debug_vis=False,
+        mesh_prim_paths=["/World/ground"],
+    )
+
+@configclass
+class G1StairsObservationCfg(G1MultiSkillObservationCfg):
+
+    @configclass
+    class PolicyCfg(G1MultiSkillObservationCfg.PolicyCfg):
+        sin_phase = None
+        cos_phase = None
+
+        # Trying the actor with the traj ref and traj actual
+        ref_traj = ObsTerm(func=mdp.ref_traj, params={"command_name": "traj_ref"})
+        act_traj = ObsTerm(func=mdp.act_traj, params={"command_name": "traj_ref"})
+        ref_traj_vel = ObsTerm(func=mdp.ref_traj_vel, params={"command_name": "traj_ref"}, clip=(-20.0, 20.0,))
+        act_traj_vel = ObsTerm(func=mdp.act_traj_vel, params={"command_name": "traj_ref"}, clip=(-20.0, 20.0,))
+
+        height_scan = ObsTerm(
+            func=mdp.height_scan,
+            params={"sensor_cfg": SceneEntityCfg("height_scanner")},
+            noise=Unoise(n_min=-0.1, n_max=0.1),
+            clip=(-1.0, 1.0),
+        )
+
+    @configclass
+    class CriticCfg(G1MultiSkillObservationCfg.CriticCfg):
+        sin_phase = None
+        cos_phase = None
+
+        height_scan = ObsTerm(
+            func=mdp.height_scan,
+            params={"sensor_cfg": SceneEntityCfg("height_scanner")},
+            noise=Unoise(n_min=-0.1, n_max=0.1),
+            clip=(-1.0, 1.0),
+        )
+
+    @configclass
+    class StudentCfg(PolicyCfg):
+        # skill_one_hot = ObsTerm(func=mdp.skill_one_hot, params={"command_name": "base_velocity"})
+        ref_traj = None
+        act_traj = None
+        ref_traj_vel = None
+        act_traj_vel = None
+
+    policy: PolicyCfg = PolicyCfg()
+    critic: CriticCfg = CriticCfg()
+    student: StudentCfg = StudentCfg()
+
 
 @configclass
 class G1StairsCLFEnvCfg(G1MultiSkillCLFEnvCfg):
     """Config for the G1 for walking."""
+    scene: G1StairsTrackingSceneCfg = G1StairsTrackingSceneCfg(num_envs=4096, env_spacing=2.5)
+    observations: G1StairsObservationCfg = G1StairsObservationCfg()
+
 
     def __post_init__(self):
         # Post init of parent
@@ -47,7 +113,7 @@ class G1StairsCLFEnvCfg(G1MultiSkillCLFEnvCfg):
         self.scene.terrain.terrain_type = "generator"
         self.scene.terrain.terrain_generator = LONG_STAIRS_CFG
         self.scene.terrain.max_init_terrain_level = 0
-        self.scene.height_scanner = None
+        # self.scene.height_scanner = None
 
         ##
         # Terminations: end the episode if any non-foot body takes a hard hit.
@@ -89,4 +155,5 @@ class G1StairsCLFEnvCfg_PLAY(G1StairsCLFEnvCfg):
         self.events.gain_randomization = None
 
         self.commands.base_velocity.debug_vis = False
+        self.scene.height_scanner.debug_vis = True
 

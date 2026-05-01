@@ -280,8 +280,13 @@ class MultiSkillManager(ManagerBase):
         # by ``step_dt / total_time`` each step (wrap for periodic, clamp
         # for episodic, perpetual stays at 0).  ``next_gate_idx`` is the
         # contact-gate currently armed per env, or -1 if none.
+        # ``gate_rel_phi`` is signed phi-distance from the armed gate
+        # (positive = past, negative = before), accumulated monotonically
+        # — does NOT wrap with ``phase``.  Re-anchored on every gate
+        # (re)arm by :meth:`_refresh_gate_rel_phi`.
         self.phase: Tensor | None = None
         self.next_gate_idx: Tensor | None = None
+        self.gate_rel_phi: Tensor | None = None
 
     # ------------------------------------------------------------------
     # Loading helpers
@@ -1362,12 +1367,10 @@ class MultiSkillManager(ManagerBase):
         gate_phi = torch.zeros(T, MAX_GATES, device=self.device)
         gate_active = torch.zeros(T, MAX_GATES, dtype=torch.bool, device=self.device)
         # Phi-distance from the previous gate (wrapping for periodic types)
-        # to this gate, and from this gate to the next.  Used to scale the
-        # contact-gate window in the command term so a configured
-        # ``contact_gate_window_frac`` is interpreted as "fraction of the
-        # local domain", not raw phi.
+        # to this gate.  Used to scale the contact-gate early window in
+        # the command term so a configured ``contact_gate_window_frac``
+        # is interpreted as "fraction of the local domain", not raw phi.
         gate_pre_size = torch.ones(T, MAX_GATES, device=self.device)
-        gate_post_size = torch.ones(T, MAX_GATES, device=self.device)
         num_gates = torch.zeros(T, dtype=torch.long, device=self.device)
         gate_body_names: list[list[list[str]]] = [
             [[] for _ in range(MAX_GATES)] for _ in range(T)
@@ -1382,27 +1385,23 @@ class MultiSkillManager(ManagerBase):
                 gate_active[ti, 0] = True
                 gate_body_names[ti][0] = [swap_left_right(b) for b in first_domain_bodies]
                 gate_pre_size[ti, 0] = 0.5
-                gate_post_size[ti, 0] = 0.5
 
                 gate_phi[ti, 1] = 1.0
                 gate_active[ti, 1] = True
                 gate_body_names[ti][1] = list(first_domain_bodies)
                 gate_pre_size[ti, 1] = 0.5
-                gate_post_size[ti, 1] = 0.5
                 num_gates[ti] = 2
             elif tt == _FULL_PERIODIC_INT or tt == _EPISODIC_INT:
                 gate_phi[ti, 0] = 1.0
                 gate_active[ti, 0] = True
                 gate_body_names[ti][0] = list(first_domain_bodies)
                 gate_pre_size[ti, 0] = 1.0
-                gate_post_size[ti, 0] = 1.0
                 num_gates[ti] = 1
             # Perpetual: no gates.
 
         self._gate_phi_table = gate_phi
         self._gate_active_table = gate_active
         self._gate_pre_size_table = gate_pre_size
-        self._gate_post_size_table = gate_post_size
         self._num_gates_per_traj = num_gates
         self._gate_body_names_per_gate = gate_body_names
         self._max_gates = MAX_GATES
@@ -1438,7 +1437,7 @@ class MultiSkillManager(ManagerBase):
     # ------------------------------------------------------------------
 
     def _ensure_phase_state(self, num_envs: int) -> None:
-        """Lazily allocate ``phase`` and ``next_gate_idx`` to size ``num_envs``."""
+        """Lazily allocate ``phase``, ``next_gate_idx``, and ``gate_rel_phi``."""
         if (
             self.phase is not None
             and self.phase.shape[0] == num_envs
@@ -1446,6 +1445,28 @@ class MultiSkillManager(ManagerBase):
             return
         self.phase = torch.zeros(num_envs, device=self.device)
         self.next_gate_idx = -torch.ones(num_envs, dtype=torch.long, device=self.device)
+        self.gate_rel_phi = torch.zeros(num_envs, device=self.device)
+
+    def _refresh_gate_rel_phi(self, env_ids: Tensor) -> None:
+        """Recompute ``gate_rel_phi`` from current phase + armed gate.
+
+        Sets ``gate_rel_phi[i] = phase[i] - gate_phi[next_gate_idx[i]]`` for
+        envs with an active gate, or ``0`` for envs whose gate is ``-1``
+        (perpetual / post-episodic).  Called after any operation that
+        changes which gate is armed (reseed, advance, snap-with-advance).
+
+        Args:
+            env_ids: Env indices to refresh.
+        """
+        if env_ids.numel() == 0:
+            return
+        traj_idx = self._get_global_indices()[env_ids]
+        gate_idx = self.next_gate_idx[env_ids]
+        active = gate_idx >= 0
+        safe_idx = torch.clamp(gate_idx, min=0)
+        gate_phi = self._gate_phi_table[traj_idx, safe_idx]
+        rel = self.phase[env_ids] - gate_phi
+        self.gate_rel_phi[env_ids] = torch.where(active, rel, torch.zeros_like(rel))
 
     def _eps_phi(self, traj_idx: Tensor) -> Tensor:
         """One step's worth of phi for each trajectory.
@@ -1483,6 +1504,7 @@ class MultiSkillManager(ManagerBase):
         num_gates = self._num_gates_per_traj[traj_idx]
         init_idx = torch.where(num_gates > 0, init_idx, -torch.ones_like(init_idx))
         self.next_gate_idx[env_ids] = init_idx
+        self._refresh_gate_rel_phi(env_ids)
 
     def _advance_gate_for_envs(self, env_ids: Tensor) -> None:
         """Advance ``next_gate_idx`` after a fire / expiry.
@@ -1508,6 +1530,7 @@ class MultiSkillManager(ManagerBase):
             last & is_episodic, -torch.ones_like(new_idx), new_idx
         )
         self.next_gate_idx[env_ids] = new_idx
+        self._refresh_gate_rel_phi(env_ids)
 
     def update_phase(
         self, step_dt: float, env_ids: Tensor | None = None
@@ -1515,10 +1538,15 @@ class MultiSkillManager(ManagerBase):
         """Advance ``self.phase`` by ``step_dt / total_time[traj_idx]``.
 
         Half/full periodic phases wrap mod 1.0.  Episodic phases clamp at
-        1.0.  Perpetual phases stay at 0.  When a periodic env's phase
-        wraps past a gate at ``phi == 1.0`` without that gate having
-        fired, ``next_gate_idx`` is advanced so the gate logic doesn't
-        keep checking against a wrapped-past gate.
+        1.0.  Perpetual phases stay at 0.
+
+        ``gate_rel_phi`` advances by the same delta but does *not* wrap or
+        clamp — it tracks signed phi-distance from the currently armed
+        gate monotonically.  The contact-gate logic in the command term
+        reads ``gate_rel_phi`` rather than recomputing ``phase - gate_phi``,
+        which means no wrap-advance is needed for phi=1.0 gates: a missed
+        wrap-gate contact just becomes a (very) late-side fire on the
+        next contact event.
 
         Args:
             step_dt: Sim step duration (seconds).
@@ -1557,20 +1585,17 @@ class MultiSkillManager(ManagerBase):
 
         self.phase[sel] = new_phase
 
-        # Advance ``next_gate_idx`` when the natural phase wrap passes a
-        # gate at phi=1.0 (the "wrap gate").  Without this, the gate
-        # logic would keep checking against a gate the phase has
-        # silently passed via the wrap.
-        wrapped = is_periodic & (new_phase < prev_phase)
-        if wrapped.any():
-            cur_gate_idx = self.next_gate_idx[sel]
-            active = cur_gate_idx >= 0
-            safe_idx = torch.clamp(cur_gate_idx, min=0)
-            cur_gate_phi = self._gate_phi_table[traj_idx, safe_idx]
-            is_wrap_gate = active & (cur_gate_phi >= 1.0 - 1e-6)
-            wrap_advance = wrapped & is_wrap_gate
-            if wrap_advance.any():
-                self._advance_gate_for_envs(sel[wrap_advance])
+        # Advance gate_rel_phi monotonically: undo the periodic wrap so
+        # the value tracks signed distance from the armed gate without
+        # ambiguity.  Perpetual envs don't move; episodic envs use actual
+        # (post-clamp) movement.
+        phi_movement = new_phase - prev_phase
+        phi_movement = torch.where(
+            is_periodic & (new_phase < prev_phase),
+            phi_movement + 1.0,
+            phi_movement,
+        )
+        self.gate_rel_phi[sel] = self.gate_rel_phi[sel] + phi_movement
 
     def reset_phase(self, env_ids: Tensor, randomize: bool = True) -> None:
         """Reset phase for the given envs.
@@ -1656,6 +1681,7 @@ class MultiSkillManager(ManagerBase):
         gate_phi = self._gate_phi_table[traj_idx, gate_idx]
         eps_phi = self._eps_phi(traj_idx)
         self.phase[env_ids] = (gate_phi - eps_phi) % 1.0
+        self._refresh_gate_rel_phi(env_ids)
 
     # ------------------------------------------------------------------
     # Ref frame map building (needs stored metadata)

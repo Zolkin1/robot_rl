@@ -156,7 +156,6 @@ class BatchedMultiSkillCommand(BaseTrajectoryCommand):
             contact_now: ``[N, B]`` boolean tensor of current per-env
                 contact state in ``self.contact_bodies`` order.
         """
-        phase = self.manager.phase
         next_gate_idx = self.manager.next_gate_idx
 
         active = next_gate_idx >= 0
@@ -167,7 +166,6 @@ class BatchedMultiSkillCommand(BaseTrajectoryCommand):
 
         cur_traj = self.manager.get_current_trajectory_indices()
         safe_idx = torch.clamp(next_gate_idx, min=0)
-        gate_phi = self.manager._gate_phi_table[cur_traj, safe_idx]
         target_active = self.manager._gate_active_table[cur_traj, safe_idx]
         target_mask = self.manager._gate_contact_mask[cur_traj, safe_idx]
         # Per-env early window scales with the size of the domain *before*
@@ -175,50 +173,38 @@ class BatchedMultiSkillCommand(BaseTrajectoryCommand):
         # ``contact_gate_window_frac`` is therefore interpreted as a
         # fraction of the local domain, not raw phi: with W=0.1 a
         # half-period gate gets a 0.05 phi early window and a full-period
-        # gate gets 0.10.  ``post_size`` (size of the domain *after* this
-        # gate) only sets the auto-expiry threshold so the gate stays
-        # armed until just before its next instance.
+        # gate gets 0.10.
         pre_size = self.manager._gate_pre_size_table[cur_traj, safe_idx]
-        post_size = self.manager._gate_post_size_table[cur_traj, safe_idx]
 
         expected_landed = (contact_now & target_mask).any(dim=1)
         usable = active & target_active
 
         W = self.cfg.contact_gate_window_frac
         W_early = W * pre_size
-        # Auto-expire just before the gate's next instance, mirroring the
-        # legacy persist behaviour (late side is unbounded for fire).
-        expire_threshold = post_size - W * pre_size
 
-        # Signed distance from gate (no wrap): positive past, negative
-        # before.  We deliberately do NOT wrap with mod 1.0 here so a
-        # post-wrap phase isn't mistaken for "just past" the previous
-        # cycle's gate.  Wrap-driven gate advancement is handled inside
-        # ``update_phase``.
-        signed = phase - gate_phi
+        # ``gate_rel_phi`` is the manager's monotonic signed distance from
+        # the currently armed gate (positive = past, negative = before).
+        # No wrap ambiguity, so a single comparison classifies each env.
+        signed = self.manager.gate_rel_phi
 
         in_early = (signed <= 0.0) & (signed >= -W_early)
-        # Late side is unbounded for fire purposes — any expected contact
-        # past the gate snaps phase back to the start of the new domain.
+        # Late side is fully unbounded — any expected contact past the
+        # gate snaps the phase back to the start of the new domain, no
+        # matter how late.  The gate stays armed until that contact
+        # lands.  For phi=1.0 gates this naturally handles the cycle
+        # boundary: after a phase wrap, ``gate_rel_phi`` becomes positive
+        # and the next contact event fires a late snap.
         in_late = signed > 0.0
-        # Past nearly a full domain past the gate without firing — gate
-        # has aged out and the next instance is about to arrive.
-        expired_window = signed > expire_threshold
 
         if not self.cfg.hold_on_late_contact:
             early_fire_mask = usable & in_early & expected_landed
-            late_fire_mask = usable & in_late & expected_landed & ~expired_window
-            # Auto-advance gates that have aged past the late window
-            # without firing.
-            auto_adv_mask = usable & expired_window
+            late_fire_mask = usable & in_late & expected_landed
 
             early_ids = torch.where(early_fire_mask)[0]
             late_ids = torch.where(late_fire_mask)[0]
-            adv_ids = torch.where(auto_adv_mask)[0]
 
             self.manager.snap_phase_to_new_domain(early_ids)
             self.manager.snap_phase_to_start_of_current_domain(late_ids)
-            self.manager._advance_gate_for_envs(adv_ids)
         else:
             # Hold-on mode: phase that crossed the gate without contact is
             # pulled back to the end of the old domain each step.  Contact
