@@ -284,9 +284,16 @@ class MultiSkillManager(ManagerBase):
         # (positive = past, negative = before), accumulated monotonically
         # — does NOT wrap with ``phase``.  Re-anchored on every gate
         # (re)arm by :meth:`_refresh_gate_rel_phi`.
+        # ``gate_rel_phi_pre_snap`` captures ``gate_rel_phi`` immediately
+        # after :meth:`update_phase` runs and *before* any contact-gate
+        # snap mutates it.  It's the value the gate logic actually
+        # decides on, so it's what the data-logger / play plots should
+        # display to show "how early/late was the contact when the fire
+        # happened."
         self.phase: Tensor | None = None
         self.next_gate_idx: Tensor | None = None
         self.gate_rel_phi: Tensor | None = None
+        self.gate_rel_phi_pre_snap: Tensor | None = None
 
     # ------------------------------------------------------------------
     # Loading helpers
@@ -1437,7 +1444,8 @@ class MultiSkillManager(ManagerBase):
     # ------------------------------------------------------------------
 
     def _ensure_phase_state(self, num_envs: int) -> None:
-        """Lazily allocate ``phase``, ``next_gate_idx``, and ``gate_rel_phi``."""
+        """Lazily allocate ``phase``, ``next_gate_idx``, ``gate_rel_phi``,
+        and ``gate_rel_phi_pre_snap``."""
         if (
             self.phase is not None
             and self.phase.shape[0] == num_envs
@@ -1446,6 +1454,7 @@ class MultiSkillManager(ManagerBase):
         self.phase = torch.zeros(num_envs, device=self.device)
         self.next_gate_idx = -torch.ones(num_envs, dtype=torch.long, device=self.device)
         self.gate_rel_phi = torch.zeros(num_envs, device=self.device)
+        self.gate_rel_phi_pre_snap = torch.zeros(num_envs, device=self.device)
 
     def _refresh_gate_rel_phi(self, env_ids: Tensor) -> None:
         """Recompute ``gate_rel_phi`` from current phase + armed gate.
@@ -1480,7 +1489,7 @@ class MultiSkillManager(ManagerBase):
         if self.env is None or not hasattr(self.env, "step_dt"):
             raise RuntimeError("Manager has no env; cannot compute eps_phi.")
         total = self.data["total_time"][traj_idx]
-        return self.env.step_dt / total
+        return 0.001 #self.env.step_dt / total  # NOTE: I think the step_dt jump was too big
 
     def _reseed_gate_for_envs(self, env_ids: Tensor) -> None:
         """Re-arm ``next_gate_idx`` for the given envs based on their current phase.
@@ -1596,6 +1605,8 @@ class MultiSkillManager(ManagerBase):
             phi_movement,
         )
         self.gate_rel_phi[sel] = self.gate_rel_phi[sel] + phi_movement
+        # Snapshot the post-update, pre-snap value for diagnostic logging.
+        self.gate_rel_phi_pre_snap[sel] = self.gate_rel_phi[sel]
 
     def reset_phase(self, env_ids: Tensor, randomize: bool = True) -> None:
         """Reset phase for the given envs.

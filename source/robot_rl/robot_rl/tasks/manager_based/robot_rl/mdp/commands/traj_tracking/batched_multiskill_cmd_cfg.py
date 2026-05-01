@@ -30,11 +30,6 @@ class BatchedMultiSkillCommandCfg(BaseTrajectoryCommandCfg):
         ".batched_multiskill_cmd:BatchedMultiSkillCommand"
     )
 
-    random_start_phase: bool = True
-    """If ``True``, sample a uniform phase ∈ [0, 1) for each env at the
-    start of an episode (replaces the time-based ``random_start_time_max``
-    for this command).  If ``False``, every env starts at phase 0."""
-
     contact_gate_window_frac: float | None = 0.2
     """Fraction of the local domain (phi distance from the previous gate to
     this gate) used as the early-fire window.  With ``W=0.1`` a half-period

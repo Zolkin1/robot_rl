@@ -248,7 +248,7 @@ class BatchedMultiSkillCommand(BaseTrajectoryCommand):
         ):
             return self._cached_t
 
-        advancing_mask = ep_len < self.env.max_episode_length
+        advancing_mask = (ep_len > 0) & (ep_len < self.env.max_episode_length)
         if advancing_mask.any():
             adv_ids = torch.where(advancing_mask)[0]
             self.manager.update_phase(self.env.step_dt, env_ids=adv_ids)

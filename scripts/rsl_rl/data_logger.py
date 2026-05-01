@@ -108,6 +108,46 @@ class DataLogger:
                     except Exception as exc:
                         self._warn("traj_idx", f"Could not read traj_idx: {exc}")
 
+                # Contact-gate state (multiskill phase-based command only).
+                # ``gate_rel_phi_pre_snap`` is the post-update, pre-snap
+                # value the gate logic actually decided on — what we want
+                # to display so dots land at the true fire-decision
+                # offset (otherwise we'd show the post-snap value, which
+                # is one step off and below the early-fire window).  Fall
+                # back to ``gate_rel_phi`` if the pre-snap snapshot isn't
+                # exposed (older managers).
+                if manager is not None:
+                    grp_pre = getattr(manager, "gate_rel_phi_pre_snap", None)
+                    grp = getattr(manager, "gate_rel_phi", None)
+                    if isinstance(grp_pre, torch.Tensor):
+                        step["gate_rel_phi"] = grp_pre.clone()
+                    elif isinstance(grp, torch.Tensor):
+                        step["gate_rel_phi"] = grp.clone()
+                    ngi = getattr(manager, "next_gate_idx", None)
+                    if isinstance(ngi, torch.Tensor):
+                        step["next_gate_idx"] = ngi.clone()
+
+                    # Early-fire window threshold per env: ``-W * pre_size``
+                    # of the currently armed gate.  Lets the plot draw the
+                    # window edge alongside ``gate_rel_phi`` so you can see
+                    # exactly when the window opens and closes per cycle.
+                    cfg = getattr(ref, "cfg", None)
+                    W = getattr(cfg, "contact_gate_window_frac", None) if cfg else None
+                    pre_table = getattr(manager, "_gate_pre_size_table", None)
+                    if (W is not None and pre_table is not None
+                            and isinstance(ngi, torch.Tensor)):
+                        try:
+                            traj_idx = manager.get_current_trajectory_indices()
+                            active = ngi >= 0
+                            safe = torch.clamp(ngi, min=0)
+                            pre_size = pre_table[traj_idx, safe]
+                            thresh = -float(W) * pre_size
+                            thresh = torch.where(active, thresh, torch.zeros_like(thresh))
+                            step["gate_early_window"] = thresh.clone()
+                        except Exception as exc:
+                            self._warn("gate_early_window",
+                                       f"Could not compute gate_early_window: {exc}")
+
                 # Fallback: if the command doesn't expose phasing_var (e.g.
                 # multiskill, which has no phase state), query phi from the
                 # manager using the command's per-env trajectory clock so

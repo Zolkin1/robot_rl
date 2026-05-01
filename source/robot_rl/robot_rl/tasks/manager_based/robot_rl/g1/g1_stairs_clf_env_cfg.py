@@ -130,6 +130,11 @@ class G1StairsCLFEnvCfg(G1MultiSkillCLFEnvCfg):
                 ),
             )
 
+        self.terminations.base_orientation = DoneTerm(
+            func=mdp.base_orientation,
+            params={"cmd_name": "traj_ref", "roll_limit_deg": 25.0, "pitch_limit_deg": 25.0},
+        )
+
 @configclass
 class G1StairsCLFEnvCfg_PLAY(G1StairsCLFEnvCfg):
     """Configuration for the G1 environment with gait library."""

@@ -295,14 +295,11 @@ def reset_on_reference(
         asset.write_joint_position_to_sim_index(position=joint_pos, env_ids=nonref_ids)
         asset.write_joint_velocity_to_sim_index(velocity=joint_vel, env_ids=nonref_ids)
 
-        # Anchor the non-ref envs' clock too.  Phase-based managers use a
-        # uniform random phase when ``cfg.random_start_phase`` is set;
-        # otherwise zero.  Legacy time-based commands always reset to 0.
+        # Anchor the non-ref envs' clock at phase 0 (start of cycle) so the
+        # trajectory eval roughly matches the default-pose spawn.  Legacy
+        # time-based commands use the equivalent ``init_time_offset = 0``.
         if _phase_based:
-            if getattr(cmd.cfg, "random_start_phase", False):
-                nonref_phase = torch.rand(num_nonref_envs, device=env.device)
-            else:
-                nonref_phase = torch.zeros(num_nonref_envs, device=env.device)
+            nonref_phase = torch.zeros(num_nonref_envs, device=env.device)
             cmd.manager.set_phase(nonref_phase, nonref_ids)
         else:
             cmd.init_time_offset[nonref_ids] = 0.0
