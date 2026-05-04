@@ -125,11 +125,13 @@ def reset_on_reference(
         cmd.manager.invalidate_cache()
         ref_traj_idx = cmd.manager.get_current_trajectory_indices()[ref_ids]
         ref_total = cmd.manager.data["total_time"][ref_traj_idx]
-        random_phase_ref = torch.rand(num_ref_envs, device=env.device)
-        random_times = random_phase_ref * ref_total
+        # random_phase_ref = torch.rand(num_ref_envs, device=env.device)
+        random_times = 0.25 * torch.ones(num_ref_envs, device=env.device) #random_phase_ref * ref_total
+        random_phase_ref = random_times / ref_total
     else:
         total_time = cmd.manager.get_total_time()
-        random_times = torch.rand(num_ref_envs, device=env.device) * total_time
+        # random_times = torch.rand(num_ref_envs, device=env.device) * total_time
+        random_times = 0.25 * torch.ones(num_ref_envs, device=env.device)
 
     # Get trajectory outputs at sampled times
     cmd.get_desired_outputs(random_times, env_ids=ref_ids)
@@ -141,7 +143,7 @@ def reset_on_reference(
     base_ori_quat_w = y_sampled[:, ori_indices]  # Shape: [num_env, 4] - quaternion (x, y, z, w)
 
     # Add the ground->ankle_roll_link offset
-    # base_pos_rel[:, 2] += base_z_offset   # TODO: Delete
+    base_pos_rel[:, 2] += base_z_offset   # TODO: Delete
 
     # Per-env spawn offset = stair-origin offset (per-trajectory, top-level YAML)
     # + ref-frame offset (per-domain). Spline outputs are ref-frame-relative, so

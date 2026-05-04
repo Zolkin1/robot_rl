@@ -36,6 +36,61 @@ import sys
 # Mode 1: diff (no IsaacLab dependency)
 # ---------------------------------------------------------------------------
 
+def _grid_overlay_plot(
+    out_path: str,
+    title: str,
+    time_s,
+    old_arr,
+    new_arr,
+    names,
+    n_cols: int = 4,
+    y_label: str = "value",
+) -> None:
+    """Save a grid plot overlaying OLD vs NEW per dimension.
+
+    ``old_arr`` / ``new_arr`` are ``[T, D]`` numpy arrays.  ``names`` provides
+    per-dimension titles (length ``D``); short ones are auto-padded.
+    """
+    import os as _os
+    import numpy as np
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    n_dims = old_arr.shape[1]
+    n_rows = max(1, (n_dims + n_cols - 1) // n_cols)
+    fig, axs = plt.subplots(n_rows, n_cols, figsize=(4.5 * n_cols, 2.6 * n_rows))
+    axs_flat = np.array(axs).flatten()
+    fig.suptitle(title, fontsize=14)
+
+    T_old = old_arr.shape[0]
+    T_new = new_arr.shape[0]
+    t_old = time_s[:T_old] if time_s is not None else np.arange(T_old)
+    t_new = time_s[:T_new] if time_s is not None else np.arange(T_new)
+
+    for i in range(n_dims):
+        ax = axs_flat[i]
+        ax.plot(t_old, old_arr[:, i], label="OLD", linewidth=1.4)
+        ax.plot(t_new, new_arr[:, i], label="NEW", linestyle="--", linewidth=1.4)
+        name = names[i] if i < len(names) else f"dim {i}"
+        ax.set_title(name, fontsize=8)
+        ax.set_xlabel("Time (s)" if time_s is not None else "step", fontsize=8)
+        ax.set_ylabel(y_label, fontsize=8)
+        ax.tick_params(labelsize=7)
+        ax.grid(True, alpha=0.3)
+        if i == 0:
+            ax.legend(fontsize=7)
+
+    for i in range(n_dims, len(axs_flat)):
+        axs_flat[i].set_visible(False)
+
+    plt.tight_layout(rect=[0, 0.02, 1, 0.96])
+    _os.makedirs(_os.path.dirname(_os.path.abspath(out_path)) or ".", exist_ok=True)
+    plt.savefig(out_path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    print(f"[INFO] Wrote plot: {out_path}")
+
+
 def cmd_diff(argv) -> None:
     """Compare two saved traces element-wise and print a summary."""
     import numpy as np
@@ -43,7 +98,18 @@ def cmd_diff(argv) -> None:
     parser = argparse.ArgumentParser(prog="compare_obs_trace.py diff")
     parser.add_argument("--old", required=True, help="Path to OLD trace pickle")
     parser.add_argument("--new", required=True, help="Path to NEW trace pickle")
+    parser.add_argument("--plot", type=str, default=None,
+                        help="Output directory for OLD-vs-NEW overlay plots "
+                             "(commands.png, joint_pos.png). Skipped if not set.")
+    parser.add_argument("--env_id", type=int, default=0,
+                        help="Which env index to plot when num_envs>1 (default 0).")
+    parser.add_argument("--snapshot_steps", type=str, default="0,1,5,50",
+                        help="Comma-separated timesteps to print per-key abs-diff "
+                             "snapshots for (default: '0,1,5,50'). Useful to "
+                             "distinguish 'diverged from t=0' (RNG/init mismatch) "
+                             "from 'drifted apart over time' (semantic dynamics).")
     args = parser.parse_args(argv)
+    snapshot_steps = [int(s) for s in args.snapshot_steps.split(",") if s.strip()]
 
     with open(args.old, "rb") as f:
         old = pickle.load(f)
@@ -136,6 +202,333 @@ def cmd_diff(argv) -> None:
         print("Earliest divergence:")
         for r in earliest[:5]:
             print(f"  {r[0]} at t={r[4]} (max_abs_diff so far: {r[3]:.6e})")
+
+    # ---- Per-timestep snapshot table -----------------------------------
+    # All keys present in either trace are included; rows where every
+    # snapshot column is zero or missing are suppressed to keep the table
+    # readable.  Keys are grouped (cmd/, obs/policy/, obs/critic/, etc.)
+    # and sorted within each group.
+    snapshot_steps_valid = [t for t in snapshot_steps if 0 <= t < n_steps]
+    if snapshot_steps_valid:
+        # Discover every key present in any of the snapshot timesteps in
+        # either trace.
+        snap_keys: set[str] = set()
+        for t in snapshot_steps_valid:
+            snap_keys.update(old["steps"][t].keys())
+            snap_keys.update(new["steps"][t].keys())
+
+        # Group by top-level prefix for readability: cmd/, obs/policy/,
+        # obs/critic/, obs/student/, mgr/, robot/, then everything else.
+        def _group_of(k: str) -> str:
+            if k.startswith("obs/policy/"): return "1_obs_policy"
+            if k.startswith("obs/critic/"): return "2_obs_critic"
+            if k.startswith("obs/student/"): return "3_obs_student"
+            if k.startswith("obs/"): return "4_obs_other"
+            if k.startswith("cmd/"): return "0_cmd"
+            if k.startswith("mgr/"): return "5_mgr"
+            if k.startswith("robot/"): return "6_robot"
+            return "9_misc"
+
+        sorted_keys = sorted(snap_keys, key=lambda k: (_group_of(k), k))
+
+        print()
+        print(f"--- Per-timestep abs-diff snapshots (max over dims, env={0}) ---")
+        header = f"{'KEY':<36}" + "".join(f"t={t:>5}".rjust(14) for t in snapshot_steps_valid)
+        print(header)
+        print("-" * len(header))
+
+        last_group = None
+        for key in sorted_keys:
+            cells: list[str] = []
+            any_nonzero = False
+            any_present = False
+            for t in snapshot_steps_valid:
+                ov = old["steps"][t].get(key)
+                nv = new["steps"][t].get(key)
+                if ov is None and nv is None:
+                    cells.append(f"{'-':>14}")
+                    continue
+                if ov is None or nv is None:
+                    cells.append(f"{'<missing>':>14}")
+                    any_present = True
+                    continue
+                any_present = True
+                ov_a = np.asarray(ov)
+                nv_a = np.asarray(nv)
+                if ov_a.shape != nv_a.shape:
+                    cells.append(f"{'<shape>':>14}")
+                    continue
+                if ov_a.dtype.kind in ("i", "u", "b"):
+                    d_int = int(np.sum(ov_a != nv_a))
+                    cells.append(f"i:n_diff={d_int:>3}".rjust(14))
+                    if d_int > 0:
+                        any_nonzero = True
+                else:
+                    d_f = float(np.abs(ov_a.astype(np.float64) - nv_a.astype(np.float64)).max())
+                    cells.append(f"{d_f:>14.4e}")
+                    if d_f > 1e-12:
+                        any_nonzero = True
+            if not any_present:
+                continue
+            # Suppress rows that are all zero across the snapshot timesteps —
+            # keeps the table readable.  ``done`` and ``ep_len`` get suppressed.
+            if not any_nonzero:
+                continue
+            grp = _group_of(key)
+            if grp != last_group:
+                print(f"{'-' * 36} {grp.split('_', 1)[1] if '_' in grp else grp}")
+                last_group = grp
+            print(f"{key:<36}" + "".join(cells))
+
+    # ---- Optional overlay plots (commands + joint positions) -----------
+    if args.plot is None:
+        return
+
+    def _stack_field(trace, key, env_id):
+        """Return [T, D] numpy array for ``trace[steps][:][key][env_id, :]``.
+
+        Returns None if the key is missing from any step.
+        """
+        rows_local: list = []
+        for s in trace["steps"]:
+            v = s.get(key)
+            if v is None:
+                return None
+            v = np.asarray(v)
+            if v.ndim == 1:
+                rows_local.append(v[env_id : env_id + 1])
+            elif v.ndim == 2:
+                rows_local.append(v[env_id])
+            else:
+                rows_local.append(v[env_id].reshape(-1))
+        return np.stack(rows_local, axis=0)
+
+    env_id = args.env_id
+    dt = old.get("metadata", {}).get("step_dt") or new.get("metadata", {}).get("step_dt")
+    n_plot = min(len(old["steps"]), len(new["steps"]))
+    time_s = (np.arange(n_plot) * dt) if dt is not None else None
+
+    pos_names = (old.get("metadata", {}).get("ordered_pos_output_names")
+                 or new.get("metadata", {}).get("ordered_pos_output_names")
+                 or [])
+    vel_names = (old.get("metadata", {}).get("ordered_vel_output_names")
+                 or new.get("metadata", {}).get("ordered_vel_output_names")
+                 or [])
+    joint_names = (old.get("metadata", {}).get("joint_names")
+                   or new.get("metadata", {}).get("joint_names")
+                   or [])
+
+    # ---- Commands plot (y_des / y_act / dy_des / dy_act per dim) -------
+    for key, label, names in (
+        ("cmd/y_des", "Reference Position (y_des)", pos_names),
+        ("cmd/y_act", "Measured Position (y_act)", pos_names),
+        ("cmd/dy_des", "Reference Velocity (dy_des)", vel_names),
+        ("cmd/dy_act", "Measured Velocity (dy_act)", vel_names),
+    ):
+        old_arr = _stack_field(old, key, env_id)
+        new_arr = _stack_field(new, key, env_id)
+        if old_arr is None or new_arr is None:
+            print(f"[WARN] Skipping plot for {key}: missing in one trace.")
+            continue
+        n = min(old_arr.shape[0], new_arr.shape[0])
+        out = os.path.join(args.plot, f"{key.replace('/', '_')}.png")
+        _grid_overlay_plot(
+            out_path=out,
+            title=f"{label} — OLD vs NEW (env {env_id})",
+            time_s=time_s[:n] if time_s is not None else None,
+            old_arr=old_arr[:n],
+            new_arr=new_arr[:n],
+            names=names,
+            y_label="position" if "y_des" in key or "y_act" in key else "velocity",
+        )
+
+    # ---- Joint positions plot ------------------------------------------
+    old_jp = _stack_field(old, "robot/joint_pos", env_id)
+    new_jp = _stack_field(new, "robot/joint_pos", env_id)
+    if old_jp is not None and new_jp is not None:
+        n = min(old_jp.shape[0], new_jp.shape[0])
+        out = os.path.join(args.plot, "robot_joint_pos.png")
+        _grid_overlay_plot(
+            out_path=out,
+            title=f"Robot Joint Positions — OLD vs NEW (env {env_id})",
+            time_s=time_s[:n] if time_s is not None else None,
+            old_arr=old_jp[:n],
+            new_arr=new_jp[:n],
+            names=joint_names,
+            y_label="rad",
+        )
+    else:
+        print("[WARN] Skipping joint_pos plot: 'robot/joint_pos' missing in one or both traces.")
+
+    # ---- Base velocity command plot ------------------------------------
+    old_bv = _stack_field(old, "cmd/base_velocity", env_id)
+    new_bv = _stack_field(new, "cmd/base_velocity", env_id)
+    if old_bv is not None and new_bv is not None:
+        n = min(old_bv.shape[0], new_bv.shape[0])
+        # Standard channel names: lin_x, lin_y, ang_z (+ optional heading).
+        bv_names = ["lin_vel_x", "lin_vel_y", "ang_vel_z", "heading"][:old_bv.shape[1]]
+        out = os.path.join(args.plot, "cmd_base_velocity.png")
+        _grid_overlay_plot(
+            out_path=out,
+            title=f"Commanded Base Velocity — OLD vs NEW (env {env_id})",
+            time_s=time_s[:n] if time_s is not None else None,
+            old_arr=old_bv[:n],
+            new_arr=new_bv[:n],
+            names=bv_names,
+            n_cols=min(len(bv_names), 4),
+            y_label="m/s or rad/s",
+        )
+    else:
+        print("[WARN] Skipping base_velocity plot: 'cmd/base_velocity' missing in one or both traces.")
+
+    # ---- Domain info plot (phasing var + current domain) --------------
+    # Two stacked subplots: phasing variable (top) and current domain
+    # (bottom), OLD vs NEW overlaid.  Mirrors play_plots.plot_domain_info
+    # but as a comparison plot.
+    old_phi = _stack_field(old, "cmd/phasing_var", env_id)
+    new_phi = _stack_field(new, "cmd/phasing_var", env_id)
+    old_dom = _stack_field(old, "cmd/current_domain", env_id)
+    new_dom = _stack_field(new, "cmd/current_domain", env_id)
+    if (old_phi is not None and new_phi is not None
+            and old_dom is not None and new_dom is not None):
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+        n = min(old_phi.shape[0], new_phi.shape[0],
+                old_dom.shape[0], new_dom.shape[0])
+        t_axis = (time_s[:n] if time_s is not None else np.arange(n))
+        fig, axs = plt.subplots(2, 1, figsize=(10, 6), sharex=True)
+        fig.suptitle(f"Domain Info — OLD vs NEW (env {env_id})", fontsize=14)
+        # Top: phasing var
+        axs[0].plot(t_axis, old_phi[:n].squeeze(), label="OLD", linewidth=1.4)
+        axs[0].plot(t_axis, new_phi[:n].squeeze(), label="NEW",
+                    linestyle="--", linewidth=1.4)
+        axs[0].set_title("Phasing Var")
+        axs[0].set_ylabel("phi")
+        axs[0].grid(True, alpha=0.3)
+        axs[0].legend(fontsize=8)
+        # Bottom: current domain
+        axs[1].plot(t_axis, old_dom[:n].squeeze(), label="OLD",
+                    linewidth=1.4, drawstyle="steps-post")
+        axs[1].plot(t_axis, new_dom[:n].squeeze(), label="NEW",
+                    linestyle="--", linewidth=1.4, drawstyle="steps-post")
+        axs[1].set_title("Current Domain")
+        axs[1].set_ylabel("domain idx")
+        axs[1].set_xlabel("Time (s)" if time_s is not None else "step")
+        axs[1].grid(True, alpha=0.3)
+        axs[1].legend(fontsize=8)
+        plt.tight_layout(rect=[0, 0.02, 1, 0.96])
+        out = os.path.join(args.plot, "cmd_domain_info.png")
+        os.makedirs(os.path.dirname(os.path.abspath(out)) or ".", exist_ok=True)
+        plt.savefig(out, dpi=150, bbox_inches="tight")
+        plt.close(fig)
+        print(f"[INFO] Wrote plot: {out}")
+    else:
+        print("[WARN] Skipping domain_info plot: 'cmd/phasing_var' or "
+              "'cmd/current_domain' missing in one or both traces.")
+
+    # ---- Reference frame pose plot -------------------------------------
+    # ref_poses is [N, 7] = [x, y, z, qx, qy, qz, qw] world-frame anchor.
+    # Also overlays which ref-frame body each env is currently using
+    # (cur_ref_frame_idx) — labeled with frame names if metadata provides
+    # them.  Useful for spotting unexpected swaps mid-cycle.
+    old_rp = _stack_field(old, "cmd/ref_poses", env_id)
+    new_rp = _stack_field(new, "cmd/ref_poses", env_id)
+    old_ridx = _stack_field(old, "cmd/cur_ref_frame_idx", env_id)
+    new_ridx = _stack_field(new, "cmd/cur_ref_frame_idx", env_id)
+    if old_rp is not None and new_rp is not None:
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+
+        n = min(old_rp.shape[0], new_rp.shape[0])
+        rp_names = ["pos_x", "pos_y", "pos_z",
+                    "ori_x", "ori_y", "ori_z", "ori_w"][:old_rp.shape[1]]
+        n_dims = old_rp.shape[1]
+        n_cols = 4
+        n_pose_rows = max(1, (n_dims + n_cols - 1) // n_cols)
+        # Add one extra row for the ref-frame identity panel if we have it.
+        has_ridx = old_ridx is not None and new_ridx is not None
+        n_total_rows = n_pose_rows + (1 if has_ridx else 0)
+
+        ref_frame_names = (old.get("metadata", {}).get("ref_frames")
+                            or new.get("metadata", {}).get("ref_frames")
+                            or [])
+
+        fig, axs = plt.subplots(n_total_rows, n_cols,
+                                 figsize=(4.5 * n_cols, 2.6 * n_total_rows))
+        axs = np.atleast_2d(axs)
+        fig.suptitle(f"Reference Frame Pose — OLD vs NEW (env {env_id})",
+                      fontsize=14)
+        t_axis = (time_s[:n] if time_s is not None else np.arange(n))
+
+        # Top rows: per-component overlay
+        for i in range(n_dims):
+            r, c = i // n_cols, i % n_cols
+            ax = axs[r, c]
+            ax.plot(t_axis, old_rp[:n, i], label="OLD", linewidth=1.4)
+            ax.plot(t_axis, new_rp[:n, i], label="NEW",
+                    linestyle="--", linewidth=1.4)
+            ax.set_title(rp_names[i] if i < len(rp_names) else f"dim {i}",
+                          fontsize=9)
+            ax.set_xlabel("Time (s)" if time_s is not None else "step",
+                           fontsize=8)
+            ax.set_ylabel("m / quat", fontsize=8)
+            ax.tick_params(labelsize=7)
+            ax.grid(True, alpha=0.3)
+            if i == 0:
+                ax.legend(fontsize=7)
+        # Hide unused cells in the pose-component rows.
+        for i in range(n_dims, n_pose_rows * n_cols):
+            r, c = i // n_cols, i % n_cols
+            axs[r, c].set_visible(False)
+
+        # Bottom row (if available): ref-frame identity step plot, spanning
+        # all columns by hiding the others and making one wide.
+        if has_ridx:
+            # Use the first cell of the bottom row, hide the rest.
+            for c in range(1, n_cols):
+                axs[n_pose_rows, c].set_visible(False)
+            ax_id = axs[n_pose_rows, 0]
+            # Repurpose this single cell as a wide span by adjusting width.
+            pos = ax_id.get_position()
+            # Compute combined width across all 4 columns
+            right_pos = axs[n_pose_rows, n_cols - 1].get_position()
+            ax_id.set_position([pos.x0, pos.y0,
+                                  right_pos.x1 - pos.x0, pos.height])
+
+            old_ridx_int = old_ridx[:n].astype(int).reshape(-1)
+            new_ridx_int = new_ridx[:n].astype(int).reshape(-1)
+            ax_id.step(t_axis, old_ridx_int, where="post",
+                        label="OLD", linewidth=1.4)
+            ax_id.step(t_axis, new_ridx_int, where="post",
+                        label="NEW", linestyle="--", linewidth=1.4)
+            n_frames = max(int(max(old_ridx_int.max(), new_ridx_int.max())) + 1,
+                            len(ref_frame_names), 1)
+            ax_id.set_yticks(range(n_frames))
+            if ref_frame_names:
+                # Truncate each label to keep legible
+                ax_id.set_yticklabels(
+                    [(s[:18] + "…") if len(s) > 19 else s
+                     for s in ref_frame_names[:n_frames]],
+                    fontsize=7,
+                )
+            ax_id.set_ylim(-0.5, n_frames - 0.5)
+            ax_id.set_xlabel("Time (s)" if time_s is not None else "step",
+                              fontsize=9)
+            ax_id.set_title("Reference Frame In Use (cur_ref_frame_idx)",
+                              fontsize=10)
+            ax_id.grid(True, alpha=0.3)
+            ax_id.legend(fontsize=8)
+
+        plt.tight_layout(rect=[0, 0.02, 1, 0.96])
+        out = os.path.join(args.plot, "cmd_ref_poses.png")
+        os.makedirs(os.path.dirname(os.path.abspath(out)) or ".", exist_ok=True)
+        plt.savefig(out, dpi=150, bbox_inches="tight")
+        plt.close(fig)
+        print(f"[INFO] Wrote plot: {out}")
+    else:
+        print("[WARN] Skipping ref_poses plot: 'cmd/ref_poses' missing in one or both traces.")
 
 
 # ---------------------------------------------------------------------------
@@ -273,11 +666,40 @@ def cmd_run(argv) -> None:
                 # Raw observations per group
                 for group, val in obs_dict.items():
                     if isinstance(val, dict):
-                        # Group with multiple terms
+                        # Group with multiple terms (rare; usually it's a concat tensor)
                         for term, t_val in val.items():
                             step_state[f"obs/{group}/{term}"] = t_val.detach().cpu().numpy()
                     else:
                         step_state[f"obs/{group}"] = val.detach().cpu().numpy()
+
+                # Also capture each obs term separately by re-querying through
+                # the ObservationManager's per-term API (the concatenated
+                # ``obs_dict`` above hides which sub-vector belongs to which
+                # term, making cross-commit per-term diffs impossible).
+                try:
+                    obs_mgr = unwrapped.observation_manager
+                    for group_name in obs_mgr.active_terms:
+                        terms = obs_mgr.active_terms[group_name]
+                        # ObservationManager has a per-group ordered list of
+                        # term names; read each term's tensor directly.
+                        for term_name in terms:
+                            try:
+                                t_val = obs_mgr._compute_obs_term(group_name, term_name) \
+                                    if hasattr(obs_mgr, "_compute_obs_term") else None
+                                if t_val is None:
+                                    # Fall back: re-run the term's func against env.
+                                    cfg = obs_mgr._group_obs_term_cfgs[group_name][
+                                        list(terms).index(term_name)
+                                    ]
+                                    t_val = cfg.func(unwrapped, **(cfg.params or {}))
+                                if hasattr(t_val, "detach"):
+                                    step_state[f"obs/{group_name}/{term_name}"] = (
+                                        t_val.detach().cpu().numpy()
+                                    )
+                            except Exception:
+                                pass
+                except Exception:
+                    pass
 
                 # Action
                 step_state["action"] = actions.detach().cpu().numpy()
@@ -285,10 +707,23 @@ def cmd_run(argv) -> None:
                 # Cmd term per-step state (safe getattr — handles OLD/NEW)
                 for attr in ("y_des", "y_act", "dy_des", "dy_act", "v", "vdot",
                               "current_domain", "cur_ref_frame_idx", "ref_poses",
-                              "traj_time"):
+                              "traj_time", "phasing_var"):
                     val = getattr(cmd, attr, None)
                     if val is not None and hasattr(val, "detach"):
                         step_state[f"cmd/{attr}"] = val.detach().cpu().numpy()
+
+                # Phasing var fallback: compute from manager + traj_time when
+                # the cmd term doesn't expose ``phasing_var`` directly (e.g.
+                # multiskill phase-based command). Mirrors ``data_logger.py``.
+                if "cmd/phasing_var" not in step_state:
+                    try:
+                        manager = getattr(cmd, "manager", None)
+                        traj_time = getattr(cmd, "traj_time", None)
+                        if manager is not None and traj_time is not None:
+                            phi = manager.get_phasing_var(traj_time)
+                            step_state["cmd/phasing_var"] = phi.detach().cpu().numpy()
+                    except Exception:
+                        pass
 
                 # Manager state (NEW only — phase, gate state)
                 manager = getattr(cmd, "manager", None)
@@ -301,6 +736,27 @@ def cmd_run(argv) -> None:
                 # Episode length / done state
                 if hasattr(unwrapped, "episode_length_buf"):
                     step_state["ep_len"] = unwrapped.episode_length_buf.detach().cpu().numpy()
+
+                # Robot joint positions (raw, in robot's own joint order — for
+                # the joint-position plot in diff mode).
+                try:
+                    robot = unwrapped.scene.articulations["robot"]
+                    jp = robot.data.joint_pos
+                    if hasattr(jp, "to_torch"):
+                        jp = jp.to_torch()
+                    elif type(jp).__module__.startswith("warp"):
+                        import warp as wp
+                        jp = wp.to_torch(jp)
+                    step_state["robot/joint_pos"] = jp.detach().cpu().numpy()
+                except Exception:
+                    pass
+
+                # Base velocity command (post-ramp, what the policy / reward see).
+                try:
+                    base_vel = unwrapped.command_manager.get_command("base_velocity")
+                    step_state["cmd/base_velocity"] = base_vel.detach().cpu().numpy()
+                except Exception:
+                    pass
 
                 steps.append(step_state)
 
@@ -316,6 +772,22 @@ def cmd_run(argv) -> None:
                     obs_dict = unwrapped.observation_manager.compute()
 
             # --- Save trace ---
+            metadata: dict = {
+                "step_dt": float(unwrapped.step_dt),
+                "cmd_term_name": cmd_term_name,
+            }
+            # Best-effort labels for the diff-mode plots.
+            for attr in ("ordered_pos_output_names", "ordered_vel_output_names",
+                          "ref_frames"):
+                vals = getattr(cmd, attr, None)
+                if isinstance(vals, list):
+                    metadata[attr] = list(vals)
+            try:
+                robot = unwrapped.scene.articulations["robot"]
+                metadata["joint_names"] = list(robot.data.joint_names)
+            except Exception:
+                pass
+
             trace = {
                 "commit": args_cli.commit_label,
                 "task": args_cli.task,
@@ -324,10 +796,7 @@ def cmd_run(argv) -> None:
                 "num_envs": args_cli.num_envs,
                 "n_steps": len(steps),
                 "steps": steps,
-                "metadata": {
-                    "step_dt": float(unwrapped.step_dt),
-                    "cmd_term_name": cmd_term_name,
-                },
+                "metadata": metadata,
             }
 
             os.makedirs(os.path.dirname(os.path.abspath(args_cli.output)) or ".",

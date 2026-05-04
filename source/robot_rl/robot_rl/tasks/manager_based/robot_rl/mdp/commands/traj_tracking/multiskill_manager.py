@@ -530,7 +530,7 @@ class MultiSkillManager(ManagerBase):
     def get_output_names(self) -> list[str]:
         """Get position output names (backwards compat)."""
         return self.pos_output_names
-
+    # TODO: Remove one above or below this
     @property
     def get_pos_output_names(self) -> list[str]:
         """Get position output names (includes ori_w)."""
@@ -548,7 +548,7 @@ class MultiSkillManager(ManagerBase):
     def get_num_outputs(self) -> int:
         """Get number of position outputs."""
         return self.num_pos_outputs
-
+    # TODO: Remove the one above or below
     def get_num_pos_outputs(self) -> int:
         """Get number of position outputs (includes ori_w)."""
         return self.num_pos_outputs
@@ -908,6 +908,7 @@ class MultiSkillManager(ManagerBase):
 
         return self._compute_bezier_batched(tau, env_coeffs_vel, T_dom, derivative=True)
 
+    # TODO: Probably want to make it so this just removes the class variable.
     def get_phasing_var(
         self, t: Tensor, env_ids: Tensor | None = None
     ) -> Tensor:
@@ -1015,7 +1016,6 @@ class MultiSkillManager(ManagerBase):
         self._ref_frame_map = table
         self._ref_frame_key = tuple(ref_frames)
 
-    # TODO: Can remove this as we don't use the contact state anymore
     def get_contact_state(
         self, t: Tensor, contact_frames: list[str], env_ids: Tensor | None = None
     ) -> Tensor:
@@ -1489,7 +1489,7 @@ class MultiSkillManager(ManagerBase):
         if self.env is None or not hasattr(self.env, "step_dt"):
             raise RuntimeError("Manager has no env; cannot compute eps_phi.")
         total = self.data["total_time"][traj_idx]
-        return 0.001 #self.env.step_dt / total  # NOTE: I think the step_dt jump was too big
+        return 0.0 #0.001 #self.env.step_dt / total  # NOTE: I think the step_dt jump was too big
 
     def _reseed_gate_for_envs(self, env_ids: Tensor) -> None:
         """Re-arm ``next_gate_idx`` for the given envs based on their current phase.
