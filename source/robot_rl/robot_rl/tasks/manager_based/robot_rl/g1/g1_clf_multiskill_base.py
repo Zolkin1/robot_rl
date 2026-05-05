@@ -74,7 +74,7 @@ class G1MultiSkillCommandsCfg(G1ClfTrackingCommandCfg):
         Q_weights = WALKING_Q_weights,
         R_weights = WALKING_R_weights,
 
-        contact_gate_window_frac=0.2,   # NOTE: Making this too big (like 0.2) can lead to spurious detections.
+        contact_gate_window_frac=None, #0.2,   # NOTE: Making this too big (like 0.2) can lead to spurious detections.
         hold_on_late_contact=True, #False, #True,  # TODO: need to consider that for False, the reference frame is
         # updated to be the current point's position, but this is in the air, and on the snap
         # back things are not adjusted. Maybe this is why I don't get late triggers with this or

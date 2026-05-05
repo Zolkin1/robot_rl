@@ -25,6 +25,12 @@ class G1WalkRunCLFEnvCfg(G1MultiSkillCLFEnvCfg):
         self.commands.base_velocity.ranges.heading = (-3.14,3.14)
         self.commands.base_velocity.resampling_time_range = (4.0, 8.0)
 
+        self.commands.base_velocity.velocity_buckets = [
+            VelocityBucketCfg(percentage=0.0, lin_vel_x=(0.0, 0.1)),  # Standing
+            VelocityBucketCfg(percentage=0.0, lin_vel_x=(0.1, 1.5)),  # Walking
+            VelocityBucketCfg(percentage=1.0, lin_vel_x=(3.0, 3.0)),  # Running
+        ]
+
         # Note: Having the accerletaion in the teacher training seems to hurt the behavior
         # TODO: Consider using a max acc on some % (like 10) of the teacher so its not OOD
         # self.commands.base_velocity.max_acc = 1.0

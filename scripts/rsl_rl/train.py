@@ -236,7 +236,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
                 nan_count = torch.isnan(tensor).sum().item()
                 print(f"[DEBUG] Pre-learn obs '{key}': shape={tensor.shape}, NaN count={nan_count}")
 
-            runner.learn(num_learning_iterations=agent_cfg.max_iterations, init_at_random_ep_len=False)
+            runner.learn(num_learning_iterations=agent_cfg.max_iterations, init_at_random_ep_len=True)
             print(f"Training time: {round(time.time() - start_time, 2)} seconds")
             # close the simulator
             env.close()
