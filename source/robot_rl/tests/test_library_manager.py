@@ -1,4 +1,8 @@
-"""Tests for LibraryManager."""
+"""Tests for LibraryManager.
+
+TODO: Delete this file when :mod:`library_manager` is removed.
+:class:`MultiSkillManager` is exercised by ``test_multiskill_manager.py``.
+"""
 
 import pytest
 import torch

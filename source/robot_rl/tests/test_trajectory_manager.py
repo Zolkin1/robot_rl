@@ -1,4 +1,13 @@
-"""Tests for TrajectoryManager."""
+"""Tests for TrajectoryManager.
+
+TODO: Trim this file to parser-level tests (YAML loading, expanded vs
+original domain counts, contact body lists, ref-frame parsing) when the
+runtime-eval API on :class:`TrajectoryManager` is stripped. Tests for
+``get_output``, ``get_phasing_var``, ``get_acceleration``,
+``get_current_domains``, ``get_domain_times``, ``get_contact_state``,
+``get_ref_frames_in_use`` exercise removed-from-runtime methods and can
+go once :class:`MultiSkillManager` is the only runtime path.
+"""
 
 import pytest
 import torch

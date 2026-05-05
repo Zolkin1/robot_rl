@@ -1,3 +1,19 @@
+"""Per-trajectory loader / runtime evaluator.
+
+TODO: KEEP this file but strip the runtime-eval API. The parser
+(``__init__``, ``traj_data``, ``_all_coeffs_pos/vel``, ``_T_all``,
+``T``, ``domain_boundaries``, ``expanded_num_domains``,
+``num_domains``, ``TrajectoryType``) is load-bearing — :class:`MultiSkillManager`
+imports ``TrajectoryManager`` to load each YAML and pulls the parsed
+fields into batched tensors. The runtime-eval methods (``get_output``,
+``get_phasing_var``, ``get_current_domains``, ``get_acceleration``,
+``get_domain_times``, ``get_ref_frames_in_use``, ``get_contact_state``,
+``log_v_on_phasing_var`` and their phasing helpers) are unused at
+runtime — only single-skill commands and their tests call them. Remove
+them when ``trajectory_cmd.py`` and ``test_trajectory_manager.py`` are
+deleted/trimmed.
+"""
+
 from enum import Enum
 from pathlib import Path
 from typing import Tuple

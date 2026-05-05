@@ -156,14 +156,6 @@ class BaseTrajectoryCommand(CommandTerm):
             device=self.device,
         )
 
-        # --- Time offsets -------------------------------------------------
-        self.time_offset = torch.zeros(self.num_envs, device=self.device)
-        self.init_time_offset = torch.zeros(self.num_envs, device=self.device)
-
-        # Private scratch for single-domain change detection. Holds the
-        # previous step's raw manager-reported phi. Not exposed to RL.
-        self._prev_phi = torch.zeros(self.num_envs, device=self.device)
-
         # --- Subclass hook ------------------------------------------------
         self._post_init()
 
@@ -171,17 +163,17 @@ class BaseTrajectoryCommand(CommandTerm):
     # Contact state & symmetry helpers
     # ------------------------------------------------------------------
 
-    def get_contact_state(self, t: torch.Tensor, env_ids: torch.Tensor = None) -> torch.Tensor:
+    def get_contact_state(self, phase: torch.Tensor, env_ids: torch.Tensor = None) -> torch.Tensor:
         """Return the desired contact state at time *t*.
 
         Args:
-            t: Shape ``[N]`` times per environment.
+            phase: Shape ``[N]`` phase in [0, 1] per environment.
             env_ids: Optional subset of environments.
 
         Returns:
             Binary tensor of shape ``[N, num_contacts]``.
         """
-        return self.manager.get_contact_state(t, self.contact_bodies, env_ids)
+        return self.manager.get_contact_state(phase, self.contact_bodies, env_ids)
 
     def get_symmetric_contacts(self, contacts: torch.Tensor) -> torch.Tensor:
         """Return the left-right symmetric reflection of *contacts*.
@@ -206,11 +198,11 @@ class BaseTrajectoryCommand(CommandTerm):
     # Measured outputs
     # ------------------------------------------------------------------
 
-    def get_measured_outputs(self, t: torch.Tensor, env_ids: torch.Tensor = None) -> None:
+    def get_measured_outputs(self, phase: torch.Tensor, env_ids: torch.Tensor = None) -> None:
         """Compute measured outputs from the robot state.
 
         Args:
-            t: Time tensor of shape ``[N]``.
+            phase: phase in [0, 1] tensor of shape ``[N]``.
             env_ids: Optional environment indices.
         """
         # Get poses for all reference-frame bodies: [N, num_ref_frames, 7]
@@ -219,24 +211,24 @@ class BaseTrajectoryCommand(CommandTerm):
         ref_poses[:, :, 3:] = wp.to_torch(self.robot.data.body_quat_w)[:, self.ref_frame_indices]
 
         # Detect domain changes
-        new_domains = self.manager.get_current_domains(t, env_ids)
+        new_domains = self.manager.get_current_domains(phase, env_ids)
 
         if env_ids is None:
             changed = new_domains != self.current_domain
+            self.current_domain = new_domains
         else:
             changed = new_domains != self.current_domain[env_ids]
-
-        self.current_domain = new_domains
+            self.current_domain[env_ids] = new_domains
 
         # Which reference frame each env should use
         if env_ids is None:
-            ref_frame_indices = self.manager.get_ref_frames_in_use(t, self.ref_frames)
+            ref_frame_indices = self.manager.get_ref_frames_in_use(phase, self.ref_frames)
             self.cur_ref_frame_idx = ref_frame_indices
         else:
-            ref_frame_indices = self.manager.get_ref_frames_in_use(t, self.ref_frames, env_ids)
+            ref_frame_indices = self.manager.get_ref_frames_in_use(phase, self.ref_frames, env_ids)
             self.cur_ref_frame_idx[env_ids] = ref_frame_indices
 
-        contact_state = self.get_contact_state(t, env_ids)
+        contact_state = self.get_contact_state(phase, env_ids)
         contact_frame_indices = self.ref_to_contact_idx[ref_frame_indices]
         ref_in_contact = torch.gather(
             contact_state, 1, contact_frame_indices.unsqueeze(1)
@@ -347,59 +339,13 @@ class BaseTrajectoryCommand(CommandTerm):
             self.y_act[:, pos_output_idx:pos_output_idx + joint_pos.shape[1]] = joint_pos
             self.dy_act[:, vel_output_idx:vel_output_idx + joint_vel.shape[1]] = joint_vel
 
-    # TODO: Can remove as we don't use accelerations anymore
-    def compute_measured_acceleration(self, ref_frame_quat: torch.Tensor) -> torch.Tensor:
-        """Compute measured accelerations from the robot.
-
-        Args:
-            ref_frame_quat: ``[N, 4]`` reference frame quaternions.
-
-        Returns:
-            ``[N, num_vel_outputs]`` measured accelerations in the local frame.
-        """
-        ddy_act = torch.zeros((self.num_envs, len(self.ordered_vel_output_names)), device=self.device)
-        output_idx = 0
-
-        if self.use_com:
-            com_acc_w = wp.to_torch(self.robot.data.root_com_acc_w)[:, :3]
-            com_acc_local = _align_yaw(com_acc_w, ref_frame_quat)
-            ddy_act[:, output_idx:output_idx + 3] = com_acc_local
-            output_idx += 3
-
-        if self.body_idx is not None:
-            body_acc = wp.to_torch(self.robot.data.body_acc_w)
-            body_lin_acc_w = body_acc[:, self.body_idx, :3]
-            body_ang_acc_w = body_acc[:, self.body_idx, 3:]
-
-            body_lin_acc_local = _align_yaw_batched(body_lin_acc_w, ref_frame_quat)
-            body_ang_acc_local = _align_yaw_batched(body_ang_acc_w, ref_frame_quat)
-
-            pos_bodies = (self.body_type == 1) | (self.body_type == 2)
-            num_pos_bodies = pos_bodies.sum()
-            ori_bodies = (self.body_type == 0) | (self.body_type == 2)
-            num_ori_bodies = ori_bodies.sum()
-
-            ddy_act[:, output_idx:output_idx + (3 * num_pos_bodies)] = (
-                body_lin_acc_local[:, pos_bodies, :].flatten(1))
-            output_idx += (3 * num_pos_bodies.item())
-
-            ddy_act[:, output_idx:output_idx + (3 * num_ori_bodies)] = (
-                body_ang_acc_local[:, ori_bodies, :].flatten(1))
-            output_idx += (3 * num_ori_bodies.item())
-
-        if self.joint_idx is not None:
-            joint_acc = wp.to_torch(self.robot.data.joint_acc)[:, self.joint_idx]
-            ddy_act[:, output_idx:output_idx + joint_acc.shape[1]] = joint_acc
-
-        return ddy_act
-
     # ------------------------------------------------------------------
     # Desired outputs
     # ------------------------------------------------------------------
 
     def _transform_desired_outputs(
         self,
-        t: torch.Tensor,
+        phase: torch.Tensor,
         y_pos: torch.Tensor,
         y_vel: torch.Tensor,
         env_ids: torch.Tensor = None,
@@ -411,15 +357,15 @@ class BaseTrajectoryCommand(CommandTerm):
         """
         return y_pos, y_vel
 
-    def get_desired_outputs(self, t: torch.Tensor, env_ids: torch.Tensor = None) -> None:
+    def get_desired_outputs(self, phase: torch.Tensor, env_ids: torch.Tensor = None) -> None:
         """Get the desired output from the trajectory manager.
 
         Args:
-            t: Time tensor of shape ``[N]``.
+            phase: phase in [0, 1] tensor of shape ``[N]``.
             env_ids: Optional environment indices.
         """
-        y_pos, y_vel = self.manager.get_output(t, env_ids)
-        y_pos, y_vel = self._transform_desired_outputs(t, y_pos, y_vel, env_ids)
+        y_pos, y_vel = self.manager.get_output(phase, env_ids)
+        y_pos, y_vel = self._transform_desired_outputs(phase, y_pos, y_vel, env_ids)
 
         if env_ids is None:
             self.y_des = y_pos
@@ -430,11 +376,10 @@ class BaseTrajectoryCommand(CommandTerm):
 
         # Zero velocities at the end of episodic trajectories
         if self.manager.get_trajectory_type() == TrajectoryType.EPISODIC:
-            phi = self.manager.get_phasing_var(t, env_ids)
             if env_ids is None:
-                self.dy_des[phi == 1] *= 0
+                self.dy_des[phase == 1] *= 0
             else:
-                episodic_mask = phi == 1
+                episodic_mask = phase == 1
                 self.dy_des[env_ids[episodic_mask]] *= 0
 
     # ------------------------------------------------------------------
@@ -469,34 +414,26 @@ class BaseTrajectoryCommand(CommandTerm):
         """Resample the command (delegates to ``_update_command``)."""
         self._update_command()
 
-    def _compute_time(self) -> torch.Tensor:
-        """Compute the per-env trajectory time.
+    def _pre_update_phase(self) -> None:
+        """Hook called at the top of ``_update_command``.
 
-        Base implementation applies ``random_start_time_max`` and
-        ``init_time_offset``.  Subclasses may override to apply further
-        masking (e.g. :class:`PhasedTrajectoryCommand` applies hold-phi).
-
-        Returns:
-            Time tensor of shape ``[N]``.
+        Responsible for advancing ``manager.phase``, invalidating the
+        trajectory-assignment cache, and running any contact-gate logic
+        that mutates phase.  The default just invalidates the cache so
+        downstream manager reads see a fresh trajectory assignment.
+        Subclasses that own phase advance / gating should re-invalidate
+        after their mutations.
         """
-        t = self.env.episode_length_buf * self.env.step_dt
-
-        if self.cfg.random_start_time_max > 0:
-            mask = torch.where(self.env.episode_length_buf == 0)[0]
-            self.time_offset[mask] = torch.rand(mask.shape, device=self.device) * self.cfg.random_start_time_max
-
-        t = torch.maximum(t - self.time_offset, torch.zeros_like(t))
-        t = t + self.init_time_offset
-        return t
+        self.manager.invalidate_cache()
 
     def _update_command(self):
         """Main per-step update: measured outputs, desired outputs, CLF."""
-        self.manager.invalidate_cache()
+        self._pre_update_phase()
 
-        t = self._compute_time()
+        phi = self.manager.phase
 
-        self.get_measured_outputs(t)
-        self.get_desired_outputs(t)
+        self.get_measured_outputs(phi)
+        self.get_desired_outputs(phi)
 
         vdot, vcur = self.clf.compute_vdot(self.y_act, self.y_des, self.dy_act, self.dy_des)
 

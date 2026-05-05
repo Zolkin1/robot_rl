@@ -712,16 +712,15 @@ def cmd_run(argv) -> None:
                     if val is not None and hasattr(val, "detach"):
                         step_state[f"cmd/{attr}"] = val.detach().cpu().numpy()
 
-                # Phasing var fallback: compute from manager + traj_time when
-                # the cmd term doesn't expose ``phasing_var`` directly (e.g.
-                # multiskill phase-based command). Mirrors ``data_logger.py``.
+                # Phasing var fallback: when the cmd term doesn't expose
+                # ``phasing_var`` directly (e.g. multiskill phase-based
+                # command, where phase lives on the manager), read
+                # ``manager.phase`` directly. Mirrors ``data_logger.py``.
                 if "cmd/phasing_var" not in step_state:
                     try:
                         manager = getattr(cmd, "manager", None)
-                        traj_time = getattr(cmd, "traj_time", None)
-                        if manager is not None and traj_time is not None:
-                            phi = manager.get_phasing_var(traj_time)
-                            step_state["cmd/phasing_var"] = phi.detach().cpu().numpy()
+                        if manager is not None and getattr(manager, "phase", None) is not None:
+                            step_state["cmd/phasing_var"] = manager.phase.detach().cpu().numpy()
                     except Exception:
                         pass
 

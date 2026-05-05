@@ -78,13 +78,12 @@ _PERPETUAL_INT = _TRAJ_TYPE_TO_INT[TrajectoryType.PERPETUAL]
 # ---------------------------------------------------------------------------
 # MultiSkillManager
 # ---------------------------------------------------------------------------
-# TODO: Go through for bugs and see if it can be cleaned
 class MultiSkillManager(ManagerBase):
     """Manages trajectories across multiple skills with fully batched evaluation.
 
     All trajectory data is flattened into global tensors so that every method
-    (get_output, get_phasing_var, …) runs as a single batched operation over
-    all environments — no per-trajectory Python loops at runtime.
+    (get_output, get_contact_state, …) runs as a single batched operation
+    over all environments — no per-trajectory Python loops at runtime.
 
     Skills are groups of trajectories that share a semantic label (e.g.
     "walking", "running", "stairs").  Within each skill, trajectory selection
@@ -248,9 +247,14 @@ class MultiSkillManager(ManagerBase):
         self._cached_global_indices: Tensor | None = None
         self._cached_env_ids: Tensor | None = None
 
-        # --- Skill transition tracking ------------------------------------
+        # --- Skill / trajectory transition tracking ------------------------
+        # ``_skill_changed`` (used for traj-stats warmup) and
+        # ``_traj_changed`` (used to re-arm the contact gate) are populated
+        # by :meth:`_ensure_cache` on each cache rebuild.
         self._prev_skill_indices: Tensor | None = None
         self._skill_changed: Tensor | None = None
+        self._prev_global_indices: Tensor | None = None
+        self._traj_changed: Tensor | None = None
 
         # --- Per-trajectory CLF stats tracker -----------------------------
         # Allocated lazily-but-eagerly here so adaptive sampling can read
@@ -525,12 +529,6 @@ class MultiSkillManager(ManagerBase):
     # Properties mirroring LibraryManager / TrajectoryManager interface
     # ------------------------------------------------------------------
 
-    # TODO: Remove because we don't need backwards compatibility
-    @property
-    def get_output_names(self) -> list[str]:
-        """Get position output names (backwards compat)."""
-        return self.pos_output_names
-    # TODO: Remove one above or below this
     @property
     def get_pos_output_names(self) -> list[str]:
         """Get position output names (includes ori_w)."""
@@ -545,10 +543,6 @@ class MultiSkillManager(ManagerBase):
         """Get the reference frame names."""
         return self.ref_frames
 
-    def get_num_outputs(self) -> int:
-        """Get number of position outputs."""
-        return self.num_pos_outputs
-    # TODO: Remove the one above or below
     def get_num_pos_outputs(self) -> int:
         """Get number of position outputs (includes ori_w)."""
         return self.num_pos_outputs
@@ -609,17 +603,24 @@ class MultiSkillManager(ManagerBase):
             conditioner = self._get_conditioner_from_env(env_ids)
             new_indices = self._select_trajectories(conditioner)
 
-            # --- Skill transition detection --------------------------------
+            # --- Skill / trajectory transition detection ------------------
             new_skill_indices = self.data["skill_idx"][new_indices]
             if self._prev_skill_indices is not None:
                 if env_ids is not None:
                     self._skill_changed = new_skill_indices != self._prev_skill_indices[env_ids]
+                    self._traj_changed = new_indices != self._prev_global_indices[env_ids]
                     self._prev_skill_indices[env_ids] = new_skill_indices
+                    self._prev_global_indices[env_ids] = new_indices
                 else:
                     self._skill_changed = new_skill_indices != self._prev_skill_indices
+                    self._traj_changed = new_indices != self._prev_global_indices
                     self._prev_skill_indices = new_skill_indices
+                    self._prev_global_indices = new_indices
             else:
                 self._skill_changed = torch.zeros(
+                    new_indices.shape[0], dtype=torch.bool, device=self.device,
+                )
+                self._traj_changed = torch.zeros(
                     new_indices.shape[0], dtype=torch.bool, device=self.device,
                 )
                 # First call — store full-batch size regardless of env_ids
@@ -628,9 +629,14 @@ class MultiSkillManager(ManagerBase):
                     self._prev_skill_indices = torch.zeros(
                         N_total, dtype=torch.long, device=self.device,
                     )
+                    self._prev_global_indices = torch.zeros(
+                        N_total, dtype=torch.long, device=self.device,
+                    )
                     self._prev_skill_indices[env_ids] = new_skill_indices
+                    self._prev_global_indices[env_ids] = new_indices
                 else:
                     self._prev_skill_indices = new_skill_indices
+                    self._prev_global_indices = new_indices
 
             self._cached_global_indices = new_indices
         else:
@@ -728,24 +734,24 @@ class MultiSkillManager(ManagerBase):
         """
         return self._get_global_indices(env_ids)
 
-    def _get_domain_indices(self, t: Tensor, traj_idx: Tensor) -> Tensor:
+    def _get_domain_indices(self, phase: Tensor, traj_idx: Tensor) -> Tensor:
         """Batched domain lookup via searchsorted on per-trajectory boundaries.
 
         Args:
-            t: ``[N]`` time per environment.
+            phase: ``[N]`` phase per environment.
             traj_idx: ``[N]`` global trajectory index per environment.
 
         Returns:
             ``[N]`` domain indices (into the expanded domain dimension).
         """
         total = self.data["total_time"][traj_idx]  # [N]
-        t_wrapped = t % total  # [N]
+        t = phase * total  # [N]
 
         # Gather per-trajectory boundaries: [N, D_max+1]
         boundaries = self.data["domain_boundaries"][traj_idx]  # [N, D_max+1]
 
         # searchsorted along dim=1
-        domain_idx = torch.searchsorted(boundaries, t_wrapped.unsqueeze(1), right=False).squeeze(1) - 1
+        domain_idx = torch.searchsorted(boundaries, t.unsqueeze(1), right=False).squeeze(1) - 1
 
         # Clamp to valid range per trajectory
         max_dom = self.data["expanded_domains"][traj_idx] - 1
@@ -754,25 +760,24 @@ class MultiSkillManager(ManagerBase):
         return domain_idx
 
     def _compute_normalized_tau(
-        self, t: Tensor, traj_idx: Tensor, domain_idx: Tensor
+        self, phase: Tensor, traj_idx: Tensor, domain_idx: Tensor
     ) -> Tensor:
         """Compute tau ∈ [0,1] within the current domain for each environment.
 
         Args:
-            t: ``[N]`` times.
+            phase: ``[N]`` phase in [0, 1].
             traj_idx: ``[N]`` global trajectory indices.
             domain_idx: ``[N]`` expanded domain indices.
 
         Returns:
             ``[N]`` normalized tau values.
         """
-        # Phasing variable in [0, 1]
-        tau = self._compute_phasing_var(t, traj_idx)
 
-        # For half-periodic: fold into [0, 0.5) → [0, 1)
+        # For half-periodic: fold the second half onto the first
+        # ([0.5, 1) → [0, 0.5)) and scale to [0, 1).
         is_half = self.data["traj_type"][traj_idx] == _HALF_PERIODIC_INT
-        tau = torch.where(is_half & (tau >= 0.5), tau - 0.5, tau)   # TODO: Double check this
-        tau = torch.where(is_half, tau / 0.5, tau)
+        phase = torch.where(is_half & (phase >= 0.5), phase - 0.5, phase)
+        phase = torch.where(is_half, phase * 2.0, phase)
 
         # Domain index within original (non-reflected) domains
         num_orig = self.data["num_original_domains"][traj_idx]  # [N]
@@ -786,16 +791,16 @@ class MultiSkillManager(ManagerBase):
         T_dom = self.data["domain_times"][traj_idx, domain_idx]
 
         # Normalize
-        tau_norm = (tau - rel_prev) * self._total_original_T[traj_idx] / T_dom
+        tau_norm = (phase - rel_prev) * self._total_original_T[traj_idx] / T_dom
         return torch.clamp(tau_norm, 0.0, 1.0)
 
     def _compute_bezier_batched(
-        self, tau: Tensor, ctrl_pts: Tensor, T_dom: Tensor, derivative: bool
+        self, phase: Tensor, ctrl_pts: Tensor, T_dom: Tensor, derivative: bool
     ) -> Tensor:
         """Batched Bernstein polynomial evaluation.
 
         Args:
-            tau: ``[N]`` normalised time in [0, 1].
+            phase: ``[N]`` phase in [0, 1].
             ctrl_pts: ``[N, num_outputs, degree+1]`` control points.
             T_dom: ``[N]`` domain durations (for velocity scaling).
             derivative: If True, compute first derivative of the Bezier curve.
@@ -808,73 +813,39 @@ class MultiSkillManager(ManagerBase):
         if not derivative:
             coefs = self._binomial_coeffs[degree]  # [degree+1]
             i_vec = torch.arange(degree + 1, device=ctrl_pts.device)
-            tau_pow = tau.unsqueeze(1) ** i_vec  # [N, degree+1]
-            one_minus_pow = (1 - tau).unsqueeze(1) ** (degree - i_vec)
+            tau_pow = phase.unsqueeze(1) ** i_vec  # [N, degree+1]
+            one_minus_pow = (1 - phase).unsqueeze(1) ** (degree - i_vec)
             weights = coefs * tau_pow * one_minus_pow  # [N, degree+1]
             return torch.einsum("nd,nod->no", weights, ctrl_pts)
         else:
             coefs = self._binomial_coeffs[degree - 1]  # [degree]
             i_vec = torch.arange(degree, device=ctrl_pts.device)
-            tau_pow = tau.unsqueeze(1) ** i_vec
-            one_minus_pow = (1 - tau).unsqueeze(1) ** (degree - 1 - i_vec)
+            tau_pow = phase.unsqueeze(1) ** i_vec
+            one_minus_pow = (1 - phase).unsqueeze(1) ** (degree - 1 - i_vec)
             weights = degree * coefs * tau_pow * one_minus_pow
             cp_diff = ctrl_pts[:, :, 1:] - ctrl_pts[:, :, :-1]
             result = torch.einsum("nd,nod->no", weights, cp_diff)
             return result / T_dom.unsqueeze(1)
-
-    def _compute_phasing_var(self, t: Tensor, traj_idx: Tensor) -> Tensor:
-        """Vectorised phasing variable computation for mixed trajectory types.
-
-        Args:
-            t: ``[N]`` times.
-            traj_idx: ``[N]`` global trajectory indices.
-
-        Returns:
-            ``[N]`` phasing variable in [0, 1].
-        """
-        total = self.data["total_time"][traj_idx]
-        tt = self.data["traj_type"][traj_idx]
-
-        t_wrapped = t % total
-
-        phi = torch.zeros_like(t)
-
-        # Half-periodic: phi = t_wrapped / total_time (total already 2x)
-        mask_hp = tt == _HALF_PERIODIC_INT
-        phi = torch.where(mask_hp, t_wrapped / total, phi)
-
-        # Full periodic
-        mask_fp = tt == _FULL_PERIODIC_INT
-        phi = torch.where(mask_fp, t_wrapped / total, phi)
-
-        # Episodic: clamp, don't wrap
-        mask_ep = tt == _EPISODIC_INT
-        phi = torch.where(mask_ep, torch.clamp(t / total, 0.0, 1.0), phi)
-
-        # Perpetual: always 0
-        # phi is already 0 for perpetual
-
-        return torch.clamp(phi, 0.0, 1.0)
 
     # ------------------------------------------------------------------
     # ManagerBase interface — fully batched
     # ------------------------------------------------------------------
 
     def get_output(
-        self, t: Tensor, env_ids: Tensor | None = None
+        self, phase: Tensor, env_ids: Tensor | None = None
     ) -> tuple[Tensor, Tensor]:
         """Compute position and velocity outputs for all environments.
 
         Args:
-            t: ``[N]`` time per environment.
+            phase: ``[N]`` phase in [0, 1] per environment.
             env_ids: Optional environment index subset.
 
         Returns:
             ``(pos_outputs, vel_outputs)`` each of shape ``[N, P]`` / ``[N, V]``.
         """
         traj_idx = self._get_global_indices(env_ids)
-        domain_idx = self._get_domain_indices(t, traj_idx)
-        tau = self._compute_normalized_tau(t, traj_idx, domain_idx)
+        domain_idx = self._get_domain_indices(phase, traj_idx)
+        tau = self._compute_normalized_tau(phase, traj_idx, domain_idx)
 
         # Gather coefficients: [N, P/V, K+1]
         env_coeffs_pos = self.data["coeffs_pos"][traj_idx, domain_idx]
@@ -886,73 +857,35 @@ class MultiSkillManager(ManagerBase):
 
         return pos_out, vel_out
 
-    # TODO: Should be able to remove this function as we don't use accelerations anymore
-    def get_acceleration(
-        self, t: Tensor, env_ids: Tensor | None = None
-    ) -> Tensor:
-        """Compute acceleration (derivative of velocity Bezier).
-
-        Args:
-            t: ``[N]`` time per environment.
-            env_ids: Optional environment index subset.
-
-        Returns:
-            ``[N, V]`` acceleration outputs.
-        """
-        traj_idx = self._get_global_indices(env_ids)
-        domain_idx = self._get_domain_indices(t, traj_idx)
-        tau = self._compute_normalized_tau(t, traj_idx, domain_idx)
-
-        env_coeffs_vel = self.data["coeffs_vel"][traj_idx, domain_idx]
-        T_dom = self.data["domain_times"][traj_idx, domain_idx]
-
-        return self._compute_bezier_batched(tau, env_coeffs_vel, T_dom, derivative=True)
-
-    # TODO: Probably want to make it so this just removes the class variable.
-    def get_phasing_var(
-        self, t: Tensor, env_ids: Tensor | None = None
-    ) -> Tensor:
-        """Compute the phasing variable for each environment.
-
-        Args:
-            t: ``[N]`` time per environment.
-            env_ids: Optional environment index subset.
-
-        Returns:
-            ``[N]`` phasing variable in [0, 1].
-        """
-        traj_idx = self._get_global_indices(env_ids)
-        return self._compute_phasing_var(t, traj_idx)
-
     def get_current_domains(
-        self, t: Tensor, env_ids: Tensor | None = None
+        self, phase: Tensor, env_ids: Tensor | None = None
     ) -> Tensor:
         """Return the domain index for each environment.
 
         Args:
-            t: ``[N]`` time per environment.
+            phase: ``[N]`` phase in [0, 1] per environment.
             env_ids: Optional environment index subset.
 
         Returns:
             ``[N]`` domain indices.
         """
         traj_idx = self._get_global_indices(env_ids)
-        return self._get_domain_indices(t, traj_idx)
+        return self._get_domain_indices(phase, traj_idx)
 
     def get_domain_times(
-        self, t: Tensor, env_ids: Tensor | None = None
+        self, phase: Tensor, env_ids: Tensor | None = None
     ) -> Tensor:
         """Get the duration of each environment's current domain.
 
         Args:
-            t: ``[N]`` time per environment.
+            phase: ``[N]`` phase in [0, 1] per environment.
             env_ids: Optional environment index subset.
 
         Returns:
             ``[N]`` domain durations.
         """
         traj_idx = self._get_global_indices(env_ids)
-        domain_idx = self._get_domain_indices(t, traj_idx)
+        domain_idx = self._get_domain_indices(phase, traj_idx)
         return self.data["domain_times"][traj_idx, domain_idx]
 
     def get_num_domains(self, env_ids: Tensor | None = None) -> Tensor:
@@ -972,12 +905,12 @@ class MultiSkillManager(ManagerBase):
         return self.data["total_time"][0]
 
     def get_ref_frames_in_use(
-        self, t: Tensor, ref_frames: list[str], env_ids: Tensor | None = None
+        self, phase: Tensor, ref_frames: list[str], env_ids: Tensor | None = None
     ) -> Tensor:
         """Determine the active reference frame per environment.
 
         Args:
-            t: ``[N]`` time per environment.
+            phase: ``[N]`` phase in [0, 1] per environment.
             ref_frames: List of reference frame names.
             env_ids: Optional environment index subset.
 
@@ -989,7 +922,7 @@ class MultiSkillManager(ManagerBase):
             self._precompute_ref_frame_map(ref_frames)
 
         traj_idx = self._get_global_indices(env_ids)
-        domain_idx = self._get_domain_indices(t, traj_idx)
+        domain_idx = self._get_domain_indices(phase, traj_idx)
         return self._ref_frame_map[traj_idx, domain_idx]
 
     def _precompute_ref_frame_map(self, ref_frames: list[str]) -> None:
@@ -1017,12 +950,12 @@ class MultiSkillManager(ManagerBase):
         self._ref_frame_key = tuple(ref_frames)
 
     def get_contact_state(
-        self, t: Tensor, contact_frames: list[str], env_ids: Tensor | None = None
+        self, phase: Tensor, contact_frames: list[str], env_ids: Tensor | None = None
     ) -> Tensor:
         """Return the contact state per environment and contact frame.
 
         Args:
-            t: ``[N]`` time per environment.
+            phase: ``[N]`` phase in  [0, 1] per environment.
             contact_frames: List of contact frame names.
             env_ids: Optional environment index subset.
 
@@ -1033,12 +966,11 @@ class MultiSkillManager(ManagerBase):
             self._precompute_contact_table(contact_frames)
 
         traj_idx = self._get_global_indices(env_ids)
-        domain_idx = self._get_domain_indices(t, traj_idx)
+        domain_idx = self._get_domain_indices(phase, traj_idx)
 
         # For half-periodic trajectories, use reflected table in second half
         is_half = self.data["traj_type"][traj_idx] == _HALF_PERIODIC_INT
-        phi = self._compute_phasing_var(t, traj_idx)
-        in_second_half = is_half & (phi >= 0.5)
+        in_second_half = is_half & (phase >= 0.5)
 
         result = self._contact_table_first[traj_idx, domain_idx]
         reflected = self._contact_table_second[traj_idx, domain_idx]
@@ -1477,19 +1409,16 @@ class MultiSkillManager(ManagerBase):
         rel = self.phase[env_ids] - gate_phi
         self.gate_rel_phi[env_ids] = torch.where(active, rel, torch.zeros_like(rel))
 
-    def _eps_phi(self, traj_idx: Tensor) -> Tensor:
-        """One step's worth of phi for each trajectory.
+    _EPS_PHI = 0.001
+    """Small phi-space nudge used by the snap operations.
 
-        Args:
-            traj_idx: ``[N]`` global trajectory indices.
-
-        Returns:
-            ``[N]`` ``step_dt / total_time[traj_idx]``.
-        """
-        if self.env is None or not hasattr(self.env, "step_dt"):
-            raise RuntimeError("Manager has no env; cannot compute eps_phi.")
-        total = self.data["total_time"][traj_idx]
-        return 0.0 #0.001 #self.env.step_dt / total  # NOTE: I think the step_dt jump was too big
+    Snap operations land phase at ``gate_phi ± _EPS_PHI`` so that the
+    post-snap value falls strictly inside the intended (new vs. previous)
+    domain rather than on the boundary, where ``searchsorted(...,
+    right=False)`` would assign it to the previous domain.  ``0.001`` is
+    small enough not to perturb training and large enough to clear
+    float-precision and the boundary tie.
+    """
 
     def _reseed_gate_for_envs(self, env_ids: Tensor) -> None:
         """Re-arm ``next_gate_idx`` for the given envs based on their current phase.
@@ -1597,13 +1526,17 @@ class MultiSkillManager(ManagerBase):
         # Advance gate_rel_phi monotonically: undo the periodic wrap so
         # the value tracks signed distance from the armed gate without
         # ambiguity.  Perpetual envs don't move; episodic envs use actual
-        # (post-clamp) movement.
+        # (post-clamp) movement.  Envs with no armed gate
+        # (``next_gate_idx == -1``) get zero movement so gate_rel_phi
+        # doesn't drift while the gate is disarmed.
         phi_movement = new_phase - prev_phase
         phi_movement = torch.where(
             is_periodic & (new_phase < prev_phase),
             phi_movement + 1.0,
             phi_movement,
         )
+        gate_armed = self.next_gate_idx[sel] >= 0
+        phi_movement = torch.where(gate_armed, phi_movement, torch.zeros_like(phi_movement))
         self.gate_rel_phi[sel] = self.gate_rel_phi[sel] + phi_movement
         # Snapshot the post-update, pre-snap value for diagnostic logging.
         self.gate_rel_phi_pre_snap[sel] = self.gate_rel_phi[sel]
@@ -1647,22 +1580,21 @@ class MultiSkillManager(ManagerBase):
 
     def snap_phase_to_new_domain(self, env_ids: Tensor) -> None:
         """Early-contact snap.  Phase currently in old domain (before gate);
-        jump *forward* to ``(gate_phi + eps_phi) % 1.0`` — start of the new
-        domain — and advance ``next_gate_idx``.
+        jump *forward* to ``(gate_phi + _EPS_PHI) % 1.0`` — start of the
+        new domain — and advance ``next_gate_idx``.
         """
         if env_ids.numel() == 0:
             return
         traj_idx = self._get_global_indices()[env_ids]
         gate_idx = self.next_gate_idx[env_ids]
         gate_phi = self._gate_phi_table[traj_idx, gate_idx]
-        eps_phi = self._eps_phi(traj_idx)
-        self.phase[env_ids] = (gate_phi + eps_phi) % 1.0
+        self.phase[env_ids] = (gate_phi + self._EPS_PHI) % 1.0
         self._advance_gate_for_envs(env_ids)
 
     def snap_phase_to_start_of_current_domain(self, env_ids: Tensor) -> None:
         """Late-contact snap (hold-off).  Phase already past the gate (in
         the new domain); pull *backward* a small amount to
-        ``(gate_phi + eps_phi) % 1.0`` — start of the same new domain —
+        ``(gate_phi + _EPS_PHI) % 1.0`` — start of the same new domain —
         and advance ``next_gate_idx``.
 
         Same numerical target as :meth:`snap_phase_to_new_domain` but the
@@ -1674,14 +1606,13 @@ class MultiSkillManager(ManagerBase):
         traj_idx = self._get_global_indices()[env_ids]
         gate_idx = self.next_gate_idx[env_ids]
         gate_phi = self._gate_phi_table[traj_idx, gate_idx]
-        eps_phi = self._eps_phi(traj_idx)
-        self.phase[env_ids] = (gate_phi + eps_phi) % 1.0
+        self.phase[env_ids] = (gate_phi + self._EPS_PHI) % 1.0
         self._advance_gate_for_envs(env_ids)
 
     def snap_phase_to_end_of_previous_domain(self, env_ids: Tensor) -> None:
         """Hold-on-late-contact snap.  Phase has just crossed the gate
         boundary into the new domain; pull *backward* to
-        ``(gate_phi - eps_phi) % 1.0`` — end of the old (previous) domain.
+        ``(gate_phi - _EPS_PHI) % 1.0`` — end of the old (previous) domain.
         Does NOT advance ``next_gate_idx`` — we're still waiting for this
         gate's contact event.
         """
@@ -1690,8 +1621,7 @@ class MultiSkillManager(ManagerBase):
         traj_idx = self._get_global_indices()[env_ids]
         gate_idx = self.next_gate_idx[env_ids]
         gate_phi = self._gate_phi_table[traj_idx, gate_idx]
-        eps_phi = self._eps_phi(traj_idx)
-        self.phase[env_ids] = (gate_phi - eps_phi) % 1.0
+        self.phase[env_ids] = (gate_phi - self._EPS_PHI) % 1.0
         self._refresh_gate_rel_phi(env_ids)
 
     # ------------------------------------------------------------------

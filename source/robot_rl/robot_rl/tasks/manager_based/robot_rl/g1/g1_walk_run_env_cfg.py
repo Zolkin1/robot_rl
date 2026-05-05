@@ -29,14 +29,6 @@ class G1WalkRunCLFEnvCfg(G1MultiSkillCLFEnvCfg):
         # TODO: Consider using a max acc on some % (like 10) of the teacher so its not OOD
         # self.commands.base_velocity.max_acc = 1.0
         # self.commands.base_velocity.max_acc_frac = 1.0 #0.2
-        # self.commands.base_velocity.max_acc_frac = 0.0
-        # self.commands.base_velocity.velocity_buckets=[
-        #     VelocityBucketCfg(percentage=0.0, lin_vel_x=(0.0, 0.1)),   # Standing
-        #     VelocityBucketCfg(percentage=1.0, lin_vel_x=(1.050 + 1.3673e-04 - 4.4560e-01 + 7.7486e-07, 1.050 + 1.3673e-04 - 4.4560e-01 + 7.7486e-07)),   # Walking
-        #     VelocityBucketCfg(percentage=0.0, lin_vel_x=(1.5, 3.7)),   # Running
-        # ]
-        # self.observations.policy.enable_corruption = False
-        # self.observations.critic.enable_corruption = False
 
         ##
         # Rewards
@@ -67,12 +59,6 @@ class G1WalkRunCLFEnvCfg(G1MultiSkillCLFEnvCfg):
 
         self.commands.base_velocity.debug_vis = False
 
-        # self.events.push_robot = None
-        # self.events.gain_randomization = None
-        # self.events.add_base_mass = None
-        # self.events.base_com = None
-        # self.events.base_external_force_torque = None
-        # self.events.randomize_ground_contact_friction = None
 
 @configclass
 class G1WalkRunCLFTransformerRLEnvCfg(G1WalkRunCLFEnvCfg):

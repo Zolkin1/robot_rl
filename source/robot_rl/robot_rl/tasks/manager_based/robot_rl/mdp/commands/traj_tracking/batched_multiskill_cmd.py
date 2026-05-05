@@ -22,10 +22,8 @@ class BatchedMultiSkillCommand(BaseTrajectoryCommand):
     :meth:`MultiSkillManager.snap_phase_to_end_of_previous_domain`.
 
     Skill changes leave the phase unchanged — the new skill inherits the
-    current phase value as-is.  Trajectory eval downstream is fed
-    ``t = phase * total_time[traj_idx]`` so the existing time-based
-    manager methods (``get_output``, ``get_phasing_var``, ...) work
-    without modification.
+    current phase value as-is.  All downstream manager evaluations
+    (``get_output``, ``get_contact_state``, ...) take the phase directly.
     """
 
     def _create_manager(self, cfg, env) -> ManagerBase:
@@ -69,11 +67,11 @@ class BatchedMultiSkillCommand(BaseTrajectoryCommand):
         # Eagerly allocate manager phase state to num_envs.
         self.manager._ensure_phase_state(self.num_envs)
 
-        # Idempotency guard for ``_compute_time`` (called twice per env step
-        # by IsaacLab's resample-then-update flow).  When the cached step
-        # buffer matches the current one we skip phase advance + gate.
+        # Idempotency guard for ``_pre_update_phase`` (``_update_command`` is
+        # called twice per env step by IsaacLab's resample-then-update flow).
+        # When the cached step buffer matches the current one we skip phase
+        # advance + gate.
         self._last_compute_step: torch.Tensor | None = None
-        self._cached_t: torch.Tensor | None = None
 
         # --- Contact-gate wiring -----------------------------------------
         self._gating_enabled = self.cfg.contact_gate_window_frac is not None
@@ -219,8 +217,10 @@ class BatchedMultiSkillCommand(BaseTrajectoryCommand):
             self.manager.snap_phase_to_end_of_previous_domain(end_prev_ids)
             self.manager.snap_phase_to_new_domain(new_dom_ids)
 
-    def _compute_time(self) -> torch.Tensor:
-        """Compute the per-env trajectory time from the manager's phase.
+    def _pre_update_phase(self) -> None:
+        """Advance ``manager.phase`` and run the contact gate.
+
+        Called once at the top of :meth:`BaseTrajectoryCommand._update_command`.
 
         Order per step:
           1. Advance phase by ``step_dt`` for non-reset envs (envs with
@@ -228,25 +228,23 @@ class BatchedMultiSkillCommand(BaseTrajectoryCommand):
              the reset event — :func:`reset_on_reference` calls
              :meth:`MultiSkillManager.set_phase` directly, so we must not
              clobber that here).
-          2. Apply contact gate (if enabled) — issues snap calls to the
+          2. Invalidate the trajectory-assignment cache and re-resolve so
+             the contact gate sees the post-advance trajectory.
+          3. Apply contact gate (if enabled) — issues snap calls to the
              manager.
-          3. Return ``t = phase * total_time[traj_idx]`` for the base
-             class to feed into ``manager.get_output(t)``.
 
         Idempotent across the same env step: IsaacLab's
         ``CommandTerm.compute`` calls ``_update_command`` twice when a
         resample fires (once from ``_resample_command`` and once
-        directly).  We cache the result keyed by ``episode_length_buf``
-        and short-circuit the second call.
+        directly).  Keyed on ``episode_length_buf``, the second call is a
+        no-op.
         """
-        # TODO: Should probably check all of this again
         ep_len = self.env.episode_length_buf
         if (
             self._last_compute_step is not None
             and torch.equal(self._last_compute_step, ep_len)
-            and self._cached_t is not None
         ):
-            return self._cached_t
+            return
 
         advancing_mask = (ep_len > 0) & (ep_len < self.env.max_episode_length)
         if advancing_mask.any():
@@ -254,16 +252,22 @@ class BatchedMultiSkillCommand(BaseTrajectoryCommand):
             self.manager.update_phase(self.env.step_dt, env_ids=adv_ids)
 
         # Resolve current trajectory assignment after any phase mutations.
+        # Populates ``manager._traj_changed`` for any env whose conditioner
+        # routed it to a different trajectory this step.
         self.manager.invalidate_cache()
-        cur_traj = self.manager.get_current_trajectory_indices()
+        self.manager.get_current_trajectory_indices()
 
         if self._gating_enabled:
+            # Re-arm the gate for envs that just changed trajectory.  Without
+            # this, ``next_gate_idx`` stays bound to the old trajectory's
+            # gate slots — possibly inactive in the new trajectory — and the
+            # gate logic silently no-ops for the rest of the episode.
+            traj_changed = self.manager._traj_changed
+            if traj_changed is not None and traj_changed.any():
+                changed_ids = torch.where(traj_changed)[0]
+                self.manager._reseed_gate_for_envs(changed_ids)
+
             contact_now = self._read_contact_now()
             self._apply_contact_gate(contact_now)
 
-        total = self.manager.data["total_time"][cur_traj]
-        t = self.manager.phase * total
-
         self._last_compute_step = ep_len.clone()
-        self._cached_t = t
-        return t

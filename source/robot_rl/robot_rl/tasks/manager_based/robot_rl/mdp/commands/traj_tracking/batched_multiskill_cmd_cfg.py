@@ -43,7 +43,7 @@ class BatchedMultiSkillCommandCfg(BaseTrajectoryCommandCfg):
     ``hold_on_late_contact=True`` for the hold-at-boundary variant.  Set
     to ``None`` to disable contact gating entirely."""
 
-    contact_sensor_names: list[str] = ("left_foot_contact", "right_foot_contact")
+    contact_sensor_names: tuple[str, ...] = ("left_foot_contact", "right_foot_contact")
     """Names of the ContactSensor scene entities used by the contact gate.
     Their combined body list must cover every reference frame in the loaded
     trajectories' ``contact_bodies``.  Each contact body must appear in

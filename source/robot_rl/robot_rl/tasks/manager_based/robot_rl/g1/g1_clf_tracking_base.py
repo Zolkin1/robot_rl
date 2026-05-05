@@ -121,6 +121,13 @@ class G1ClfTrackingSceneCfg(InteractiveSceneCfg):
 ##
 @configclass
 class G1ClfTrackingCommandCfg:
+    # TODO: Migrate to BatchedMultiSkillCommandCfg.  Single-skill
+    # TrajectoryCommandCfg is slated for deletion; see
+    # ``g1_clf_multiskill_base.G1MultiSkillCommandsCfg`` for the
+    # equivalent multi-skill setup (folder of skill subfolders + skill
+    # conditioner instead of ``manager_type="library"``).  Sin/cos phase
+    # observations need a multi-skill replacement as well — see
+    # ``observations._phased_cmd``.
     traj_ref = TrajectoryCommandCfg(
         contact_bodies = [".*_ankle_roll_link"],
 

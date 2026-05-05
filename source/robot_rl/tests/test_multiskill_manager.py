@@ -204,11 +204,12 @@ class TestBatchedOutput:
         # Test times spanning the trajectory
         total_t = msm.data["total_time"][traj_idx].item()
         t = torch.linspace(0.001, total_t * 0.99, N)
+        phase = t / total_t
 
         # Set all envs to this trajectory
         msm.set_trajectory_indices(torch.full((N,), traj_idx, dtype=torch.long))
 
-        pos_msm, vel_msm = msm.get_output(t)
+        pos_msm, vel_msm = msm.get_output(phase)
         pos_ref, vel_ref = ref.get_output(t)
 
         assert torch.allclose(pos_msm, pos_ref, atol=1e-4, rtol=1e-4), (
@@ -229,8 +230,11 @@ class TestBatchedOutput:
         msm.set_trajectory_indices(indices)
 
         t = torch.tensor([0.05, 0.1, 0.05, 0.1])
+        total_a = msm.data["total_time"][idx_a].item()
+        total_b = msm.data["total_time"][idx_b].item()
+        phase = torch.tensor([t[0] / total_a, t[1] / total_a, t[2] / total_b, t[3] / total_b])
 
-        pos_msm, vel_msm = msm.get_output(t)
+        pos_msm, vel_msm = msm.get_output(phase)
 
         pos_a, vel_a = reference_managers[idx_a].get_output(t[:2])
         pos_b, vel_b = reference_managers[idx_b].get_output(t[2:])
@@ -241,22 +245,26 @@ class TestBatchedOutput:
         assert torch.allclose(vel_msm[2:], vel_b, atol=1e-4)
 
     def test_output_at_t_zero(self, multiskill_single_skill, reference_managers):
-        """Output at t=0 should match reference for all trajectories."""
+        """Output at phase=0 should match reference for all trajectories."""
         msm = multiskill_single_skill
         T = msm.num_trajectories
-        t = torch.full((T,), 0.001)  # Slightly off zero to avoid boundary
+        # Slightly off zero to avoid boundary; same value works as both phase
+        # and time since reference managers use whatever value as time directly.
+        t = torch.full((T,), 0.001)
+        totals = msm.data["total_time"][:T]
+        phase = t / totals
         indices = torch.arange(T, dtype=torch.long)
         msm.set_trajectory_indices(indices)
 
-        pos_msm, vel_msm = msm.get_output(t)
+        pos_msm, vel_msm = msm.get_output(phase)
 
         for ti in range(T):
             pos_ref, vel_ref = reference_managers[ti].get_output(t[ti:ti+1])
             assert torch.allclose(pos_msm[ti:ti+1], pos_ref, atol=1e-4), (
-                f"Traj {ti} t=0 pos mismatch"
+                f"Traj {ti} phase=0 pos mismatch"
             )
             assert torch.allclose(vel_msm[ti:ti+1], vel_ref, atol=1e-4), (
-                f"Traj {ti} t=0 vel mismatch"
+                f"Traj {ti} phase=0 vel mismatch"
             )
 
 
@@ -264,39 +272,38 @@ class TestBatchedOutput:
 # Cross-Validation: Phasing Variable
 # ---------------------------------------------------------------------------
 
-class TestPhasingVar:
-    @pytest.mark.parametrize("traj_idx", [0, 5, 10, 18])
-    def test_phasing_matches_reference(
-        self, multiskill_single_skill, reference_managers, traj_idx
-    ):
-        """Phasing variable should match per-trajectory result."""
-        if traj_idx >= len(reference_managers):
-            pytest.skip("Not enough trajectories")
+class TestPhase:
+    """Phase state lives directly on the manager — these tests pin the
+    set / read round-trip.  Earlier ``get_phasing_var(t)`` tests are gone:
+    after the time→phase refactor, ``manager.phase`` *is* the phasing
+    variable, so there is no transformation left to cross-validate."""
 
+    def test_set_phase_round_trip(self, multiskill_single_skill):
+        """``set_phase`` writes; ``manager.phase`` reads back the same value."""
         msm = multiskill_single_skill
-        ref = reference_managers[traj_idx]
-        N = 8
+        N = 4
+        msm.set_trajectory_indices(torch.zeros(N, dtype=torch.long, device=DEVICE))
+        msm._ensure_phase_state(N)
+        env_ids = torch.arange(N, device=DEVICE)
+        target = torch.tensor([0.0, 0.25, 0.5, 0.99], device=DEVICE)
+        msm.set_phase(target, env_ids)
+        assert torch.allclose(msm.phase, target, atol=1e-7)
 
-        total_t = msm.data["total_time"][traj_idx].item()
-        t = torch.linspace(0.001, total_t * 0.99, N)
-
-        msm.set_trajectory_indices(torch.full((N,), traj_idx, dtype=torch.long))
-        phi_msm = msm.get_phasing_var(t)
-        phi_ref = ref.get_phasing_var(t)
-
-        assert torch.allclose(phi_msm, phi_ref, atol=1e-5), (
-            f"Traj {traj_idx} phasing mismatch: max diff = {(phi_msm - phi_ref).abs().max()}"
-        )
-
-    def test_phasing_range(self, multiskill_single_skill):
-        """Phasing should be in [0, 1]."""
+    def test_phase_in_unit_interval_after_update(self, multiskill_single_skill):
+        """``update_phase`` keeps phase in [0, 1] for all trajectory types."""
         msm = multiskill_single_skill
         N = 20
-        t = torch.rand(N) * 2.0
-        msm.set_trajectory_indices(torch.zeros(N, dtype=torch.long))
-        phi = msm.get_phasing_var(t)
-        assert (phi >= 0).all()
-        assert (phi <= 1).all()
+        msm.set_trajectory_indices(torch.zeros(N, dtype=torch.long, device=DEVICE))
+        msm._ensure_phase_state(N)
+        # Seed near the wrap so periodic trajectories actually wrap.
+        msm.phase[:] = torch.linspace(0.9, 0.999, N, device=DEVICE)
+        # update_phase needs an env with step_dt; reuse the stub via msm.env
+        # if present, otherwise skip.
+        if msm.env is None or not hasattr(msm.env, "step_dt"):
+            pytest.skip("Manager has no env; cannot exercise update_phase")
+        msm.update_phase(msm.env.step_dt)
+        assert (msm.phase >= 0).all()
+        assert (msm.phase <= 1).all()
 
 
 # ---------------------------------------------------------------------------
@@ -318,9 +325,10 @@ class TestDomains:
 
         total_t = msm.data["total_time"][traj_idx].item()
         t = torch.linspace(0.001, total_t * 0.99, N)
+        phase = t / total_t
 
         msm.set_trajectory_indices(torch.full((N,), traj_idx, dtype=torch.long))
-        dom_msm = msm.get_current_domains(t)
+        dom_msm = msm.get_current_domains(phase)
         dom_ref = ref.get_current_domains(t)
 
         assert torch.equal(dom_msm, dom_ref), (
@@ -341,9 +349,10 @@ class TestDomains:
 
         total_t = msm.data["total_time"][traj_idx].item()
         t = torch.linspace(0.001, total_t * 0.99, N)
+        phase = t / total_t
 
         msm.set_trajectory_indices(torch.full((N,), traj_idx, dtype=torch.long))
-        dt_msm = msm.get_domain_times(t)
+        dt_msm = msm.get_domain_times(phase)
         dt_ref = ref.get_domain_times(t)
 
         assert torch.allclose(dt_msm, dt_ref, atol=1e-6), (
@@ -355,42 +364,13 @@ class TestDomains:
         msm = multiskill_single_skill
         T = msm.num_trajectories
         N = T
-        t = torch.rand(N) * 2.0
+        phase = torch.rand(N)
         indices = torch.arange(T, dtype=torch.long)
         msm.set_trajectory_indices(indices)
 
-        dom = msm.get_current_domains(t)
+        dom = msm.get_current_domains(phase)
         max_valid = msm.data["expanded_domains"][indices] - 1
         assert (dom <= max_valid).all()
-
-
-# ---------------------------------------------------------------------------
-# Cross-Validation: Acceleration
-# ---------------------------------------------------------------------------
-
-class TestAcceleration:
-    @pytest.mark.parametrize("traj_idx", [0, 5, 10])
-    def test_acceleration_matches_reference(
-        self, multiskill_single_skill, reference_managers, traj_idx
-    ):
-        """Acceleration should match per-trajectory result."""
-        if traj_idx >= len(reference_managers):
-            pytest.skip("Not enough trajectories")
-
-        msm = multiskill_single_skill
-        ref = reference_managers[traj_idx]
-        N = 8
-
-        total_t = msm.data["total_time"][traj_idx].item()
-        t = torch.linspace(0.01, total_t * 0.9, N)
-
-        msm.set_trajectory_indices(torch.full((N,), traj_idx, dtype=torch.long))
-        acc_msm = msm.get_acceleration(t)
-        acc_ref = ref.get_acceleration(t)
-
-        assert torch.allclose(acc_msm, acc_ref, atol=1e-3, rtol=1e-3), (
-            f"Traj {traj_idx} accel mismatch: max diff = {(acc_msm - acc_ref).abs().max()}"
-        )
 
 
 # ---------------------------------------------------------------------------
@@ -413,9 +393,10 @@ class TestContactState:
 
         total_t = msm.data["total_time"][traj_idx].item()
         t = torch.linspace(0.001, total_t * 0.99, N)
+        phase = t / total_t
 
         msm.set_trajectory_indices(torch.full((N,), traj_idx, dtype=torch.long))
-        cs_msm = msm.get_contact_state(t, contact_frames)
+        cs_msm = msm.get_contact_state(phase, contact_frames)
         cs_ref = ref.get_contact_state(t, contact_frames)
 
         assert torch.equal(cs_msm, cs_ref), (
@@ -438,16 +419,18 @@ class TestOrderOutputs:
 
         # Get output in original order
         N = 4
+        total_t = msm.data["total_time"][0].item()
         t = torch.tensor([0.01, 0.05, 0.1, 0.15])
+        phase = t / total_t
         msm.set_trajectory_indices(torch.zeros(N, dtype=torch.long))
-        pos_orig, vel_orig = msm.get_output(t)
+        pos_orig, vel_orig = msm.get_output(phase)
 
         # Reverse output names
         rev_pos = list(reversed(msm.pos_output_names))
         rev_vel = list(reversed(msm.vel_output_names))
         msm.order_outputs(rev_pos, rev_vel)
 
-        pos_rev, vel_rev = msm.get_output(t)
+        pos_rev, vel_rev = msm.get_output(phase)
 
         # Reversed output should be the original flipped
         assert torch.allclose(pos_rev, pos_orig.flip(1), atol=1e-6)
@@ -505,18 +488,17 @@ class TestPlaceholders:
 # ---------------------------------------------------------------------------
 
 class TestInterface:
-    def test_get_num_outputs(self, multiskill_single_skill):
-        """get_num_outputs should return pos output count."""
-        assert multiskill_single_skill.get_num_outputs() == multiskill_single_skill.num_pos_outputs
-
     def test_get_num_pos_outputs(self, multiskill_single_skill):
         assert multiskill_single_skill.get_num_pos_outputs() == multiskill_single_skill.num_pos_outputs
 
     def test_get_num_vel_outputs(self, multiskill_single_skill):
         assert multiskill_single_skill.get_num_vel_outputs() == multiskill_single_skill.num_vel_outputs
 
-    def test_get_output_names(self, multiskill_single_skill):
-        assert multiskill_single_skill.get_output_names == multiskill_single_skill.pos_output_names
+    def test_get_pos_output_names(self, multiskill_single_skill):
+        assert multiskill_single_skill.get_pos_output_names == multiskill_single_skill.pos_output_names
+
+    def test_get_vel_output_names(self, multiskill_single_skill):
+        assert multiskill_single_skill.get_vel_output_names == multiskill_single_skill.vel_output_names
 
     def test_get_reference_frames(self, multiskill_single_skill):
         assert isinstance(multiskill_single_skill.get_reference_frames(), list)
@@ -740,6 +722,30 @@ class TestGateState:
         assert msm.phase[0].item() == pytest.approx(0.30 + delta, abs=1e-6)
         assert msm.gate_rel_phi[0].item() == pytest.approx((0.30 - 0.50) + delta, abs=1e-6)
 
+    def test_update_phase_does_not_drift_when_gate_disarmed(self, msm, half_periodic_idx):
+        """``gate_rel_phi`` must not accumulate while ``next_gate_idx == -1``.
+
+        Without this guard, an env that ran on a no-gate trajectory and
+        later transitioned to a walking trajectory would see ``gate_rel_phi``
+        ramp linearly forever (no anchor) — visible in domain-info plots
+        as a monotonic line with no resets.
+        """
+        ti = half_periodic_idx
+        N = 1
+        msm.set_trajectory_indices(torch.tensor([ti], dtype=torch.long, device=DEVICE))
+        msm._ensure_phase_state(N)
+
+        msm.phase[:] = 0.30
+        msm.next_gate_idx[:] = -1  # disarmed
+        msm.gate_rel_phi[:] = 0.0
+
+        msm.update_phase(0.02)
+
+        # Phase still advances (the trajectory clock is independent).
+        assert msm.phase[0].item() > 0.30
+        # gate_rel_phi must stay put while the gate is disarmed.
+        assert msm.gate_rel_phi[0].item() == pytest.approx(0.0, abs=1e-7)
+
     def test_update_phase_wrap_unwraps_gate_rel_phi(self, msm, half_periodic_idx):
         """Across a phase wrap, gate_rel_phi advances by the un-wrapped delta."""
         ti = half_periodic_idx
@@ -856,8 +862,7 @@ class TestGateState:
         msm.phase[:] = 0.46  # in early window of gate 0 (phi=0.5)
         msm.next_gate_idx[:] = 0
 
-        total = msm.data["total_time"][ti].item()
-        eps = msm.env.step_dt / total
+        eps = 0.001
 
         msm.snap_phase_to_new_domain(torch.tensor([0], device=DEVICE))
 
@@ -876,8 +881,7 @@ class TestGateState:
         msm.phase[:] = 0.62  # past gate 0
         msm.next_gate_idx[:] = 0
 
-        total = msm.data["total_time"][ti].item()
-        eps = msm.env.step_dt / total
+        eps = 0.001
 
         msm.snap_phase_to_start_of_current_domain(torch.tensor([0], device=DEVICE))
 
@@ -895,8 +899,7 @@ class TestGateState:
         msm.phase[:] = 0.55
         msm.next_gate_idx[:] = 0
 
-        total = msm.data["total_time"][ti].item()
-        eps = msm.env.step_dt / total
+        eps = 0.001
 
         msm.snap_phase_to_end_of_previous_domain(torch.tensor([0], device=DEVICE))
 
@@ -916,8 +919,7 @@ class TestGateState:
         msm.phase[:] = 0.97  # in early window of gate 1 (phi=1.0)
         msm.next_gate_idx[:] = 1
 
-        total = msm.data["total_time"][ti].item()
-        eps = msm.env.step_dt / total
+        eps = 0.001
 
         msm.snap_phase_to_new_domain(torch.tensor([0], device=DEVICE))
 
@@ -925,3 +927,54 @@ class TestGateState:
         assert msm.phase[0].item() == pytest.approx(eps, abs=1e-6)
         # gate_rel_phi = eps - 0.5
         assert msm.gate_rel_phi[0].item() == pytest.approx(eps - 0.50, abs=1e-6)
+
+    def test_snap_lands_in_intended_domain(self, msm, half_periodic_idx):
+        """``_eps_phi``-driven snaps must land phase in the domain promised
+        by each snap's docstring.
+
+        ``snap_phase_to_new_domain`` and
+        ``snap_phase_to_start_of_current_domain`` both set
+        ``phase = gate_phi + eps``; ``get_current_domains`` should report
+        the **new** domain (gate_idx + 1 within original domains).
+        ``snap_phase_to_end_of_previous_domain`` sets ``phase = gate_phi -
+        eps``; ``get_current_domains`` should report the **previous**
+        domain.  Sanity-checks that ``eps_phi = 0.001`` is large enough to
+        clear ``searchsorted(..., right=False)``'s tie boundary.
+        """
+        ti = half_periodic_idx
+        N = 1
+        msm.set_trajectory_indices(torch.tensor([ti], dtype=torch.long, device=DEVICE))
+        msm._ensure_phase_state(N)
+
+        # Gate 0 of half-periodic sits at phi=0.5; before the snap we're in
+        # the old (first) domain.
+        msm.phase[:] = 0.46
+        msm.next_gate_idx[:] = 0
+        old_domain = msm.get_current_domains(msm.phase).clone()
+
+        msm.snap_phase_to_new_domain(torch.tensor([0], device=DEVICE))
+        post = msm.get_current_domains(msm.phase)
+        assert post.item() != old_domain.item(), (
+            f"snap_phase_to_new_domain left phase ({msm.phase.item()}) in the "
+            f"old domain ({old_domain.item()})."
+        )
+
+        # Reset and exercise the late-fire snap (same target).
+        msm.phase[:] = 0.62
+        msm.next_gate_idx[:] = 0
+        msm.snap_phase_to_start_of_current_domain(torch.tensor([0], device=DEVICE))
+        post = msm.get_current_domains(msm.phase)
+        assert post.item() == old_domain.item() + 1, (
+            f"snap_phase_to_start_of_current_domain landed in domain "
+            f"{post.item()}; expected {old_domain.item() + 1}."
+        )
+
+        # Reset and exercise the hold-on snap (lands in OLD domain).
+        msm.phase[:] = 0.55
+        msm.next_gate_idx[:] = 0
+        msm.snap_phase_to_end_of_previous_domain(torch.tensor([0], device=DEVICE))
+        post = msm.get_current_domains(msm.phase)
+        assert post.item() == old_domain.item(), (
+            f"snap_phase_to_end_of_previous_domain landed in domain "
+            f"{post.item()}; expected {old_domain.item()}."
+        )

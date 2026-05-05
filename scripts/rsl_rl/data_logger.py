@@ -149,15 +149,18 @@ class DataLogger:
                                        f"Could not compute gate_early_window: {exc}")
 
                 # Fallback: if the command doesn't expose phasing_var (e.g.
-                # multiskill, which has no phase state), query phi from the
-                # manager using the command's per-env trajectory clock so
-                # downstream plots still work.
-                if "phasing_var" not in step and hasattr(ref, "traj_time") and hasattr(ref, "manager"):
+                # multiskill, which keeps phase state on the manager), read
+                # ``manager.phase`` directly so downstream plots still work.
+                if (
+                    "phasing_var" not in step
+                    and hasattr(ref, "manager")
+                    and getattr(ref.manager, "phase", None) is not None
+                ):
                     try:
-                        step["phasing_var"] = ref.manager.get_phasing_var(ref.traj_time).clone()
+                        step["phasing_var"] = ref.manager.phase.clone()
                     except Exception as exc:
                         self._warn("phasing_var_fallback",
-                                   f"Could not compute fallback phasing_var: {exc}")
+                                   f"Could not read manager.phase: {exc}")
             except Exception as exc:
                 self._warn("traj_term", f"Failed to read trajectory term: {exc}")
 

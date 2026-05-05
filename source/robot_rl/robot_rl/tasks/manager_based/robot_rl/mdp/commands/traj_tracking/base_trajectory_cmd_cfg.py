@@ -19,4 +19,3 @@ class BaseTrajectoryCommandCfg(CommandTermCfg):
     Q_weights: list[float] = None
     R_weights: list[float] = None
     resampling_time_range: tuple[float, float] = (5.0, 15.0)
-    random_start_time_max: float = -1

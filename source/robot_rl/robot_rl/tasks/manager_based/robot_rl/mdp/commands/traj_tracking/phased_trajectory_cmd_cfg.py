@@ -1,4 +1,9 @@
-"""Configuration for :class:`PhasedTrajectoryCommand`."""
+"""Configuration for :class:`PhasedTrajectoryCommand`.
+
+TODO: Delete with :mod:`phased_trajectory_cmd`. Replaced by
+:class:`BatchedMultiSkillCommandCfg` once g1 single-skill configs are
+migrated.
+"""
 
 from isaaclab.utils import configclass
 

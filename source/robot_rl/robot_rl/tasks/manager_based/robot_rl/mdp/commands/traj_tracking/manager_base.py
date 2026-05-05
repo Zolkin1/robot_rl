@@ -36,15 +36,6 @@ class ManagerBase(ABC):
         pass
 
     @abstractmethod
-    def get_num_outputs(self) -> int:
-        """Get the total number of outputs in the trajectory.
-
-        Returns:
-            The number of outputs (e.g., frame axes + joints).
-        """
-        pass
-
-    @abstractmethod
     def get_current_domains(self, t: torch.Tensor) -> torch.Tensor:
         """Determine which domain each environment is in given the time.
 

@@ -109,32 +109,20 @@ def reset_on_reference(
             f"The following robot joints are missing from the trajectory outputs: {missing_joints}"
         )
 
-    # Sample random times for each environment.  For phase-based managers
-    # (multi-skill) total_time is per-trajectory, so we sample a phase
-    # first and convert; for the single-trajectory legacy path we keep the
-    # original scalar-total_time sampling.
-    _phase_based = hasattr(cmd.manager, "set_phase")
-    if _phase_based:
-        # The manager caches its trajectory assignments across steps and
-        # only invalidates inside ``BatchedMultiSkillCommand._compute_time``.
-        # Reset events fire between steps, so by default the cache here
-        # holds the *previous* step's traj_idx — built from the
-        # pre-resample conditioner.  Invalidate so the read below picks
-        # the trajectory matching the freshly-resampled conditioner (incl.
-        # any ``special_envs`` override above).
-        cmd.manager.invalidate_cache()
-        ref_traj_idx = cmd.manager.get_current_trajectory_indices()[ref_ids]
-        ref_total = cmd.manager.data["total_time"][ref_traj_idx]
-        # random_phase_ref = torch.rand(num_ref_envs, device=env.device)
-        random_times = 0.25 * torch.ones(num_ref_envs, device=env.device) #random_phase_ref * ref_total
-        random_phase_ref = random_times / ref_total
-    else:
-        total_time = cmd.manager.get_total_time()
-        # random_times = torch.rand(num_ref_envs, device=env.device) * total_time
-        random_times = 0.25 * torch.ones(num_ref_envs, device=env.device)
+    # Sample a phase per ref env.  The manager caches its trajectory
+    # assignments across steps and only invalidates inside
+    # ``BatchedMultiSkillCommand._pre_update_phase``.  Reset events fire
+    # between steps, so by default the cache here holds the *previous*
+    # step's traj_idx — built from the pre-resample conditioner.
+    # Invalidate so the read below picks the trajectory matching the
+    # freshly-resampled conditioner (incl. any ``special_envs`` override
+    # above).
+    cmd.manager.invalidate_cache()
+    ref_traj_idx = cmd.manager.get_current_trajectory_indices()[ref_ids]
+    random_phase_ref = torch.rand(num_ref_envs, device=env.device)
 
-    # Get trajectory outputs at sampled times
-    cmd.get_desired_outputs(random_times, env_ids=ref_ids)
+    # Get trajectory outputs at sampled phase
+    cmd.get_desired_outputs(random_phase_ref, env_ids=ref_ids)
     des_outputs = cmd.y_des
     y_sampled = des_outputs[ref_ids]  # Position outputs
 
@@ -150,14 +138,9 @@ def reset_on_reference(
     # both the spawn pose and the stored ref pose must shift by the same amount —
     # keeps ``robot_body - ref_frame == trajectory_value`` after the reset.
     # Assumes the stair origin lives at the env origin (= 0 in stair-local coords).
-    if _phase_based:
-        domain_idx = cmd.manager.get_current_domains(random_times, env_ids=ref_ids)
-        ref_offset = cmd.manager.data["ref_frame_offset"][ref_traj_idx, domain_idx]
-        stair_offset = cmd.manager.data["origin_relative_to_stair_center"][ref_traj_idx]
-    else:
-        domain_idx = cmd.manager.get_current_domains(random_times)
-        ref_offset = cmd.manager.ref_frame_offset_per_domain[domain_idx]
-        stair_offset = cmd.manager.origin_relative_to_stair_center.expand(num_ref_envs, -1)
+    domain_idx = cmd.manager.get_current_domains(random_phase_ref, env_ids=ref_ids)
+    ref_offset = cmd.manager.data["ref_frame_offset"][ref_traj_idx, domain_idx]
+    stair_offset = cmd.manager.data["origin_relative_to_stair_center"][ref_traj_idx]
     spawn_offset = ref_offset + stair_offset
 
     # Compute world-frame base pose
@@ -205,12 +188,8 @@ def reset_on_reference(
     #     joint_vel = joint_vel * scale_factors
 
     # Anchor the trajectory clock so the next step evaluates from the
-    # sampled state.  Phase-based managers persist the phase directly;
-    # the legacy time-based commands additively store an init offset.
-    if _phase_based:
-        cmd.manager.set_phase(random_phase_ref, ref_ids)
-    else:
-        cmd.init_time_offset[ref_ids] = random_times
+    # sampled state.
+    cmd.manager.set_phase(random_phase_ref, ref_ids)
 
     # Write states to simulation
     asset.write_root_pose_to_sim_index(root_pose=base_pose, env_ids=ref_ids)
@@ -298,13 +277,9 @@ def reset_on_reference(
         asset.write_joint_velocity_to_sim_index(velocity=joint_vel, env_ids=nonref_ids)
 
         # Anchor the non-ref envs' clock at phase 0 (start of cycle) so the
-        # trajectory eval roughly matches the default-pose spawn.  Legacy
-        # time-based commands use the equivalent ``init_time_offset = 0``.
-        if _phase_based:
-            nonref_phase = torch.zeros(num_nonref_envs, device=env.device)
-            cmd.manager.set_phase(nonref_phase, nonref_ids)
-        else:
-            cmd.init_time_offset[nonref_ids] = 0.0
+        # trajectory eval roughly matches the default-pose spawn.
+        nonref_phase = torch.zeros(num_nonref_envs, device=env.device)
+        cmd.manager.set_phase(nonref_phase, nonref_ids)
 
 
 

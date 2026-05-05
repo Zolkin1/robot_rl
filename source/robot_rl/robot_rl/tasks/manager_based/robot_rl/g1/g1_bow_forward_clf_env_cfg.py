@@ -158,6 +158,8 @@ BOWING_R_weights["left_wrist_yaw_link:ori_z"] = [0.005]
 @configclass
 class G1BowingCommandsCfg(HumanoidCommandsCfg):
     """Configuration for gait library commands."""
+    # TODO: Migrate to BatchedMultiSkillCommandCfg.  TrajectoryCommandCfg
+    # is slated for deletion (single-skill path superseded by multi-skill).
     traj_ref = TrajectoryCommandCfg(
         contact_bodies = [".*_ankle_roll_link"],
 
@@ -168,7 +170,6 @@ class G1BowingCommandsCfg(HumanoidCommandsCfg):
         conditioner_generator_name = "base_velocity",
         Q_weights = BOWING_Q_weights,
         R_weights = BOWING_R_weights,
-        random_start_time_max = -1.0, #1.0,
         percent_hold_phi = 0.0, #0.05,
     )
 
