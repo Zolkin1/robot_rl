@@ -11,6 +11,9 @@ from robot_rl.tasks.manager_based.robot_rl import mdp
 from .g1_clf_tracking_base import G1ClfTrackingEnvCfg, G1ClfTrackingObservationsCfg, G1ClfTrackingCommandCfg, \
     G1ClfTrackingRewardCfg
 from ..mdp.commands.traj_tracking.batched_multiskill_cmd_cfg import BatchedMultiSkillCommandCfg
+# FOR THE DUAL COMMAND
+from ..mdp.commands.traj_tracking.batched_multiskill_cmd_cfg_v2 import BatchedMultiSkillCommandV2Cfg
+#####
 from ..mdp.commands.multiskill_velocity_commands_cfg import MultiskillVelocityTrackingCommandCfg, VelocityBucketCfg
 from ..mdp.commands.velocity_commands_cfg import VelocityTrackingCommandCfg
 
@@ -99,6 +102,21 @@ class G1MultiSkillCommandsCfg(G1ClfTrackingCommandCfg):
             VelocityBucketCfg(percentage=0.45, lin_vel_x=(0.1, 1.5)),   # Walking
             VelocityBucketCfg(percentage=0.45, lin_vel_x=(1.5, 3.7)),   # Running
         ]
+    )
+
+    # FOR THE DUAL COMMAND
+    traj_ref_V2 = BatchedMultiSkillCommandV2Cfg(
+        contact_bodies = [".*_ankle_roll_link"],
+
+        hf_repo = "zolkin/robot_rl",
+        path = "trajectories/retargeted/2026-04-10_11-41-19_merged",
+
+        conditioner_generator_name = "base_velocity",
+        Q_weights = WALKING_Q_weights,
+        R_weights = WALKING_R_weights,
+
+        contact_gate_window_frac=0.2,
+        hold_on_late_contact=True,
     )
 
 @configclass

@@ -223,10 +223,23 @@ class G1ClfTrackingObservationsCfg:
 @configclass
 class G1ClfTrackingEventsCfg:
     # pass
+    # reset_on_ref = EventTerm(
+    #     func=mdp.reset_on_reference,
+    #     mode="reset",
+    #     params={"command_name": "traj_ref",
+    #             "base_frame_name": "pelvis_link",
+    #             "conditioner_command_name": "base_velocity",
+    #             "special_val": 0.0,     # Sometimes start on the running traj
+    #             "rel_envs_on_special": 0.0,
+    #             "rel_envs_on_ref": 1.0, #0.5,
+    #             "joint_add_range": [0.0, 0.0]} #[-0.1, 0.1]}
+    # )
+
     reset_on_ref = EventTerm(
-        func=mdp.reset_on_reference,
+        func=mdp.reset_on_reference_dual,
         mode="reset",
-        params={"command_name": "traj_ref",
+        params={"primary_command_name": "traj_ref",
+                "v2_command_name": "traj_ref_V2",
                 "base_frame_name": "pelvis_link",
                 "conditioner_command_name": "base_velocity",
                 "special_val": 0.0,     # Sometimes start on the running traj
@@ -234,6 +247,7 @@ class G1ClfTrackingEventsCfg:
                 "rel_envs_on_ref": 1.0, #0.5,
                 "joint_add_range": [0.0, 0.0]} #[-0.1, 0.1]}
     )
+
 
     # As of Isaac v3.0.0 beta there is no way to randomize dynamic and viscous friction that I can see.
     # Randomize joint friction

@@ -21,6 +21,7 @@ from .events.init_config import *  # noqa: F401, F403
 from .events.physical_randomization import *  # noqa: F401, F403
 from .events.resets import *  # noqa: F401, F403
 
+from .events.dual_resets import *  # noqa: F401, F403
 
 def __getattr__(name):
     """Lazily resolve attributes from isaaclab.envs.mdp."""
