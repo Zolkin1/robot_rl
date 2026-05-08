@@ -109,6 +109,8 @@ class G1StairsCLFEnvCfg(G1MultiSkillCLFEnvCfg):
             VelocityBucketCfg(percentage=1.0, lin_vel_x=(0.4, 0.4)),
         ]
 
+        self.commands.base_velocity.debug_vis = False
+
         ##
         # Events
         ##
