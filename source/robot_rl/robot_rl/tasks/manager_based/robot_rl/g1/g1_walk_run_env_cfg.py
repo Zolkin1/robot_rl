@@ -17,7 +17,6 @@ class G1WalkRunCLFEnvCfg(G1MultiSkillCLFEnvCfg):
         ##
         # TODO: Pull the updated trajectory so the stand frame aligns with the walk/run frames
         self.commands.traj_ref.path = "trajectories/retargeted/2026-04-10_11-41-19_merged"
-        self.commands.traj_ref_OLD.path = "trajectories/retargeted/2026-04-10_11-41-19_merged"
 
         # Configure velocity ranges for different gaits
         self.commands.base_velocity.ranges.lin_vel_x = (0.0, 3.7)

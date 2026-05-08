@@ -8,12 +8,11 @@ from isaaclab.managers import SceneEntityCfg
 
 from robot_rl.tasks.manager_based.robot_rl import mdp
 
+from isaaclab.managers import EventTermCfg as EventTerm
+
 from .g1_clf_tracking_base import G1ClfTrackingEnvCfg, G1ClfTrackingObservationsCfg, G1ClfTrackingCommandCfg, \
-    G1ClfTrackingRewardCfg
-from ..mdp.commands.traj_tracking.batched_multiskill_cmd_cfg import BatchedMultiSkillCommandCfg
-# FOR THE DUAL COMMAND
+    G1ClfTrackingRewardCfg, G1ClfTrackingEventsCfg
 from ..mdp.commands.traj_tracking.batched_multiskill_cmd_cfg_v2 import BatchedMultiSkillCommandV2Cfg
-#####
 from ..mdp.commands.multiskill_velocity_commands_cfg import MultiskillVelocityTrackingCommandCfg, VelocityBucketCfg
 from ..mdp.commands.velocity_commands_cfg import VelocityTrackingCommandCfg
 
@@ -67,20 +66,6 @@ class G1MultiSkillRewardCfg(G1ClfTrackingRewardCfg):
     )
 @configclass
 class G1MultiSkillCommandsCfg(G1ClfTrackingCommandCfg):
-    traj_ref_OLD = BatchedMultiSkillCommandCfg(
-        contact_bodies = [".*_ankle_roll_link"],
-
-        hf_repo = "zolkin/robot_rl",
-        path = "trajectories/retargeted/2026-04-10_11-41-19_merged",
-
-        conditioner_generator_name = "base_velocity",
-        Q_weights = WALKING_Q_weights,
-        R_weights = WALKING_R_weights,
-
-        contact_gate_window_frac=0.2,
-        hold_on_late_contact=True,
-    )
-
     base_velocity = MultiskillVelocityTrackingCommandCfg(
         asset_name="robot",
         resampling_time_range=(7.0, 10.0), #(10.0, 10.0),
@@ -104,7 +89,6 @@ class G1MultiSkillCommandsCfg(G1ClfTrackingCommandCfg):
         ]
     )
 
-    # FOR THE DUAL COMMAND
     traj_ref = BatchedMultiSkillCommandV2Cfg(
         contact_bodies = [".*_ankle_roll_link"],
 
@@ -119,6 +103,29 @@ class G1MultiSkillCommandsCfg(G1ClfTrackingCommandCfg):
         hold_on_late_contact=True,
     )
 @configclass
+class G1MultiSkillEventsCfg(G1ClfTrackingEventsCfg):
+    """Events for the multi-skill env.  Replaces the parent's
+    ``reset_on_reference_dual`` (which expected V1 + V2 commands) with the
+    single-cmd ``reset_on_reference`` since V1 is no longer instantiated.
+    """
+
+    reset_on_ref = EventTerm(
+        func=mdp.reset_on_reference,
+        mode="reset",
+        params={
+            "command_name": "traj_ref",
+            "base_frame_name": "pelvis_link",
+            "conditioner_command_name": "base_velocity",
+            "special_val": 0.0,
+            "rel_envs_on_special": 0.0,
+            "rel_envs_on_ref": 1.0,
+            "joint_add_range": [0.0, 0.0],
+        },
+    )
+
+
+@configclass
 class G1MultiSkillCLFEnvCfg(G1ClfTrackingEnvCfg):
     observations: G1MultiSkillObservationCfg = G1MultiSkillObservationCfg()
     commands: G1MultiSkillCommandsCfg = G1MultiSkillCommandsCfg()
+    events: G1MultiSkillEventsCfg = G1MultiSkillEventsCfg()
