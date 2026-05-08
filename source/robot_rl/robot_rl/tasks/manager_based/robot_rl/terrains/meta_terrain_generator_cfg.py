@@ -19,18 +19,18 @@ from dataclasses import field
 from isaaclab.utils import configclass
 from isaaclab.terrains.terrain_generator_cfg import TerrainGeneratorCfg
 
-from .meta_terrain_generator import MetaTerrainGenerator
-
 
 @configclass
 class MetaTerrainGeneratorCfg(TerrainGeneratorCfg):
-    """Configuration for the terrain generator."""
+    """Configuration for the terrain generator.
 
-    class_type: type = MetaTerrainGenerator
-    """The class to use for the terrain generator.
-
-    Defaults to :class:`isaaclab.terrains.terrain_generator.TerrainGenerator`.
+    ``class_type`` is a string so importing this cfg does NOT pull in the
+    runtime ``MetaTerrainGenerator``. The runtime class is resolved when
+    ``cfg.class_type(cfg)`` is called inside the sim, after AppLauncher.
     """
+
+    class_type: type | str = "{DIR}.meta_terrain_generator:MetaTerrainGenerator"
+    """The class to use for the terrain generator."""
 
     inter_column_borders: list[tuple[str, float]] = field(default_factory=list)
     """Configuration for flat border columns inserted between terrain segments.

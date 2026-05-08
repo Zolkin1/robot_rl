@@ -1,10 +1,15 @@
 from isaaclab.utils import configclass
 from isaaclab.terrains import TerrainImporterCfg
-from .meta_terrain_importer import MetaTerrainImporter
 
 
 @configclass
 class MetaTerrainImporterCfg(TerrainImporterCfg):
-    """Configuration for importing meta terrains."""
+    """Configuration for importing meta terrains.
 
-    class_type: type = MetaTerrainImporter
+    ``class_type`` is a string so importing this cfg does NOT pull in the
+    runtime ``MetaTerrainImporter`` (and its transitive ``isaaclab.markers``
+    chain that pre-loads ``pxr``). The runtime class is resolved when
+    ``cfg.class_type(cfg)`` is called inside the sim, after AppLauncher.
+    """
+
+    class_type: type | str = "{DIR}.meta_terrain_importer:MetaTerrainImporter"

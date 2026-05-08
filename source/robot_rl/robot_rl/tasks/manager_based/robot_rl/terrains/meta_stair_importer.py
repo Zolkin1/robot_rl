@@ -16,10 +16,7 @@ from typing import TYPE_CHECKING
 import torch
 from typing_extensions import override
 
-from isaaclab.utils import configclass
-
 from .meta_terrain_importer import MetaTerrainImporter
-from .meta_terrain_importer_cfg import MetaTerrainImporterCfg
 
 if TYPE_CHECKING:
     pass
@@ -163,8 +160,3 @@ class MetaStairTerrainImporter(MetaTerrainImporter):
         return torch.stack([world_x, world_y, world_z], dim=-1)
 
 
-@configclass
-class MetaStairTerrainImporterCfg(MetaTerrainImporterCfg):
-    """Configuration for :class:`MetaStairTerrainImporter`."""
-
-    class_type: type = MetaStairTerrainImporter

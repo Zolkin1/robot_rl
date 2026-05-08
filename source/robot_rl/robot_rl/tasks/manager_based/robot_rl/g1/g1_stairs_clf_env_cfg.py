@@ -9,7 +9,8 @@ from isaaclab.utils.noise import UniformNoiseCfg as Unoise
 from robot_rl.tasks.manager_based.robot_rl import mdp
 from robot_rl.tasks.manager_based.robot_rl.g1.g1_clf_tracking_base import G1ClfTrackingSceneCfg
 from robot_rl.tasks.manager_based.robot_rl.g1.g1_clf_multiskill_base import G1MultiSkillCLFEnvCfg, G1MultiSkillObservationCfg
-from robot_rl.tasks.manager_based.robot_rl.terrains import LONG_STAIRS_CFG
+from robot_rl.tasks.manager_based.robot_rl.terrains.config.terrain_cfgs import LONG_STAIRS_CFG
+from robot_rl.tasks.manager_based.robot_rl.terrains.meta_stair_importer_cfg import MetaStairTerrainImporterCfg
 
 from ..mdp.commands.multiskill_velocity_commands_cfg import VelocityBucketCfg
 
@@ -132,11 +133,21 @@ class G1StairsCLFEnvCfg(G1MultiSkillCLFEnvCfg):
         ##
 
         ##
-        # Terrain
+        # Terrain — swap the inherited TerrainImporterCfg for the meta variant
+        # so ``terrain_meta_data["project"]`` is available downstream (rewards,
+        # CLF, etc.). Inherit the materials from the base scene's terrain.
         ##
-        self.scene.terrain.terrain_type = "generator"
-        self.scene.terrain.terrain_generator = LONG_STAIRS_CFG
-        self.scene.terrain.max_init_terrain_level = 0
+        base_terrain = self.scene.terrain
+        self.scene.terrain = MetaStairTerrainImporterCfg(
+            prim_path=base_terrain.prim_path,
+            terrain_type="generator",
+            terrain_generator=LONG_STAIRS_CFG,
+            max_init_terrain_level=0,
+            collision_group=base_terrain.collision_group,
+            physics_material=base_terrain.physics_material,
+            visual_material=base_terrain.visual_material,
+            debug_vis=base_terrain.debug_vis,
+        )
 
         ##
         # Terminations: end the episode if any non-foot body takes a hard hit.
