@@ -64,18 +64,3 @@ class BatchedMultiSkillCommandCfg(BaseTrajectoryCommandCfg):
     backward snap to the start of the new domain (no domain change).
     The gate stays armed indefinitely until contact lands.  Only used
     when ``contact_gate_window_frac`` is not ``None``."""
-
-    track_traj_stats: bool = True
-    """If ``True``, the underlying :class:`MultiSkillManager` allocates a
-    per-trajectory CLF stats tracker (:class:`TrajectoryCLFStats`) updated
-    once per step from :meth:`log_v_on_phasing_var`. Required for adaptive
-    trajectory sampling."""
-
-    traj_stats_alpha: float = 0.005
-    """EMA factor for the per-trajectory tracker (matches ``skill_v_logs``)."""
-
-    traj_stats_reset_warmup: int = 2
-    """Frames after each env reset that are excluded from the tracker."""
-
-    traj_stats_transition_warmup: int = 3
-    """Frames after each skill transition that are excluded from the tracker."""

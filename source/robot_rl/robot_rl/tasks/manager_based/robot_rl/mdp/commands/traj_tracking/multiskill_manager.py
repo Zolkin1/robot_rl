@@ -1,8 +1,7 @@
 """MultiSkillManager: batched trajectory management across multiple skills.
 
 Replaces the loop-per-trajectory pattern in LibraryManager with fully batched
-tensor operations. Supports multi-dimensional conditioning (velocity, terrain)
-and per-skill CLF logging.
+tensor operations. Supports multi-dimensional conditioning (velocity, terrain).
 """
 
 from __future__ import annotations
@@ -19,7 +18,6 @@ from torch import Tensor
 
 from .manager_base import ManagerBase
 from .sagittal_reflector import swap_left_right
-from .traj_clf_stats import TrajectoryCLFStats
 from .trajectory_manager import TrajectoryManager, TrajectoryType
 
 
@@ -102,10 +100,6 @@ class MultiSkillManager(ManagerBase):
         env: Any = None,
         conditioner_generator_name: str | None = None,
         hf_repo: str | None = None,
-        track_traj_stats: bool = True,
-        traj_stats_alpha: float = 0.005,
-        traj_stats_reset_warmup: int = 2,
-        traj_stats_transition_warmup: int = 3,
     ):
         """Load trajectory YAMLs from a top-level folder containing per-skill subfolders.
 
@@ -134,18 +128,6 @@ class MultiSkillManager(ManagerBase):
             hf_repo: Optional HuggingFace repo ID (e.g. ``"zolkin/robot_rl"``).
                 When set, ``path`` is treated as a path within the repo and
                 downloaded to a local ``hf/`` cache directory.
-            track_traj_stats: If ``True``, allocate a per-trajectory CLF
-                stats tracker (:class:`TrajectoryCLFStats`) that is updated
-                from :meth:`log_v_on_phasing_var`. Required for adaptive
-                trajectory sampling.
-            traj_stats_alpha: EMA factor for the per-trajectory tracker.
-            traj_stats_reset_warmup: Number of frames after each env reset
-                that are excluded from the per-trajectory tracker. The CLF
-                buffer needs a couple of frames before V is meaningful.
-            traj_stats_transition_warmup: Number of frames after each skill
-                transition that are excluded from the per-trajectory
-                tracker. Transition phase causes V spikes unrelated to the
-                new trajectory's true difficulty.
         """
         self.device = torch.device(device)
         self.env = env
@@ -233,47 +215,18 @@ class MultiSkillManager(ManagerBase):
                 dtype=torch.float32, device=self.device,
             )
 
-        # --- Per-skill CLF logging -----------------------------------------
-        phi_keys = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
-        self.phi_keys = torch.tensor(phi_keys, device=self.device)
-        self.skill_v_logs: dict[str, Tensor] = {}
-        self.skill_num_v_logs: dict[str, Tensor] = {}
-        for skill in self.skills:
-            self.skill_v_logs[skill.name] = torch.zeros(len(phi_keys), device=self.device)
-            self.skill_num_v_logs[skill.name] = torch.zeros(len(phi_keys), device=self.device)
-
         # --- Cache for per-step trajectory assignment ----------------------
         self._cache_valid = False
         self._cached_global_indices: Tensor | None = None
         self._cached_env_ids: Tensor | None = None
 
-        # --- Skill / trajectory transition tracking ------------------------
-        # ``_skill_changed`` (used for traj-stats warmup) and
-        # ``_traj_changed`` (used to re-arm the contact gate) are populated
-        # by :meth:`_ensure_cache` on each cache rebuild.
-        self._prev_skill_indices: Tensor | None = None
-        self._skill_changed: Tensor | None = None
+        # --- Trajectory transition tracking --------------------------------
+        # ``_traj_changed`` is populated by :meth:`_ensure_cache` on each
+        # cache rebuild and read by the owning command term to re-arm the
+        # contact gate.  Snapshot is committed by :meth:`commit_traj_state`,
+        # not eagerly inside ``_ensure_cache`` — see that method's docstring.
         self._prev_global_indices: Tensor | None = None
         self._traj_changed: Tensor | None = None
-
-        # --- Per-trajectory CLF stats tracker -----------------------------
-        # Allocated lazily-but-eagerly here so adaptive sampling can read
-        # mean_v at any point. Per-env warmup counters are allocated lazily
-        # on first update because we don't know num_envs until env-side
-        # construction is done.
-        self.traj_stats: TrajectoryCLFStats | None = None
-        self._traj_stats_reset_warmup = int(traj_stats_reset_warmup)
-        self._traj_stats_transition_warmup = int(traj_stats_transition_warmup)
-        if track_traj_stats:
-            self.traj_stats = TrajectoryCLFStats(
-                num_trajectories=self.num_trajectories,
-                device=self.device,
-                mode="ema",
-                alpha=float(traj_stats_alpha),
-            )
-        self._steps_since_reset: Tensor | None = None
-        self._steps_since_transition: Tensor | None = None
-        self._prev_episode_length: Tensor | None = None
 
         # --- Contact-gate metadata ----------------------------------------
         self._build_gate_tables()
@@ -579,10 +532,9 @@ class MultiSkillManager(ManagerBase):
 
         Decoupled from :meth:`_ensure_cache` so external callers (reset
         events, observation queries, snap helpers, loggers) do not
-        silently consume ``_traj_changed`` / ``_skill_changed`` before
-        the owning command's ``_pre_update_phase`` has read them.  The
-        owning command term must call this exactly once per step,
-        after gate re-arm and any other consumers have run.
+        silently consume ``_traj_changed`` before the owning command's
+        ``_pre_update_phase`` has read it.  The owning command term must
+        call this exactly once per step, after gate re-arm has run.
 
         Args:
             env_ids: Optional subset; ``None`` commits the full batch.
@@ -591,14 +543,8 @@ class MultiSkillManager(ManagerBase):
             return
         if env_ids is None:
             self._prev_global_indices = self._cached_global_indices.clone()
-            self._prev_skill_indices = self.data["skill_idx"][
-                self._cached_global_indices
-            ].clone()
         else:
             self._prev_global_indices[env_ids] = self._cached_global_indices[env_ids]
-            self._prev_skill_indices[env_ids] = self.data["skill_idx"][
-                self._cached_global_indices[env_ids]
-            ]
 
     def set_trajectory_indices(self, global_indices: Tensor) -> None:
         """Directly set the trajectory index for each environment.
@@ -618,7 +564,7 @@ class MultiSkillManager(ManagerBase):
 
         Selects the best trajectory per environment across all skills based
         on the commanded velocity (and terrain, when applicable).  Also
-        tracks skill transitions between steps.
+        tracks per-env trajectory transitions between steps.
 
         Args:
             env_ids: Optional subset of environment indices.  ``None`` means
@@ -631,46 +577,34 @@ class MultiSkillManager(ManagerBase):
             conditioner = self._get_conditioner_from_env(env_ids)
             new_indices = self._select_trajectories(conditioner)
 
-            # --- Skill / trajectory transition detection ------------------
-            # Compute the per-env transition flags against the previous
-            # snapshot, but DO NOT update ``_prev_*`` here.  Many callers
-            # (reset events, observation fns, snap helpers, the logger)
-            # invoke ``_ensure_cache`` between two ``_pre_update_phase``
-            # calls; if they updated the prev arrays they would silently
-            # consume the transition before the owning command term saw
-            # it.  The owning term must call :meth:`commit_traj_state`
-            # exactly once per step, after gate re-arm and any other
-            # transition consumers have run.
-            new_skill_indices = self.data["skill_idx"][new_indices]
-            if self._prev_skill_indices is not None:
+            # --- Trajectory transition detection --------------------------
+            # Compute ``_traj_changed`` against the previous snapshot, but
+            # do NOT update ``_prev_global_indices`` here.  Many callers
+            # (reset events, observation fns, snap helpers) invoke
+            # ``_ensure_cache`` between two ``_pre_update_phase`` calls; if
+            # they updated the prev array they would silently consume the
+            # transition before the owning command saw it.  The owning
+            # command term must call :meth:`commit_traj_state` exactly
+            # once per step, after gate re-arm has read ``_traj_changed``.
+            if self._prev_global_indices is not None:
                 if env_ids is not None:
-                    self._skill_changed = new_skill_indices != self._prev_skill_indices[env_ids]
                     self._traj_changed = new_indices != self._prev_global_indices[env_ids]
                 else:
-                    self._skill_changed = new_skill_indices != self._prev_skill_indices
                     self._traj_changed = new_indices != self._prev_global_indices
             else:
-                # First-call init: prev arrays must be populated so
+                # First-call init: prev array must be populated so
                 # subsequent comparisons have a baseline.  This is the
-                # only place ``_ensure_cache`` writes them.
-                self._skill_changed = torch.zeros(
-                    new_indices.shape[0], dtype=torch.bool, device=self.device,
-                )
+                # only place ``_ensure_cache`` writes it.
                 self._traj_changed = torch.zeros(
                     new_indices.shape[0], dtype=torch.bool, device=self.device,
                 )
                 if env_ids is not None:
                     N_total = self.env.num_envs
-                    self._prev_skill_indices = torch.zeros(
-                        N_total, dtype=torch.long, device=self.device,
-                    )
                     self._prev_global_indices = torch.zeros(
                         N_total, dtype=torch.long, device=self.device,
                     )
-                    self._prev_skill_indices[env_ids] = new_skill_indices
                     self._prev_global_indices[env_ids] = new_indices
                 else:
-                    self._prev_skill_indices = new_skill_indices.clone()
                     self._prev_global_indices = new_indices.clone()
 
             self._cached_global_indices = new_indices
@@ -1163,134 +1097,6 @@ class MultiSkillManager(ManagerBase):
         cumsum[:, 1:] = torch.cumsum(original_domain_times[:, :-1], dim=1)
         self._cumsum_T = cumsum
         self._total_original_T = original_domain_times.sum(dim=1)
-
-    # ------------------------------------------------------------------
-    # Per-skill CLF logging
-    # ------------------------------------------------------------------
-
-    def log_v_on_phasing_var(self, phi: Tensor, v: Tensor) -> None:
-        """Log CLF values binned by phasing variable, per skill.
-
-        Also folds ``v`` into the per-trajectory stats tracker (if enabled),
-        gating envs that recently reset or just transitioned skills.
-
-        Args:
-            phi: ``[N]`` phasing variable values.
-            v: ``[N]`` CLF values.
-        """
-        self._ensure_cache()
-        traj_idx = self._cached_global_indices
-        skill_indices = self.data["skill_idx"][traj_idx]
-
-        # Per-trajectory tracker update — piggyback on this once-per-step site.
-        if self.traj_stats is not None:
-            self._update_traj_stats(traj_idx, v)
-
-        for skill in self.skills:
-            si = self.skill_name_to_idx[skill.name]
-            mask = skill_indices == si
-            if not mask.any():
-                continue
-
-            phi_s = phi[mask]
-            v_s = v[mask]
-
-            bin_idx = torch.searchsorted(self.phi_keys, phi_s, right=False)
-            bin_idx = torch.clamp(bin_idx, 0, len(self.phi_keys) - 1)
-
-            batch_counts = torch.zeros_like(self.phi_keys)
-            batch_sums = torch.zeros_like(self.phi_keys)
-            batch_counts.scatter_add_(0, bin_idx, torch.ones_like(v_s))
-            batch_sums.scatter_add_(0, bin_idx, v_s)
-
-            alpha = 0.005
-            valid = batch_counts > 0
-            batch_means = batch_sums[valid] / batch_counts[valid]
-            self.skill_v_logs[skill.name][valid] = (
-                (1 - alpha) * self.skill_v_logs[skill.name][valid] + alpha * batch_means
-            )
-            self.skill_num_v_logs[skill.name] += batch_counts
-
-    def _update_traj_stats(self, traj_idx: Tensor, v: Tensor) -> None:
-        """Fold one step of CLF values into the per-trajectory tracker.
-
-        Builds an active mask that excludes envs that just reset or just
-        transitioned skills, then forwards to ``self.traj_stats.update``.
-
-        Args:
-            traj_idx: ``[N]`` long tensor of global trajectory indices.
-            v: ``[N]`` float tensor of CLF values.
-        """
-        n = v.shape[0]
-        device = v.device
-
-        # Allocate per-env warmup counters lazily (we need num_envs).
-        if self._steps_since_reset is None or self._steps_since_reset.shape[0] != n:
-            self._steps_since_reset = torch.full(
-                (n,), self._traj_stats_reset_warmup + 1,
-                dtype=torch.long, device=device,
-            )
-            self._steps_since_transition = torch.full(
-                (n,), self._traj_stats_transition_warmup + 1,
-                dtype=torch.long, device=device,
-            )
-            self._prev_episode_length = torch.zeros(n, dtype=torch.long, device=device)
-
-        # Detect resets via episode_length_buf decreasing (or zero).
-        ep_len = None
-        if self.env is not None and hasattr(self.env, "episode_length_buf"):
-            ep_len = self.env.episode_length_buf.to(dtype=torch.long, device=device)
-            reset_mask = ep_len < self._prev_episode_length
-            # Also treat episode_length_buf==0 as a reset frame to be safe.
-            reset_mask = reset_mask | (ep_len == 0)
-        else:
-            reset_mask = torch.zeros(n, dtype=torch.bool, device=device)
-
-        if reset_mask.any():
-            self._steps_since_reset[reset_mask] = 0
-
-        # Skill transition mask is populated by ``_ensure_cache``.
-        if self._skill_changed is not None and self._skill_changed.shape[0] == n:
-            trans_mask = self._skill_changed
-            if trans_mask.any():
-                self._steps_since_transition[trans_mask] = 0
-
-        active = (
-            (self._steps_since_reset >= self._traj_stats_reset_warmup)
-            & (self._steps_since_transition >= self._traj_stats_transition_warmup)
-        )
-
-        self.traj_stats.update(traj_idx, v, active=active)
-
-        # Advance counters for the next step.
-        self._steps_since_reset += 1
-        self._steps_since_transition += 1
-        if ep_len is not None:
-            self._prev_episode_length = ep_len.clone()
-
-    def get_v_log(self) -> tuple[Tensor, Tensor]:
-        """Get the aggregated V log across all skills.
-
-        Returns:
-            ``(v_log, phi_keys)`` where v_log is the mean across skills.
-        """
-        stacked = torch.stack(list(self.skill_v_logs.values()), dim=0)
-        return stacked.mean(dim=0), self.phi_keys
-
-    def get_v_log_per_skill(self) -> dict[str, Tensor]:
-        """Get the V log for each skill separately."""
-        return dict(self.skill_v_logs)
-
-    def get_v_log_avg(self) -> Tensor:
-        """Compute average V value per skill.
-
-        Returns:
-            ``[num_skills]`` tensor of mean V values.
-        """
-        result = torch.zeros(len(self.skills), device=self.device)
-        for i, skill in enumerate(self.skills):
-            result[i] = self.skill_v_logs[skill.name].mean()
-        return result
 
     # ------------------------------------------------------------------
     # Placeholder stubs for future features

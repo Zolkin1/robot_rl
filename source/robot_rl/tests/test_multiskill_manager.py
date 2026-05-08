@@ -438,40 +438,6 @@ class TestOrderOutputs:
 
 
 # ---------------------------------------------------------------------------
-# CLF Logging
-# ---------------------------------------------------------------------------
-
-class TestCLFLogging:
-    def test_log_and_retrieve(self, multiskill_single_skill):
-        """Should be able to log V values and retrieve them."""
-        msm = multiskill_single_skill
-        N = 10
-        msm.set_trajectory_indices(torch.zeros(N, dtype=torch.long))
-
-        phi = torch.linspace(0.05, 0.95, N)
-        v = torch.ones(N) * 2.0
-
-        msm.log_v_on_phasing_var(phi, v)
-
-        v_log, phi_keys = msm.get_v_log()
-        assert v_log.shape == phi_keys.shape
-        assert phi_keys.shape[0] == 10
-
-    def test_per_skill_logs(self, multiskill_single_skill):
-        """Per-skill V logs should exist for each skill."""
-        msm = multiskill_single_skill
-        per_skill = msm.get_v_log_per_skill()
-        assert "default" in per_skill
-        assert per_skill["default"].shape[0] == 10
-
-    def test_v_log_avg(self, multiskill_single_skill):
-        """Average V should return one value per skill."""
-        msm = multiskill_single_skill
-        avg = msm.get_v_log_avg()
-        assert avg.shape == (len(msm.skills),)
-
-
-# ---------------------------------------------------------------------------
 # Placeholder Stubs
 # ---------------------------------------------------------------------------
 

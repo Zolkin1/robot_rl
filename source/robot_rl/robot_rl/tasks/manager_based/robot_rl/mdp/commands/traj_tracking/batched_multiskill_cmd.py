@@ -42,10 +42,6 @@ class BatchedMultiSkillCommand(BaseTrajectoryCommand):
             env=env,
             conditioner_generator_name=cfg.conditioner_generator_name,
             hf_repo=cfg.hf_repo,
-            track_traj_stats=getattr(cfg, "track_traj_stats", True),
-            traj_stats_alpha=getattr(cfg, "traj_stats_alpha", 0.005),
-            traj_stats_reset_warmup=getattr(cfg, "traj_stats_reset_warmup", 2),
-            traj_stats_transition_warmup=getattr(cfg, "traj_stats_transition_warmup", 3),
         )
 
     def _verify_contact_frames(self) -> None:
@@ -255,9 +251,8 @@ class BatchedMultiSkillCommand(BaseTrajectoryCommand):
         if not advance_mask.any():
             # Nothing to advance — keep the snapshot fresh and skip the
             # gate logic.  No call to ``_ensure_cache`` happens here, so
-            # ``_traj_changed`` / ``_skill_changed`` retain whatever
-            # state the previous tick's commit left them in (always
-            # all-False after a successful commit).
+            # ``_traj_changed`` retains whatever state the previous tick's
+            # commit left it in (always all-False after a successful commit).
             self._last_compute_step = ep_len.clone()
             return
 
@@ -265,9 +260,9 @@ class BatchedMultiSkillCommand(BaseTrajectoryCommand):
         self.manager.update_phase(self.env.step_dt, env_ids=adv_ids)
 
         # Resolve current trajectory assignment after any phase mutations.
-        # Populates ``manager._traj_changed`` / ``_skill_changed`` against
-        # the previous-tick snapshot.  Crucially this no longer commits
-        # the snapshot — see ``MultiSkillManager.commit_traj_state``.
+        # Populates ``manager._traj_changed`` against the previous-tick
+        # snapshot.  Crucially this no longer commits the snapshot — see
+        # ``MultiSkillManager.commit_traj_state``.
         self.manager.invalidate_cache()
         self.manager.get_current_trajectory_indices()
 
@@ -284,11 +279,10 @@ class BatchedMultiSkillCommand(BaseTrajectoryCommand):
             contact_now = self._read_contact_now()
             self._apply_contact_gate(contact_now)
 
-        # Commit the trajectory snapshot only after every consumer of
-        # ``_traj_changed`` / ``_skill_changed`` has run.  Subsequent
-        # intra-step ``_ensure_cache`` calls (logger, reset events,
-        # observation fns) will then correctly report no further change
-        # for the current step.
+        # Commit the trajectory snapshot only after gate re-arm has read
+        # ``_traj_changed``.  Subsequent intra-step ``_ensure_cache`` calls
+        # (reset events, observation fns) will then correctly report no
+        # further change for the current step.
         self.manager.commit_traj_state()
 
         self._last_compute_step = ep_len.clone()

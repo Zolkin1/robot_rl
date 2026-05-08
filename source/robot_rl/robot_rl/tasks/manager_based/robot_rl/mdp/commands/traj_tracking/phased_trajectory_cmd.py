@@ -131,8 +131,3 @@ class PhasedTrajectoryCommand(BaseTrajectoryCommand):
         """Populate the phasing variable, then delegate to the base."""
         self.update_phasing_var(t, env_ids)
         super().get_desired_outputs(t, env_ids)
-
-    def _update_command(self):
-        """Run the base update and log CLF binned by phase."""
-        super()._update_command()
-        self.manager.log_v_on_phasing_var(self.phasing_var, self.v)
