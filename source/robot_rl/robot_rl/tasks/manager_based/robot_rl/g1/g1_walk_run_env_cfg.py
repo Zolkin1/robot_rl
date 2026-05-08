@@ -17,7 +17,7 @@ class G1WalkRunCLFEnvCfg(G1MultiSkillCLFEnvCfg):
         ##
         # TODO: Pull the updated trajectory so the stand frame aligns with the walk/run frames
         self.commands.traj_ref.path = "trajectories/retargeted/2026-04-10_11-41-19_merged"
-        self.commands.traj_ref_V2.path = "trajectories/retargeted/2026-04-10_11-41-19_merged"
+        self.commands.traj_ref_OLD.path = "trajectories/retargeted/2026-04-10_11-41-19_merged"
 
         # Configure velocity ranges for different gaits
         self.commands.base_velocity.ranges.lin_vel_x = (0.0, 3.7)
@@ -25,6 +25,12 @@ class G1WalkRunCLFEnvCfg(G1MultiSkillCLFEnvCfg):
         self.commands.base_velocity.ranges.ang_vel_z = (0, 0) #(-0.75, 0.75)
         self.commands.base_velocity.ranges.heading = (-3.14,3.14)
         self.commands.base_velocity.resampling_time_range = (4.0, 8.0)
+
+        # self.commands.base_velocity.velocity_buckets=[
+        #     VelocityBucketCfg(percentage=0.0, lin_vel_x=(0.0, 0.1)),   # Standing
+        #     VelocityBucketCfg(percentage=0.0, lin_vel_x=(0.1, 1.5)),   # Walking
+        #     VelocityBucketCfg(percentage=1.0, lin_vel_x=(1.5, 3.7)),   # Running
+        # ]
 
         # Note: Having the accerletaion in the teacher training seems to hurt the behavior
         # TODO: Consider using a max acc on some % (like 10) of the teacher so its not OOD

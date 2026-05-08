@@ -26,22 +26,24 @@ def reset_on_reference_dual(
         asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
 ):
     """
-    Reset two trajectory commands (one OLD-style time-based, one V2 phase-based)
-    to the same sampled state, so per-step traces are directly comparable.
-
-    Identical pose/joint/velocity setup to ``reset_on_reference``. Uses cmd1's
-    OLD-style scalar ``get_total_time()`` for random sampling so cmd1 behaves
-    bit-equivalently to the standalone reset; cmd2 derives its starting phase
-    from the same sampled times via ``(t / total_per_env_traj) % 1.0``.
+    Reset two trajectory commands to the same sampled state, so per-step
+    traces are directly comparable.  The two cmds may use either the OLD
+    time-based interface (``init_time_offset``) or the NEW phase-based
+    interface (``manager.set_phase``); the function detects which by
+    probing for ``set_phase`` on each manager and routes accordingly.
 
     Args:
-        primary_command_name: OLD-style cmd (writes ``init_time_offset``).
-        v2_command_name: V2 phase-based cmd (writes ``manager.phase`` via ``set_phase``).
+        primary_command_name: One of the two trajectory commands.  Used to
+            compute the sampled robot pose and (optionally) total_time.
+        v2_command_name: The other trajectory command.  Both cmds receive
+            the same sampled phase, regardless of their interface.
         Other args: identical to :func:`reset_on_reference`.
     """
     asset: Articulation = env.scene[asset_cfg.name]
     cmd1 = env.command_manager.get_term(primary_command_name)
     cmd2 = env.command_manager.get_term(v2_command_name)
+    cmd1_phase_based = hasattr(cmd1.manager, "set_phase")
+    cmd2_phase_based = hasattr(cmd2.manager, "set_phase")
 
     env.command_manager.get_term(conditioner_command_name)._resample(env_ids)
     env.command_manager.get_term(conditioner_command_name)._update_command()
@@ -127,16 +129,75 @@ def reset_on_reference_dual(
         joint_pos[:, i] = y_sampled[:, pos_traj_idx]
         joint_vel[:, i] = dy_sampled[:, vel_traj_idx]
 
-        # ---- Anchor each cmd's clock with the same sampled phase ----
-    # OLD-style: time-based offset.
-    cmd1.init_time_offset[ref_ids] = random_times
+    # ---- Anchor each cmd's clock with the same sampled phase ----
+    def _anchor_ref(cmd, phase_based):
+        if phase_based:
+            cur_traj = cmd.manager.get_current_trajectory_indices()[ref_ids]
+            totals = cmd.manager.data["total_time"][cur_traj]
+            phase = (random_times / totals) % 1.0
+            cmd.manager.set_phase(phase, ref_ids)
+        else:
+            cmd.init_time_offset[ref_ids] = random_times
 
-    # V2: convert to per-env phase mod 1.0 (matches OLD's eval-time wrap).
-    cur_traj_v2 = cmd2.manager.get_current_trajectory_indices()[ref_ids]
-    cmd2_totals = cmd2.manager.data["total_time"][cur_traj_v2]
-    cmd2_phase = (random_times / cmd2_totals) % 1.0
-    cmd2.manager.set_phase(cmd2_phase, ref_ids)
-    # TODO: Can also do a check to make sure the desired trajectories are the same.
+    _anchor_ref(cmd1, cmd1_phase_based)
+    _anchor_ref(cmd2, cmd2_phase_based)
+
+    # DEBUG: verify both cmds were anchored to the same phase + same y_des.
+    # Disabled for training — re-enable by changing ``if False:`` to
+    # ``if num_ref_envs > 0:`` (and uncomment the invalidate_cache calls).
+    # cmd1.manager.invalidate_cache()
+    # cmd2.manager.invalidate_cache()
+    if False:  # disabled for training
+        _e_local = 0  # first ref env
+        # Phase for each cmd, computed independently of representation.
+        c1_traj = cmd1.manager.get_current_trajectory_indices()[ref_ids][_e_local]
+        c1_total = float(cmd1.manager.data["total_time"][c1_traj])
+        if cmd1_phase_based:
+            c1_phase = float(cmd1.manager.phase[ref_ids[_e_local]])
+        else:
+            c1_phase = (
+                float(cmd1.init_time_offset[ref_ids[_e_local]]) / c1_total
+            ) % 1.0
+
+        c2_traj = cmd2.manager.get_current_trajectory_indices()[ref_ids][_e_local]
+        c2_total = float(cmd2.manager.data["total_time"][c2_traj])
+        if cmd2_phase_based:
+            c2_phase = float(cmd2.manager.phase[ref_ids[_e_local]])
+        else:
+            c2_phase = (
+                float(cmd2.init_time_offset[ref_ids[_e_local]]) / c2_total
+            ) % 1.0
+
+        # Evaluate desired outputs on both cmds at the just-anchored phase.
+        # Each cmd's t needs to be the time at which its eval would land on
+        # the anchored phase.  For time-based: t = init_time_offset.  For
+        # phase-based: t = phase * total.
+        c1_t = (
+            cmd1.init_time_offset[ref_ids]
+            if not cmd1_phase_based
+            else cmd1.manager.phase[ref_ids]
+                 * cmd1.manager.data["total_time"][cmd1.manager.get_current_trajectory_indices()[ref_ids]]
+        )
+        c2_t = (
+            cmd2.init_time_offset[ref_ids]
+            if not cmd2_phase_based
+            else cmd2.manager.phase[ref_ids]
+                 * cmd2.manager.data["total_time"][cmd2.manager.get_current_trajectory_indices()[ref_ids]]
+        )
+
+        cmd1.get_desired_outputs(c1_t, env_ids=ref_ids)
+        cmd2.get_desired_outputs(c2_t, env_ids=ref_ids)
+
+        env_idx = ref_ids[_e_local].item()
+        dy_des = (cmd1.y_des[env_idx] - cmd2.y_des[env_idx]).norm().item()
+        ddy_des = (cmd1.dy_des[env_idx] - cmd2.dy_des[env_idx]).norm().item()
+
+        print(
+            f"[RESET-CHECK env={env_idx} "
+            f"c1_phase={c1_phase:.10f} c2_phase={c2_phase:.10f} "
+            f"dphase={abs(c1_phase - c2_phase):.10f} "
+            f"dy_des={dy_des:.6f} ddy_des={ddy_des:.6f}]"
+        )
 
     # Write states to sim
     asset.write_root_pose_to_sim_index(root_pose=base_pose, env_ids=ref_ids)
@@ -169,12 +230,15 @@ def reset_on_reference_dual(
         asset.write_joint_position_to_sim_index(position=joint_pos, env_ids=nonref_ids)
         asset.write_joint_velocity_to_sim_index(velocity=joint_vel, env_ids=nonref_ids)
 
-        # OLD-style: zero the offset.
-        cmd1.init_time_offset[nonref_ids] = 0.0
-        # V2: phase 0 on the NEW manager.
-        cmd2.manager.set_phase(
-            torch.zeros(num_nonref_envs, device=env.device), nonref_ids
-        )
+        zero_phase = torch.zeros(num_nonref_envs, device=env.device)
+        def _anchor_nonref(cmd, phase_based):
+            if phase_based:
+                cmd.manager.set_phase(zero_phase, nonref_ids)
+            else:
+                cmd.init_time_offset[nonref_ids] = 0.0
+
+        _anchor_nonref(cmd1, cmd1_phase_based)
+        _anchor_nonref(cmd2, cmd2_phase_based)
 
 def _find_output_indices(ordered_names: list[str], frame_name: str, suffix_pattern: str) -> list[int]:
     """

@@ -566,6 +566,28 @@ class MultiSkillManagerV2(ManagerBase):
         """Invalidate the per-step cache.  Call once at the start of each step."""
         self._cache_valid = False
 
+    def commit_skill_state(self, env_ids: Tensor | None = None) -> None:
+        """Snapshot ``_prev_skill_indices`` to the currently-cached skill
+        assignment, optionally restricted to ``env_ids``.
+
+        Decoupled from ``_ensure_cache`` so external callers (event handlers,
+        observation funcs, loggers, etc.) that need a populated cache cannot
+        accidentally consume a pending skill transition.  V2's
+        :meth:`_compute_time` calls this after the skill-change handler so
+        that the very next ``_ensure_cache`` rebuild correctly sees no
+        change for envs whose transition has just been processed.
+        """
+        if self._cached_global_indices is None:
+            return
+        new_skill_indices = self.data["skill_idx"][self._cached_global_indices]
+        if self._prev_skill_indices is None:
+            self._prev_skill_indices = new_skill_indices.clone()
+            return
+        if env_ids is None:
+            self._prev_skill_indices = new_skill_indices.clone()
+        else:
+            self._prev_skill_indices[env_ids] = new_skill_indices[env_ids]
+
     def set_trajectory_indices(self, global_indices: Tensor) -> None:
         """Directly set the trajectory index for each environment.
 
@@ -599,13 +621,18 @@ class MultiSkillManagerV2(ManagerBase):
 
             # --- Skill transition detection --------------------------------
             new_skill_indices = self.data["skill_idx"][new_indices]
+            # ``_skill_changed`` is computed against ``_prev_skill_indices``
+            # but ``_prev_skill_indices`` is NOT updated here.  The update
+            # happens in :meth:`commit_skill_state`, called explicitly by
+            # V2's ``_compute_time`` after its skill-change handler has
+            # had a chance to react.  This decoupling prevents external
+            # callers (dual_resets, observations, the logger, etc.) from
+            # silently consuming the transition before V2 sees it.
             if self._prev_skill_indices is not None:
                 if env_ids is not None:
                     self._skill_changed = new_skill_indices != self._prev_skill_indices[env_ids]
-                    self._prev_skill_indices[env_ids] = new_skill_indices
                 else:
                     self._skill_changed = new_skill_indices != self._prev_skill_indices
-                    self._prev_skill_indices = new_skill_indices
             else:
                 self._skill_changed = torch.zeros(
                     new_indices.shape[0], dtype=torch.bool, device=self.device,
@@ -1525,8 +1552,11 @@ class MultiSkillManagerV2(ManagerBase):
         new_phase = torch.where(
             is_episodic, torch.clamp(new_phase, 0.0, 1.0), new_phase
         )
+        # new_phase = torch.where(
+        #     is_perpetual, torch.zeros_like(new_phase), new_phase
+        # )
         new_phase = torch.where(
-            is_perpetual, torch.zeros_like(new_phase), new_phase
+            is_perpetual, new_phase % 1.0, new_phase
         )
 
         self.phase[sel] = new_phase
@@ -1543,6 +1573,20 @@ class MultiSkillManagerV2(ManagerBase):
             cur_gate_phi = self._gate_phi_table[traj_idx, safe_idx]
             is_wrap_gate = active & (cur_gate_phi >= 1.0 - 1e-6)
             wrap_advance = wrapped & is_wrap_gate
+
+            # DEBUG: trace wrap-auto-advance for env 0
+            _e = 0
+            if 0 in sel.tolist():
+                _idx = int((sel == _e).nonzero(as_tuple=True)[0][0])
+                if False:  # disabled for training
+                    print(
+                        f"[update_phase env=0 step={int(self.env.episode_length_buf[_e])} "
+                        f"prev={prev_phase[_idx].item():.6f} new={new_phase[_idx].item():.6f} "
+                        f"wrapped={wrapped[_idx].item()} cur_gate_idx={int(self.next_gate_idx[_e])} "
+                        f"cur_gate_phi={cur_gate_phi[_idx].item():.4f} "
+                        f"is_wrap={is_wrap_gate[_idx].item()} wrap_adv={wrap_advance[_idx].item()}]"
+                    )
+
             if wrap_advance.any():
                 self._advance_gate_for_envs(sel[wrap_advance])
 
@@ -1585,35 +1629,43 @@ class MultiSkillManagerV2(ManagerBase):
 
     def snap_phase_to_new_domain(self, env_ids: Tensor) -> None:
         """Early-contact snap.  Phase currently in old domain (before gate);
-        jump *forward* to ``(gate_phi + eps_phi) % 1.0`` — start of the new
-        domain — and advance ``next_gate_idx``.
+        jump *forward* to match V1's fire target post-snap.
+
+        - For the wrap gate (gate_phi == 1.0): snap to ``0.0`` (i.e.,
+          ``gate_phi % 1.0``).  V1's wrap-gate fire sets ``t = (period+1)*total``,
+          which gives ``phi = 0`` — first-half side of the fold check.
+        - For non-wrap gates: snap to ``gate_phi - 1e-6`` — same FP-side as
+          V1's t-based ``(t % total) / total`` lands on, so V1 and V2
+          agree on the half-periodic ``tau >= 0.5`` fold decision.
         """
         if env_ids.numel() == 0:
             return
         traj_idx = self._get_global_indices()[env_ids]
         gate_idx = self.next_gate_idx[env_ids]
         gate_phi = self._gate_phi_table[traj_idx, gate_idx]
-        eps_phi = self._eps_phi(traj_idx)
-        self.phase[env_ids] = (gate_phi + eps_phi) % 1.0
+        snap_target = torch.where(
+            gate_phi >= 1.0 - 1e-6,
+            gate_phi % 1.0,        # wrap gate: 0 (matches V1's post-wrap phi)
+            gate_phi - 1e-6,       # non-wrap: first-half FP side
+        )
+        self.phase[env_ids] = snap_target
         self._advance_gate_for_envs(env_ids)
 
     def snap_phase_to_start_of_current_domain(self, env_ids: Tensor) -> None:
-        """Late-contact snap (hold-off).  Phase already past the gate (in
-        the new domain); pull *backward* a small amount to
-        ``(gate_phi + eps_phi) % 1.0`` — start of the same new domain —
-        and advance ``next_gate_idx``.
-
-        Same numerical target as :meth:`snap_phase_to_new_domain` but the
-        domain-membership intent (already inside vs. crossing into) is
-        different at the call site.
+        """Late-contact snap (hold-off).  Same target as
+        :meth:`snap_phase_to_new_domain`.
         """
         if env_ids.numel() == 0:
             return
         traj_idx = self._get_global_indices()[env_ids]
         gate_idx = self.next_gate_idx[env_ids]
         gate_phi = self._gate_phi_table[traj_idx, gate_idx]
-        eps_phi = self._eps_phi(traj_idx)
-        self.phase[env_ids] = (gate_phi + eps_phi) % 1.0
+        snap_target = torch.where(
+            gate_phi >= 1.0 - 1e-6,
+            gate_phi % 1.0,
+            gate_phi - 1e-6,
+        )
+        self.phase[env_ids] = snap_target
         self._advance_gate_for_envs(env_ids)
 
     def snap_phase_to_end_of_previous_domain(self, env_ids: Tensor) -> None:
@@ -1629,7 +1681,18 @@ class MultiSkillManagerV2(ManagerBase):
         gate_idx = self.next_gate_idx[env_ids]
         gate_phi = self._gate_phi_table[traj_idx, gate_idx]
         eps_phi = self._eps_phi(traj_idx)
-        self.phase[env_ids] = (gate_phi - eps_phi) % 1.0
+
+        # For wrap gate (gate_phi == 1.0): pull to gate_phi - eps_phi
+        # (matches V1's special-case hold target ``1.0 - eps_phi``).
+        # For non-wrap gates: pull to gate_phi - 1e-6 so V2's phi lands on
+        # the same FP-side as V1's t-based phi computation, ensuring both
+        # cmds agree on the half-periodic ``tau >= 0.5`` fold decision.
+        hold_phase = torch.where(
+            gate_phi >= 1.0 - 1e-6, gate_phi - eps_phi, gate_phi - 1e-6
+        )
+        self.phase[env_ids] = hold_phase
+
+        # self.phase[env_ids] = (gate_phi) % 1.0
 
     # ------------------------------------------------------------------
     # Ref frame map building (needs stored metadata)

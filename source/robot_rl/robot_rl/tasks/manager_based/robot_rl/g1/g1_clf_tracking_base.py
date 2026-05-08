@@ -121,20 +121,6 @@ class G1ClfTrackingSceneCfg(InteractiveSceneCfg):
 ##
 @configclass
 class G1ClfTrackingCommandCfg:
-    traj_ref = TrajectoryCommandCfg(
-        contact_bodies = [".*_ankle_roll_link"],
-
-        manager_type="library",
-        hf_repo = "zolkin/robot_rl",
-        path = "trajectories/walking",
-
-        conditioner_generator_name = "base_velocity",
-        Q_weights = WALKING_Q_weights,
-        R_weights = WALKING_R_weights,
-        hold_phi_threshold = 0.1,
-        heuristic_func=None,
-        phasing_boundaries=4,
-    )
 
     base_velocity = VelocityTrackingCommandCfg(
         asset_name="robot",
@@ -153,6 +139,21 @@ class G1ClfTrackingCommandCfg:
             y_kp=(1.2, 1.8),
             y_kd=(0.2, 0.4),
         ))
+
+    traj_ref = TrajectoryCommandCfg(
+        contact_bodies = [".*_ankle_roll_link"],
+
+        manager_type="library",
+        hf_repo = "zolkin/robot_rl",
+        path = "trajectories/walking",
+
+        conditioner_generator_name = "base_velocity",
+        Q_weights = WALKING_Q_weights,
+        R_weights = WALKING_R_weights,
+        hold_phi_threshold = 0.1,
+        heuristic_func=None,
+        phasing_boundaries=4,
+    )
 
 
 ##
@@ -239,7 +240,7 @@ class G1ClfTrackingEventsCfg:
         func=mdp.reset_on_reference_dual,
         mode="reset",
         params={"primary_command_name": "traj_ref",
-                "v2_command_name": "traj_ref_V2",
+                "v2_command_name": "traj_ref_OLD",
                 "base_frame_name": "pelvis_link",
                 "conditioner_command_name": "base_velocity",
                 "special_val": 0.0,     # Sometimes start on the running traj

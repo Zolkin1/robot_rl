@@ -67,7 +67,7 @@ class G1MultiSkillRewardCfg(G1ClfTrackingRewardCfg):
     )
 @configclass
 class G1MultiSkillCommandsCfg(G1ClfTrackingCommandCfg):
-    traj_ref = BatchedMultiSkillCommandCfg(
+    traj_ref_OLD = BatchedMultiSkillCommandCfg(
         contact_bodies = [".*_ankle_roll_link"],
 
         hf_repo = "zolkin/robot_rl",
@@ -105,7 +105,7 @@ class G1MultiSkillCommandsCfg(G1ClfTrackingCommandCfg):
     )
 
     # FOR THE DUAL COMMAND
-    traj_ref_V2 = BatchedMultiSkillCommandV2Cfg(
+    traj_ref = BatchedMultiSkillCommandV2Cfg(
         contact_bodies = [".*_ankle_roll_link"],
 
         hf_repo = "zolkin/robot_rl",
@@ -118,7 +118,6 @@ class G1MultiSkillCommandsCfg(G1ClfTrackingCommandCfg):
         contact_gate_window_frac=0.2,
         hold_on_late_contact=True,
     )
-
 @configclass
 class G1MultiSkillCLFEnvCfg(G1ClfTrackingEnvCfg):
     observations: G1MultiSkillObservationCfg = G1MultiSkillObservationCfg()

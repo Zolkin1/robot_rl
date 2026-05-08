@@ -7,7 +7,14 @@ import warp as wp
 
 from .base_trajectory_cmd import BaseTrajectoryCommand
 from .manager_base import ManagerBase
-from .multiskill_manager_v2 import MultiSkillManagerV2
+from .multiskill_manager_v2 import MultiSkillManagerV2, _PERPETUAL_INT
+
+# Flip to True to re-enable the throttled diagnostic prints inside
+# ``_compute_time`` (idempotency miss reasons, traj-change events,
+# skill-change handler trace).  Diagnostic counters used by the JSONL
+# logger keep updating regardless; only the ``print`` statements are
+# gated.  Disabled by default so training stdout isn't polluted.
+_V2_DEBUG_PRINTS = False
 
 
 class BatchedMultiSkillCommandV2(BaseTrajectoryCommand):
@@ -74,6 +81,14 @@ class BatchedMultiSkillCommandV2(BaseTrajectoryCommand):
         # buffer matches the current one we skip phase advance + gate.
         self._last_compute_step: torch.Tensor | None = None
         self._cached_t: torch.Tensor | None = None
+        # End-of-last-compute snapshots, used as ``pre_update_*`` at the
+        # start of the next compute.  Maintained independently of
+        # ``manager.phase`` and ``manager._cached_global_indices`` so that
+        # external mutations (reset events that call ``set_phase`` and/or
+        # ``get_desired_outputs``) cannot mask the pre-tick state V2 needs
+        # to detect skill changes correctly.
+        self._prev_compute_phase: torch.Tensor | None = None
+        self._prev_compute_traj: torch.Tensor | None = None
 
         # --- Contact-gate wiring -----------------------------------------
         self._gating_enabled = self.cfg.contact_gate_window_frac is not None
@@ -172,10 +187,14 @@ class BatchedMultiSkillCommandV2(BaseTrajectoryCommand):
         # ``update_phase``.
         signed = phase - gate_phi
 
-        in_early = (signed <= 0.0) & (signed >= -W)
-        in_late = (signed > 0.0) & (signed <= W)
+        # Match V1's window convention: width scales with gate_phi
+        # (so a gate at phi=0.5 has half the window of a gate at phi=1.0).
+        # V1: in_window = phi >= target_phi * (1 - W) → signed >= -target_phi * W.
+        early_window_size = gate_phi * W
+        in_early = (signed < 0.0) & (signed >= -early_window_size)
+        in_late = (signed >= 0.0) & (signed <= early_window_size)
         # Past the late window without firing — gate has aged out.
-        expired_window = signed > W
+        expired_window = signed > early_window_size
 
         if not self.cfg.hold_on_late_contact:
             early_fire_mask = usable & in_early & expected_landed
@@ -199,6 +218,16 @@ class BatchedMultiSkillCommandV2(BaseTrajectoryCommand):
             crossed_no_contact = usable & (in_late | expired_window) & ~expected_landed
             crossed_with_contact = usable & (in_late | expired_window) & expected_landed
             early_fire_mask = usable & in_early & expected_landed
+
+            # DEBUG: V2 gate events
+            _e = 0
+            if int(self.env.episode_length_buf[_e]) < 0:
+                if early_fire_mask[_e]:
+                    print(f"  [V2 EARLY_FIRE phase={phase[_e].item():.5f} gate_phi={gate_phi[_e].item():.4f} gate_idx={int(next_gate_idx[_e])}]")
+                elif crossed_with_contact[_e]:
+                    print(f"  [V2 LATE_FIRE phase={phase[_e].item():.5f} gate_phi={gate_phi[_e].item():.4f} gate_idx={int(next_gate_idx[_e])}]")
+                elif crossed_no_contact[_e]:
+                    print(f"  [V2 HOLD phase={phase[_e].item():.5f} gate_phi={gate_phi[_e].item():.4f} gate_idx={int(next_gate_idx[_e])}]")
 
             end_prev_ids = torch.where(crossed_no_contact)[0]
             new_dom_ids = torch.where(early_fire_mask | crossed_with_contact)[0]
@@ -227,17 +256,233 @@ class BatchedMultiSkillCommandV2(BaseTrajectoryCommand):
         and short-circuit the second call.
         """
         ep_len = self.env.episode_length_buf
+        # Diagnostic counters (read by the V1-side logger).  Created lazily
+        # so existing instances pick them up after a re-init.
+        if not hasattr(self, "_dbg_call_count"):
+            self._dbg_call_count = 0
+            self._dbg_idem_hits = 0
+            self._dbg_idem_misses_no_cache = 0
+            self._dbg_idem_misses_eplen_diff = 0
+            self._dbg_advance_count = 0
+            self._dbg_last_ep_len_env0 = None
+        self._dbg_call_count += 1
+
+        # Detect envs whose phase was externally set between our last
+        # ``_compute_time`` and now (most commonly by ``dual_resets``
+        # calling ``set_phase`` on a reset).  For those envs, the reset
+        # event owns the phase value — we must not advance it, snap it,
+        # or override it via the skill-change handler.
+        if self._prev_compute_phase is not None:
+            external_set = (
+                (self.manager.phase - self._prev_compute_phase).abs() > 1e-3
+            )
+        else:
+            external_set = torch.zeros(
+                self.num_envs, dtype=torch.bool, device=self.device
+            )
+
+        # Per-env idempotency: an env needs phase advance iff its ep_len
+        # changed since our last advance for it AND it isn't a freshly-reset
+        # env (whose phase is owned by the reset event).
+        #
+        # Full-tensor torch.equal would fail any time a single env reset
+        # between calls — even when env 0 (and most others) hadn't moved.
+        # That caused phase to be advanced twice per tick for every
+        # non-resetting env when any env reset.
+        if self._last_compute_step is None:
+            advance_mask = (ep_len > 0) & ~external_set
+        else:
+            advance_mask = (ep_len > 0) & (ep_len != self._last_compute_step) & ~external_set
+
         if (
             self._last_compute_step is not None
-            and torch.equal(self._last_compute_step, ep_len)
             and self._cached_t is not None
+            and not advance_mask.any()
         ):
+            self._dbg_idem_hits += 1
             return self._cached_t
 
-        advancing_mask = ep_len > 0
-        if advancing_mask.any():
-            adv_ids = torch.where(advancing_mask)[0]
+        # Idempotency missed — record why (for env 0 at least).
+        if self._last_compute_step is None or self._cached_t is None:
+            self._dbg_idem_misses_no_cache += 1
+        else:
+            self._dbg_idem_misses_eplen_diff += 1
+            # Print the interesting cases: when env-0's ep_len did NOT
+            # change but the full-tensor check still fails (i.e., some
+            # OTHER env's ep_len changed between calls).  This is the
+            # "stutter" scenario.  Throttled to first 8 of each kind.
+            if _V2_DEBUG_PRINTS:
+                if not hasattr(self, "_dbg_miss_print_count"):
+                    self._dbg_miss_print_count = 0
+                    self._dbg_stutter_print_count = 0
+                last = self._last_compute_step
+                cur = ep_len
+                same_count = int((last == cur).sum())
+                diff_mask = last != cur
+                diff_idx = torch.where(diff_mask)[0]
+                env0_same = int(last[0]) == int(cur[0])
+                tag = "STUTTER" if env0_same else "TICK"
+                count_attr = (
+                    "_dbg_stutter_print_count" if env0_same else "_dbg_miss_print_count"
+                )
+                count = getattr(self, count_attr)
+                if count < 8:
+                    print(
+                        f"[V2 idem MISS {tag} #{count}] "
+                        f"shape last={list(last.shape)} cur={list(cur.shape)} "
+                        f"dtype last={last.dtype} cur={cur.dtype} "
+                        f"matching={same_count}/{cur.numel()} "
+                        f"env0: last={int(last[0])} cur={int(cur[0])} "
+                        f"first_diffs(idx,last,cur)="
+                        f"{[(int(i), int(last[i]), int(cur[i])) for i in diff_idx[:5]]}"
+                    )
+                    setattr(self, count_attr, count + 1)
+        self._dbg_advance_count += 1
+        self._dbg_last_ep_len_env0 = int(ep_len[0])
+
+        # Capture pre-update state so we can restore on skill change
+        # (mirrors OLD cmd's ``compute_transition_time`` semantics).
+        #
+        # We use V2's OWN snapshot from the end of the previous
+        # ``_compute_time`` call, NOT ``manager.phase`` /
+        # ``manager._cached_global_indices``.  External callers (notably
+        # the ``reset_on_reference_dual`` event, which calls ``set_phase``
+        # and ``get_desired_outputs``) can mutate the manager's state
+        # between ticks; reading from the manager here would pick up the
+        # post-mutation values and silently skip the skill-change handler.
+        # The snapshot is updated at the end of this method.
+        pre_update_phase = (
+            self._prev_compute_phase.clone()
+            if self._prev_compute_phase is not None
+            else (self.manager.phase.clone() if self.manager.phase is not None else None)
+        )
+        pre_update_traj = (
+            self._prev_compute_traj.clone()
+            if self._prev_compute_traj is not None
+            else (
+                self.manager._cached_global_indices.clone()
+                if self.manager._cached_global_indices is not None
+                else None
+            )
+        )
+
+        # Use the per-env advance_mask computed at the top: only advance
+        # envs whose ep_len progressed since the last compute call.  An
+        # env's ep_len being unchanged means we're in the same env tick
+        # for that env (second of a resample-driven double-call), so its
+        # phase has already been advanced.
+        if advance_mask.any():
+            adv_ids = torch.where(advance_mask)[0]
             self.manager.update_phase(self.env.step_dt, env_ids=adv_ids)
+        # Keep ``advancing_mask`` as an alias for backward compat with the
+        # skill-change block below.
+        advancing_mask = advance_mask
+
+        # Skill-change handling: read ``_skill_changed`` NOW, before the
+        # explicit ``invalidate_cache`` below triggers a second rebuild
+        # that would wipe it to all-False (since ``_prev_skill_indices``
+        # was just updated by ``update_phase``'s implicit rebuild).
+        #
+        # Match V1's ``compute_transition_time`` semantics:
+        #   - For perpetual prev: target = 0 (V1's _compute_phasing_var
+        #     of perpetual returns 0 regardless of t).
+        #   - For non-perpetual prev: target = pre_update_phase (preserve phi).
+        #
+        # Reset envs already have their phase set + gate re-armed via
+        # ``manager.set_phase`` in the reset event, so we restrict to
+        # advancing envs to avoid double-handling.
+        # DEBUG: print every time env-0's trajectory differs from the
+        # pre-update value, regardless of _skill_changed.  Helps detect
+        # whether _skill_changed is wrongly False at a real transition.
+        if _V2_DEBUG_PRINTS and pre_update_traj is not None:
+            cur_global_for_dbg = self.manager._cached_global_indices
+            if cur_global_for_dbg is not None and int(cur_global_for_dbg[0]) != int(pre_update_traj[0]):
+                if not hasattr(self, "_dbg_traj_chg_count"):
+                    self._dbg_traj_chg_count = 0
+                if self._dbg_traj_chg_count < 8:
+                    sk_changed_v = (
+                        bool(self.manager._skill_changed[0])
+                        if self.manager._skill_changed is not None
+                        and self.manager._skill_changed.numel() > 0
+                        else "None"
+                    )
+                    print(
+                        f"[V2 TRAJ-CHG env=0 ep_len={int(self.env.episode_length_buf[0])} "
+                        f"prev_traj={int(pre_update_traj[0])} cur_traj={int(cur_global_for_dbg[0])} "
+                        f"_skill_changed[0]={sk_changed_v} "
+                        f"advance_mask[0]={bool(advancing_mask[0])} "
+                        f"prev_phase={float(pre_update_phase[0]):.5f} "
+                        f"cur_phase_post_update={float(self.manager.phase[0]):.5f}]"
+                    )
+                    self._dbg_traj_chg_count += 1
+
+        if (
+            self.manager._skill_changed is not None
+            and pre_update_phase is not None
+            and pre_update_traj is not None
+        ):
+            # Skill-change handler also gated by ``~external_set`` (already
+            # baked into ``advance_mask`` via the head of this method).
+            changed = self.manager._skill_changed & advancing_mask
+            if changed.any():
+                changed_ids = torch.where(changed)[0]
+                prev_type = self.manager.data["traj_type"][pre_update_traj[changed_ids]]
+                was_perpetual = prev_type == _PERPETUAL_INT
+                target_phase = torch.where(
+                    was_perpetual,
+                    torch.zeros_like(pre_update_phase[changed_ids]),
+                    pre_update_phase[changed_ids],
+                )
+                # DEBUG: print first few skill-change events for env 0.
+                if _V2_DEBUG_PRINTS and 0 in changed_ids.tolist():
+                    if not hasattr(self, "_dbg_skill_print_count"):
+                        self._dbg_skill_print_count = 0
+                    if self._dbg_skill_print_count < 5:
+                        idx = (changed_ids == 0).nonzero(as_tuple=True)[0][0].item()
+                        print(
+                            f"[V2 SKILL-CHG env=0 ep_len={int(self.env.episode_length_buf[0])} "
+                            f"prev_traj={int(pre_update_traj[0])} prev_phase={float(pre_update_phase[0]):.5f} "
+                            f"prev_type={int(prev_type[idx])} was_perpetual={bool(was_perpetual[idx])} "
+                            f"target_phase={float(target_phase[idx]):.5f} "
+                            f"phase_before_set={float(self.manager.phase[0]):.5f}]"
+                        )
+                        self._dbg_skill_print_count += 1
+                self.manager.set_phase(target_phase, changed_ids)
+                if (
+                    _V2_DEBUG_PRINTS
+                    and 0 in changed_ids.tolist()
+                    and getattr(self, "_dbg_skill_print_count", 0) <= 5
+                ):
+                    print(
+                        f"[V2 SKILL-CHG env=0 phase_after_set={float(self.manager.phase[0]):.5f} "
+                        f"next_gate_idx_after_set={int(self.manager.next_gate_idx[0])}]"
+                    )
+                # Match V1 hold-mode skill-change semantics: arm gate 0 of
+                # the new trajectory unconditionally (regardless of current
+                # phi).  ``set_phase`` above called ``_reseed_gate_for_envs``
+                # which picks the first upcoming gate based on phase, so we
+                # must override afterward.  Without this override, when phi
+                # at swap is past gate 0's phi, V2 picks the wrap gate and
+                # diverges from V1 by up to half a period.
+                if self.cfg.hold_on_late_contact:
+                    cur_traj_after = self.manager.get_current_trajectory_indices()[changed_ids]
+                    new_num_gates = self.manager._num_gates_per_traj[cur_traj_after]
+                    gate_init = torch.where(
+                        new_num_gates > 0,
+                        torch.zeros_like(new_num_gates),
+                        -torch.ones_like(new_num_gates),
+                    )
+                    self.manager.next_gate_idx[changed_ids] = gate_init
+
+        # Commit the new skill assignment so the next ``_ensure_cache``
+        # rebuild correctly reports no further change for the envs whose
+        # transition we just processed.  Done unconditionally for envs
+        # that advanced this tick — covers the case where ``_skill_changed``
+        # was wrongly False because some external caller (e.g. the reset
+        # event) already invalidated and rebuilt the cache before we got
+        # here, but we still need to keep ``_prev_skill_indices`` in sync.
+        if advance_mask.any():
+            self.manager.commit_skill_state(torch.where(advance_mask)[0])
 
         # Resolve current trajectory assignment after any phase mutations.
         self.manager.invalidate_cache()
@@ -245,6 +490,10 @@ class BatchedMultiSkillCommandV2(BaseTrajectoryCommand):
 
         if self._gating_enabled:
             contact_now = self._read_contact_now()
+            # DEBUG: V2 trace
+            _e = 0
+            if int(self.env.episode_length_buf[_e]) < 0:
+                print(f"[V2 contact step={int(self.env.episode_length_buf[_e])} contact={contact_now[_e].tolist()}]")
             self._apply_contact_gate(contact_now)
 
         total = self.manager.data["total_time"][cur_traj]
@@ -252,4 +501,118 @@ class BatchedMultiSkillCommandV2(BaseTrajectoryCommand):
 
         self._last_compute_step = ep_len.clone()
         self._cached_t = t
+        # Snapshot the post-compute state so the next call's pre_update_*
+        # is read from V2's own state, not from a manager that external
+        # callers may have mutated in between.
+        self._prev_compute_phase = self.manager.phase.clone()
+        self._prev_compute_traj = (
+            self.manager._cached_global_indices.clone()
+            if self.manager._cached_global_indices is not None
+            else None
+        )
+
+        # DEBUG: V2 end-of-step state
+        _e = 0
+        if int(ep_len[_e]) < 0:
+            _total_e = self.manager.data["total_time"][cur_traj[_e]]
+            _phi_e = float(self.manager.phase[_e])
+            _t_e = _phi_e * float(_total_e)
+            _traj_e = int(cur_traj[_e])
+            _skill_e = int(self.manager.data["skill_idx"][cur_traj[_e]])
+            _vel_e = self.env.command_manager.get_term(self.cfg.conditioner_generator_name).command[_e].tolist()
+            print(f"[V2 step={int(ep_len[_e])} phi={_phi_e:.6f} t={_t_e:.6f} gate={int(self.manager.next_gate_idx[_e])} traj={_traj_e} skill={_skill_e} vel={_vel_e}]")
+
         return t
+
+
+
+# =====================================================================
+# Patches applied to make V2 (24531ad NEW cmd) match V1 (3f278d4 OLD cmd)
+# behavior during the regression bisect.  All seven are verified via the
+# dual-cmd play comparison (V1 shadow vs V2 primary).
+# =====================================================================
+#
+# 1. Fire-target eps_phi shift fix
+#    Where: ``multiskill_manager_v2.py``
+#           ``snap_phase_to_new_domain``,
+#           ``snap_phase_to_start_of_current_domain``.
+#    What:  Snap to ``gate_phi % 1.0`` (no ``+ eps_phi`` shift).
+#    Why:   Original NEW snap landed phase one ``eps_phi`` *past* the
+#           gate; V1's fire snaps phase to ``target_phi`` exactly.  The
+#           offset persisted across every fire, so V2 was permanently
+#           ahead of V1 by ``eps_phi`` (~3% of a period) after the first
+#           gate fire.
+#
+# 2. Skill-change gate re-arm
+#    Where: ``_compute_time`` above, in the skill-change block.
+#    What:  Detect skill change via ``manager._skill_changed`` and
+#           call ``manager._reseed_gate_for_envs(changed_ids)`` (now
+#           via ``set_phase``, which calls reseed internally).
+#    Why:   NEW cmd had no skill-change handler.  When the conditioner
+#           swapped skills, ``next_gate_idx`` carried over from the
+#           previous trajectory unchanged — for perpetual→walking the
+#           gate stayed at -1 and V2 never fired any gates.
+#
+# 3. Phase preserved across skill change (matches compute_transition_time)
+#    Where: ``_compute_time`` above.
+#    What:  Capture ``pre_update_phase`` and ``pre_update_traj`` before
+#           ``update_phase`` runs.  On skill change, restore phase via
+#           ``set_phase``: ``target_phase = 0`` if prev trajectory was
+#           perpetual, else ``pre_update_phase``.
+#    Why:   ``update_phase`` advances phase by ``step_dt / new_total``
+#           on the transition step, so the new trajectory is evaluated
+#           one step ahead of where V1's ``compute_transition_time``
+#           would place it.  For perpetual prev, V1's
+#           ``_compute_phasing_var`` returns 0 regardless of t, so the
+#           target is 0; for non-perpetual, phi persists across the swap.
+#
+# 4. ``_skill_changed`` read order
+#    Where: ``_compute_time`` above.
+#    What:  Read ``manager._skill_changed`` *before* V2's redundant
+#           ``invalidate_cache`` + ``get_current_trajectory_indices``.
+#    Why:   The parent class ``BaseTrajectoryCommand._update_command``
+#           already invalidated the cache before ``_compute_time`` ran.
+#           ``update_phase``'s internal ``_get_global_indices`` triggered
+#           the *first* rebuild and populated ``_skill_changed=True``.
+#           V2's explicit ``invalidate_cache`` triggered a *second*
+#           rebuild that wiped ``_skill_changed`` to False (because
+#           ``_prev_skill_indices`` was just updated to the new value).
+#           Reading the flag between the two rebuilds preserves it.
+#
+# 5. Hold-mode skill-change gate override
+#    Where: ``_compute_time`` above.
+#    What:  After ``set_phase`` (which auto-reseeds gate to first
+#           upcoming based on phase), unconditionally override
+#           ``next_gate_idx[changed] = 0`` when in hold mode.
+#    Why:   V1's ``smooth_transitions`` block in hold mode arms gate 0
+#           regardless of current phi.  ``_reseed_gate_for_envs`` picks
+#           the first gate ``>= phase``, so when the swap happens at
+#           ``phi=0.7`` (past the mid-period gate at 0.5), V2 armed the
+#           wrap gate (1.0) while V1 armed gate 0 — a half-period
+#           divergence that lasted until the trajectories re-synced.
+#
+# 6. Window width matches gate_phi * W
+#    Where: ``_apply_contact_gate`` above.
+#    What:  ``early_window_size = gate_phi * W`` (per-gate width),
+#           applied to both ``in_early`` and ``in_late`` bounds.
+#    Why:   Original NEW used a fixed window ``W`` regardless of
+#           ``gate_phi``.  V1 used ``window_lo = target_phi * (1 - W)``
+#           ⇒ window width ``target_phi * W``.  At a mid-period gate
+#           (``phi=0.5, W=0.2``), V1's window was 0.1 phase-units wide
+#           but V2's was 0.2 — twice as permissive on early fires.
+#
+# 7. Inclusive ``in_late`` (signed >= 0), strict ``in_early`` (signed < 0)
+#    Where: ``_apply_contact_gate`` above.
+#    What:  Treat ``signed == 0`` as ``in_late`` (so hold pulls back),
+#           and ``signed < 0`` strict for ``in_early``.
+#    Why:   V1's ``hold_mask = phi >= target_phi`` is *inclusive*: at
+#           ``phi == target_phi`` exactly, V1 holds.  Original NEW used
+#           strict ``signed > 0`` for ``in_late``, missing the boundary
+#           and letting phase pass through without holding (V2 then
+#           outpaced V1 by one step per FP-induced edge case).
+#
+# Also in ``multiskill_manager_v2.py``:
+#   - Removed perpetual phase pinning in ``update_phase`` — phase now
+#     advances naturally for perpetual trajectories with ``% 1.0`` wrap,
+#     matching V1's behavior (where ``t`` advances regardless of
+#     trajectory type).
