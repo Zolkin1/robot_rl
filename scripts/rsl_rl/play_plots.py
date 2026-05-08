@@ -249,84 +249,166 @@ def plot_base_velocity(
         plt.close(fig)
 
 
+def _plot_gate_offset(
+    ax: "plt.Axes",
+    time_s: np.ndarray,
+    gate_rel_phi: np.ndarray,
+    next_gate_idx: np.ndarray | None,
+    early_window: np.ndarray | None,
+) -> None:
+    """Render gate-relative phi over time with snap-event markers.
+
+    ``gate_rel_phi`` is the manager's monotonic signed phi-distance from
+    the currently armed gate (negative = before gate, positive = past
+    gate).  Discontinuities mark contact-gate snaps; the value just
+    before each discontinuity is the *miss amount* — how early (negative)
+    or late (positive) the contact landed relative to the expected gate
+    phi.  Reset boundaries also change ``next_gate_idx`` and will appear
+    as markers; their offset value reflects whatever phase was sampled
+    at reset rather than a true contact miss.
+
+    When ``early_window`` is supplied (per-step ``-W * pre_size`` of the
+    armed gate), it's drawn as a step line and the early-fire region
+    between the threshold and 0 is shaded — making it visually obvious
+    when the window opens (gate_rel_phi crosses the threshold going up)
+    and closes (a snap fires).
+    """
+    ax.plot(time_s, gate_rel_phi, color="gray", alpha=0.55, linewidth=1.0,
+            label="gate_rel_phi", zorder=2)
+    ax.axhline(0.0, color="black", linestyle=":", linewidth=0.8, alpha=0.6)
+
+    if early_window is not None:
+        # Early-fire window: contacts in [early_window, 0] snap forward.
+        # Use ``step="post"`` so transitions on gate-advance look like
+        # piecewise-constant boundaries rather than slanted lines.
+        ax.fill_between(
+            time_s, early_window, 0.0,
+            step="post", color="tab:green", alpha=0.12, zorder=0,
+            label="early-fire window",
+        )
+        ax.plot(time_s, early_window, color="tab:green",
+                drawstyle="steps-post", linewidth=1.0, alpha=0.8, zorder=1)
+
+    if next_gate_idx is not None:
+        # A snap (or reset) is the only way next_gate_idx changes.
+        # ``np.diff`` returns nonzero at index t-1 when next_gate_idx
+        # changes between steps t-1 and t, so the fire happened at step
+        # ``t = change_steps + 1``.  ``gate_rel_phi`` is logged as the
+        # post-update, pre-snap snapshot, so ``gate_rel_phi[t]`` is the
+        # value that triggered the fire decision — exactly what we want
+        # to display on the marker.
+        change_steps = np.where(np.diff(next_gate_idx) != 0)[0]
+        fire_steps = change_steps + 1
+        if fire_steps.size > 0:
+            offsets = gate_rel_phi[fire_steps]
+            times = time_s[fire_steps]
+            late_mask = offsets > 0
+            early_mask = ~late_mask
+            if late_mask.any():
+                ax.scatter(times[late_mask], offsets[late_mask],
+                           color="tab:red", s=28, zorder=3,
+                           label=f"late snap (n={int(late_mask.sum())})")
+            if early_mask.any():
+                ax.scatter(times[early_mask], offsets[early_mask],
+                           color="tab:green", s=28, zorder=3,
+                           label=f"early snap (n={int(early_mask.sum())})")
+
+    ax.set_title("Gate Offset (negative = early, positive = late)", fontsize=10)
+    ax.set_xlabel("Time (s)")
+    ax.set_ylabel("phi from armed gate")
+    ax.grid(True, alpha=0.3)
+    ax.legend(fontsize=8, loc="upper right")
+
+
 def plot_domain_info(
     data: dict[str, np.ndarray],
     metadata: dict[str, Any],
     save_dir: str,
     env_ids: list[int],
 ) -> None:
-    """Phasing variable and current domain over time."""
+    """Phasing variable, current domain, and (optionally) gate offset + phase obs.
+
+    Layout (rows added only when the corresponding data is present):
+      row 0: phasing_var | current_domain
+      row 1 (if gate_rel_phi logged): gate offset (full width)
+      row 2 (if phase_obs logged):    sin phase obs | cos phase obs
+    """
     if "phasing_var" not in data:
         print("[WARN plot_domain_info] Missing phasing_var data, skipping.")
         return
+
+    import matplotlib.gridspec as gridspec
 
     dt = metadata.get("dt", 1.0)
     time_s = np.arange(data["phasing_var"].shape[0]) * dt
 
     has_phase_obs = "phase_obs" in data
+    has_gate_data = "gate_rel_phi" in data
     phase_labels = metadata.get("phase_obs_labels", [])
 
     for env_id in env_ids:
+        n_rows = 1 + (1 if has_gate_data else 0) + (1 if has_phase_obs else 0)
+        fig = plt.figure(figsize=(10, 3 * n_rows))
+        gs = gridspec.GridSpec(n_rows, 2, figure=fig)
+        fig.suptitle(f"Domain Info (Env {env_id})", fontsize=16)
+
+        row = 0
+
+        # Row 0: phasing var | current domain
+        ax_phi = fig.add_subplot(gs[row, 0])
+        ax_phi.plot(time_s, data["phasing_var"][:, env_id], linewidth=2)
+        ax_phi.set_title("Phasing Var")
+        ax_phi.set_xlabel("Time (s)")
+        ax_phi.grid(True, alpha=0.3)
+
+        ax_dom = fig.add_subplot(gs[row, 1])
+        if "current_domain" in data:
+            ax_dom.plot(time_s, data["current_domain"][:, env_id], linewidth=2)
+            ax_dom.set_title("Current Domain")
+            ax_dom.set_xlabel("Time (s)")
+            ax_dom.grid(True, alpha=0.3)
+        else:
+            ax_dom.set_visible(False)
+        row += 1
+
+        # Row 1 (optional): gate offset spans both columns
+        if has_gate_data:
+            ax_gate = fig.add_subplot(gs[row, :])
+            ngi = data["next_gate_idx"][:, env_id] if "next_gate_idx" in data else None
+            ew = data["gate_early_window"][:, env_id] if "gate_early_window" in data else None
+            _plot_gate_offset(
+                ax_gate,
+                time_s,
+                data["gate_rel_phi"][:, env_id],
+                ngi,
+                ew,
+            )
+            row += 1
+
+        # Row 2 (optional): split phase obs into sin and cos halves
         if has_phase_obs:
-            # 2x2 layout: top-left=phasing_var, top-right=current_domain,
-            #              bottom-left=sin phase obs, bottom-right=cos phase obs
-            fig, axs = plt.subplots(2, 2, figsize=(10, 6))
-            fig.suptitle(f"Domain Info (Env {env_id})", fontsize=16)
-
-            # Top-left: phasing var
-            axs[0, 0].plot(time_s, data["phasing_var"][:, env_id], linewidth=2)
-            axs[0, 0].set_title("Phasing Var")
-            axs[0, 0].set_xlabel("Time (s)")
-            axs[0, 0].grid(True, alpha=0.3)
-
-            # Top-right: current domain
-            if "current_domain" in data:
-                axs[0, 1].plot(time_s, data["current_domain"][:, env_id], linewidth=2)
-                axs[0, 1].set_title("Current Domain")
-            else:
-                axs[0, 1].set_visible(False)
-            axs[0, 1].set_xlabel("Time (s)")
-            axs[0, 1].grid(True, alpha=0.3)
-
-            # Split phase_obs into sin and cos halves
             phase_data = data["phase_obs"][:, env_id, :]  # [T, D]
             n_dims = phase_data.shape[1]
             half = n_dims // 2
 
-            # Bottom-left: sin phase observations
+            ax_sin = fig.add_subplot(gs[row, 0])
             for d in range(half):
                 label = phase_labels[d] if d < len(phase_labels) else f"sin dim {d}"
-                axs[1, 0].plot(time_s, phase_data[:, d], linewidth=1.5, label=label)
-            axs[1, 0].set_title("Sin Phase Obs")
-            axs[1, 0].set_xlabel("Time (s)")
-            axs[1, 0].legend(fontsize=8)
-            axs[1, 0].grid(True, alpha=0.3)
+                ax_sin.plot(time_s, phase_data[:, d], linewidth=1.5, label=label)
+            ax_sin.set_title("Sin Phase Obs")
+            ax_sin.set_xlabel("Time (s)")
+            ax_sin.legend(fontsize=8)
+            ax_sin.grid(True, alpha=0.3)
 
-            # Bottom-right: cos phase observations
+            ax_cos = fig.add_subplot(gs[row, 1])
             for d in range(half, n_dims):
                 label = phase_labels[d] if d < len(phase_labels) else f"cos dim {d}"
-                axs[1, 1].plot(time_s, phase_data[:, d], linewidth=1.5, label=label)
-            axs[1, 1].set_title("Cos Phase Obs")
-            axs[1, 1].set_xlabel("Time (s)")
-            axs[1, 1].legend(fontsize=8)
-            axs[1, 1].grid(True, alpha=0.3)
-        else:
-            # No phase obs: simple 1-row layout
-            plot_items = [("phasing_var", "Phasing Var")]
-            if "current_domain" in data:
-                plot_items.append(("current_domain", "Current Domain"))
-
-            n_cols = len(plot_items)
-            fig, axs_flat = plt.subplots(1, n_cols, figsize=(5 * n_cols, 3))
-            fig.suptitle(f"Domain Info (Env {env_id})", fontsize=16)
-            if n_cols == 1:
-                axs_flat = [axs_flat]
-
-            for i, (key, label) in enumerate(plot_items):
-                axs_flat[i].plot(time_s, data[key][:, env_id], linewidth=2)
-                axs_flat[i].set_title(label)
-                axs_flat[i].set_xlabel("Time (s)")
-                axs_flat[i].grid(True, alpha=0.3)
+                ax_cos.plot(time_s, phase_data[:, d], linewidth=1.5, label=label)
+            ax_cos.set_title("Cos Phase Obs")
+            ax_cos.set_xlabel("Time (s)")
+            ax_cos.legend(fontsize=8)
+            ax_cos.grid(True, alpha=0.3)
+            row += 1
 
         plt.tight_layout(rect=[0, 0.03, 1, 0.95])
         plt.savefig(os.path.join(save_dir, f"domain_info_env{env_id}.png"),

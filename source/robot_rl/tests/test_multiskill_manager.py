@@ -204,11 +204,12 @@ class TestBatchedOutput:
         # Test times spanning the trajectory
         total_t = msm.data["total_time"][traj_idx].item()
         t = torch.linspace(0.001, total_t * 0.99, N)
+        phase = t / total_t
 
         # Set all envs to this trajectory
         msm.set_trajectory_indices(torch.full((N,), traj_idx, dtype=torch.long))
 
-        pos_msm, vel_msm = msm.get_output(t)
+        pos_msm, vel_msm = msm.get_output(phase)
         pos_ref, vel_ref = ref.get_output(t)
 
         assert torch.allclose(pos_msm, pos_ref, atol=1e-4, rtol=1e-4), (
@@ -229,8 +230,11 @@ class TestBatchedOutput:
         msm.set_trajectory_indices(indices)
 
         t = torch.tensor([0.05, 0.1, 0.05, 0.1])
+        total_a = msm.data["total_time"][idx_a].item()
+        total_b = msm.data["total_time"][idx_b].item()
+        phase = torch.tensor([t[0] / total_a, t[1] / total_a, t[2] / total_b, t[3] / total_b])
 
-        pos_msm, vel_msm = msm.get_output(t)
+        pos_msm, vel_msm = msm.get_output(phase)
 
         pos_a, vel_a = reference_managers[idx_a].get_output(t[:2])
         pos_b, vel_b = reference_managers[idx_b].get_output(t[2:])
@@ -241,22 +245,26 @@ class TestBatchedOutput:
         assert torch.allclose(vel_msm[2:], vel_b, atol=1e-4)
 
     def test_output_at_t_zero(self, multiskill_single_skill, reference_managers):
-        """Output at t=0 should match reference for all trajectories."""
+        """Output at phase=0 should match reference for all trajectories."""
         msm = multiskill_single_skill
         T = msm.num_trajectories
-        t = torch.full((T,), 0.001)  # Slightly off zero to avoid boundary
+        # Slightly off zero to avoid boundary; same value works as both phase
+        # and time since reference managers use whatever value as time directly.
+        t = torch.full((T,), 0.001)
+        totals = msm.data["total_time"][:T]
+        phase = t / totals
         indices = torch.arange(T, dtype=torch.long)
         msm.set_trajectory_indices(indices)
 
-        pos_msm, vel_msm = msm.get_output(t)
+        pos_msm, vel_msm = msm.get_output(phase)
 
         for ti in range(T):
             pos_ref, vel_ref = reference_managers[ti].get_output(t[ti:ti+1])
             assert torch.allclose(pos_msm[ti:ti+1], pos_ref, atol=1e-4), (
-                f"Traj {ti} t=0 pos mismatch"
+                f"Traj {ti} phase=0 pos mismatch"
             )
             assert torch.allclose(vel_msm[ti:ti+1], vel_ref, atol=1e-4), (
-                f"Traj {ti} t=0 vel mismatch"
+                f"Traj {ti} phase=0 vel mismatch"
             )
 
 
@@ -264,39 +272,38 @@ class TestBatchedOutput:
 # Cross-Validation: Phasing Variable
 # ---------------------------------------------------------------------------
 
-class TestPhasingVar:
-    @pytest.mark.parametrize("traj_idx", [0, 5, 10, 18])
-    def test_phasing_matches_reference(
-        self, multiskill_single_skill, reference_managers, traj_idx
-    ):
-        """Phasing variable should match per-trajectory result."""
-        if traj_idx >= len(reference_managers):
-            pytest.skip("Not enough trajectories")
+class TestPhase:
+    """Phase state lives directly on the manager — these tests pin the
+    set / read round-trip.  Earlier ``get_phasing_var(t)`` tests are gone:
+    after the time→phase refactor, ``manager.phase`` *is* the phasing
+    variable, so there is no transformation left to cross-validate."""
 
+    def test_set_phase_round_trip(self, multiskill_single_skill):
+        """``set_phase`` writes; ``manager.phase`` reads back the same value."""
         msm = multiskill_single_skill
-        ref = reference_managers[traj_idx]
-        N = 8
+        N = 4
+        msm.set_trajectory_indices(torch.zeros(N, dtype=torch.long, device=DEVICE))
+        msm._ensure_phase_state(N)
+        env_ids = torch.arange(N, device=DEVICE)
+        target = torch.tensor([0.0, 0.25, 0.5, 0.99], device=DEVICE)
+        msm.set_phase(target, env_ids)
+        assert torch.allclose(msm.phase, target, atol=1e-7)
 
-        total_t = msm.data["total_time"][traj_idx].item()
-        t = torch.linspace(0.001, total_t * 0.99, N)
-
-        msm.set_trajectory_indices(torch.full((N,), traj_idx, dtype=torch.long))
-        phi_msm = msm.get_phasing_var(t)
-        phi_ref = ref.get_phasing_var(t)
-
-        assert torch.allclose(phi_msm, phi_ref, atol=1e-5), (
-            f"Traj {traj_idx} phasing mismatch: max diff = {(phi_msm - phi_ref).abs().max()}"
-        )
-
-    def test_phasing_range(self, multiskill_single_skill):
-        """Phasing should be in [0, 1]."""
+    def test_phase_in_unit_interval_after_update(self, multiskill_single_skill):
+        """``update_phase`` keeps phase in [0, 1] for all trajectory types."""
         msm = multiskill_single_skill
         N = 20
-        t = torch.rand(N) * 2.0
-        msm.set_trajectory_indices(torch.zeros(N, dtype=torch.long))
-        phi = msm.get_phasing_var(t)
-        assert (phi >= 0).all()
-        assert (phi <= 1).all()
+        msm.set_trajectory_indices(torch.zeros(N, dtype=torch.long, device=DEVICE))
+        msm._ensure_phase_state(N)
+        # Seed near the wrap so periodic trajectories actually wrap.
+        msm.phase[:] = torch.linspace(0.9, 0.999, N, device=DEVICE)
+        # update_phase needs an env with step_dt; reuse the stub via msm.env
+        # if present, otherwise skip.
+        if msm.env is None or not hasattr(msm.env, "step_dt"):
+            pytest.skip("Manager has no env; cannot exercise update_phase")
+        msm.update_phase(msm.env.step_dt)
+        assert (msm.phase >= 0).all()
+        assert (msm.phase <= 1).all()
 
 
 # ---------------------------------------------------------------------------
@@ -318,9 +325,10 @@ class TestDomains:
 
         total_t = msm.data["total_time"][traj_idx].item()
         t = torch.linspace(0.001, total_t * 0.99, N)
+        phase = t / total_t
 
         msm.set_trajectory_indices(torch.full((N,), traj_idx, dtype=torch.long))
-        dom_msm = msm.get_current_domains(t)
+        dom_msm = msm.get_current_domains(phase)
         dom_ref = ref.get_current_domains(t)
 
         assert torch.equal(dom_msm, dom_ref), (
@@ -341,9 +349,10 @@ class TestDomains:
 
         total_t = msm.data["total_time"][traj_idx].item()
         t = torch.linspace(0.001, total_t * 0.99, N)
+        phase = t / total_t
 
         msm.set_trajectory_indices(torch.full((N,), traj_idx, dtype=torch.long))
-        dt_msm = msm.get_domain_times(t)
+        dt_msm = msm.get_domain_times(phase)
         dt_ref = ref.get_domain_times(t)
 
         assert torch.allclose(dt_msm, dt_ref, atol=1e-6), (
@@ -355,42 +364,13 @@ class TestDomains:
         msm = multiskill_single_skill
         T = msm.num_trajectories
         N = T
-        t = torch.rand(N) * 2.0
+        phase = torch.rand(N)
         indices = torch.arange(T, dtype=torch.long)
         msm.set_trajectory_indices(indices)
 
-        dom = msm.get_current_domains(t)
+        dom = msm.get_current_domains(phase)
         max_valid = msm.data["expanded_domains"][indices] - 1
         assert (dom <= max_valid).all()
-
-
-# ---------------------------------------------------------------------------
-# Cross-Validation: Acceleration
-# ---------------------------------------------------------------------------
-
-class TestAcceleration:
-    @pytest.mark.parametrize("traj_idx", [0, 5, 10])
-    def test_acceleration_matches_reference(
-        self, multiskill_single_skill, reference_managers, traj_idx
-    ):
-        """Acceleration should match per-trajectory result."""
-        if traj_idx >= len(reference_managers):
-            pytest.skip("Not enough trajectories")
-
-        msm = multiskill_single_skill
-        ref = reference_managers[traj_idx]
-        N = 8
-
-        total_t = msm.data["total_time"][traj_idx].item()
-        t = torch.linspace(0.01, total_t * 0.9, N)
-
-        msm.set_trajectory_indices(torch.full((N,), traj_idx, dtype=torch.long))
-        acc_msm = msm.get_acceleration(t)
-        acc_ref = ref.get_acceleration(t)
-
-        assert torch.allclose(acc_msm, acc_ref, atol=1e-3, rtol=1e-3), (
-            f"Traj {traj_idx} accel mismatch: max diff = {(acc_msm - acc_ref).abs().max()}"
-        )
 
 
 # ---------------------------------------------------------------------------
@@ -413,9 +393,10 @@ class TestContactState:
 
         total_t = msm.data["total_time"][traj_idx].item()
         t = torch.linspace(0.001, total_t * 0.99, N)
+        phase = t / total_t
 
         msm.set_trajectory_indices(torch.full((N,), traj_idx, dtype=torch.long))
-        cs_msm = msm.get_contact_state(t, contact_frames)
+        cs_msm = msm.get_contact_state(phase, contact_frames)
         cs_ref = ref.get_contact_state(t, contact_frames)
 
         assert torch.equal(cs_msm, cs_ref), (
@@ -438,54 +419,22 @@ class TestOrderOutputs:
 
         # Get output in original order
         N = 4
+        total_t = msm.data["total_time"][0].item()
         t = torch.tensor([0.01, 0.05, 0.1, 0.15])
+        phase = t / total_t
         msm.set_trajectory_indices(torch.zeros(N, dtype=torch.long))
-        pos_orig, vel_orig = msm.get_output(t)
+        pos_orig, vel_orig = msm.get_output(phase)
 
         # Reverse output names
         rev_pos = list(reversed(msm.pos_output_names))
         rev_vel = list(reversed(msm.vel_output_names))
         msm.order_outputs(rev_pos, rev_vel)
 
-        pos_rev, vel_rev = msm.get_output(t)
+        pos_rev, vel_rev = msm.get_output(phase)
 
         # Reversed output should be the original flipped
         assert torch.allclose(pos_rev, pos_orig.flip(1), atol=1e-6)
         assert torch.allclose(vel_rev, vel_orig.flip(1), atol=1e-6)
-
-
-# ---------------------------------------------------------------------------
-# CLF Logging
-# ---------------------------------------------------------------------------
-
-class TestCLFLogging:
-    def test_log_and_retrieve(self, multiskill_single_skill):
-        """Should be able to log V values and retrieve them."""
-        msm = multiskill_single_skill
-        N = 10
-        msm.set_trajectory_indices(torch.zeros(N, dtype=torch.long))
-
-        phi = torch.linspace(0.05, 0.95, N)
-        v = torch.ones(N) * 2.0
-
-        msm.log_v_on_phasing_var(phi, v)
-
-        v_log, phi_keys = msm.get_v_log()
-        assert v_log.shape == phi_keys.shape
-        assert phi_keys.shape[0] == 10
-
-    def test_per_skill_logs(self, multiskill_single_skill):
-        """Per-skill V logs should exist for each skill."""
-        msm = multiskill_single_skill
-        per_skill = msm.get_v_log_per_skill()
-        assert "default" in per_skill
-        assert per_skill["default"].shape[0] == 10
-
-    def test_v_log_avg(self, multiskill_single_skill):
-        """Average V should return one value per skill."""
-        msm = multiskill_single_skill
-        avg = msm.get_v_log_avg()
-        assert avg.shape == (len(msm.skills),)
 
 
 # ---------------------------------------------------------------------------
@@ -505,18 +454,17 @@ class TestPlaceholders:
 # ---------------------------------------------------------------------------
 
 class TestInterface:
-    def test_get_num_outputs(self, multiskill_single_skill):
-        """get_num_outputs should return pos output count."""
-        assert multiskill_single_skill.get_num_outputs() == multiskill_single_skill.num_pos_outputs
-
     def test_get_num_pos_outputs(self, multiskill_single_skill):
         assert multiskill_single_skill.get_num_pos_outputs() == multiskill_single_skill.num_pos_outputs
 
     def test_get_num_vel_outputs(self, multiskill_single_skill):
         assert multiskill_single_skill.get_num_vel_outputs() == multiskill_single_skill.num_vel_outputs
 
-    def test_get_output_names(self, multiskill_single_skill):
-        assert multiskill_single_skill.get_output_names == multiskill_single_skill.pos_output_names
+    def test_get_pos_output_names(self, multiskill_single_skill):
+        assert multiskill_single_skill.get_pos_output_names == multiskill_single_skill.pos_output_names
+
+    def test_get_vel_output_names(self, multiskill_single_skill):
+        assert multiskill_single_skill.get_vel_output_names == multiskill_single_skill.vel_output_names
 
     def test_get_reference_frames(self, multiskill_single_skill):
         assert isinstance(multiskill_single_skill.get_reference_frames(), list)
@@ -616,3 +564,383 @@ class TestErrors:
         msm.invalidate_cache()
         with pytest.raises(RuntimeError, match="Cannot auto-populate"):
             msm._ensure_cache()
+
+
+# ---------------------------------------------------------------------------
+# Contact-gate state machinery: phase, next_gate_idx, gate_rel_phi
+# ---------------------------------------------------------------------------
+
+
+class _StubEnv:
+    """Minimal env stub exposing ``step_dt`` for the snap operations."""
+
+    def __init__(self, step_dt: float = 0.02):
+        self.step_dt = step_dt
+
+
+def _find_traj_of_type(msm: MultiSkillManager, type_int: int) -> int:
+    """Return the index of the first trajectory of the given type, or -1."""
+    for ti in range(msm.num_trajectories):
+        if msm.data["traj_type"][ti].item() == type_int:
+            return ti
+    return -1
+
+
+class TestGateState:
+    """Direct tests for gate-state primitives.
+
+    These exercise ``_refresh_gate_rel_phi``, ``update_phase``,
+    ``_advance_gate_for_envs``, and the three snap methods by manipulating
+    per-env phase state by hand — no IsaacLab env required, just a
+    ``_StubEnv`` exposing ``step_dt`` for the snap path.
+    """
+
+    @pytest.fixture
+    def msm(self) -> MultiSkillManager:
+        """Fresh MSM with a stub env so ``_eps_phi`` works for snap tests."""
+        return MultiSkillManager(
+            path=MERGED_LIBRARY_DIR,
+            device=DEVICE,
+            env=_StubEnv(step_dt=0.02),
+        )
+
+    @pytest.fixture
+    def half_periodic_idx(self, msm) -> int:
+        ti = _find_traj_of_type(msm, 0)  # _HALF_PERIODIC_INT
+        if ti < 0:
+            pytest.skip("No half-periodic trajectory in test data")
+        return ti
+
+    # --- _refresh_gate_rel_phi -------------------------------------------
+
+    def test_refresh_with_active_gate(self, msm, half_periodic_idx):
+        """gate_rel_phi = phase - gate_phi[armed] for active gates."""
+        ti = half_periodic_idx
+        N = 4
+        msm.set_trajectory_indices(torch.full((N,), ti, dtype=torch.long, device=DEVICE))
+        msm._ensure_phase_state(N)
+
+        # Half-periodic gates are at phi=0.5 (gate 0) and phi=1.0 (gate 1).
+        msm.phase[:] = torch.tensor([0.30, 0.50, 0.70, 0.95], device=DEVICE)
+        msm.next_gate_idx[:] = torch.tensor([0, 0, 1, 1], dtype=torch.long, device=DEVICE)
+        msm.gate_rel_phi[:] = -99.0  # poison to ensure refresh writes
+
+        msm._refresh_gate_rel_phi(torch.arange(N, device=DEVICE))
+
+        expected = torch.tensor(
+            [0.30 - 0.50, 0.50 - 0.50, 0.70 - 1.00, 0.95 - 1.00],
+            device=DEVICE,
+        )
+        assert torch.allclose(msm.gate_rel_phi, expected, atol=1e-6)
+
+    def test_refresh_with_inactive_gate_writes_zero(self, msm, half_periodic_idx):
+        """gate_rel_phi = 0 when next_gate_idx == -1, regardless of phase."""
+        ti = half_periodic_idx
+        N = 3
+        msm.set_trajectory_indices(torch.full((N,), ti, dtype=torch.long, device=DEVICE))
+        msm._ensure_phase_state(N)
+
+        msm.phase[:] = torch.tensor([0.10, 0.50, 0.90], device=DEVICE)
+        msm.next_gate_idx[:] = torch.tensor([-1, -1, -1], dtype=torch.long, device=DEVICE)
+        msm.gate_rel_phi[:] = 99.0  # poison
+
+        msm._refresh_gate_rel_phi(torch.arange(N, device=DEVICE))
+
+        assert torch.allclose(msm.gate_rel_phi, torch.zeros(N, device=DEVICE))
+
+    def test_refresh_subset_only(self, msm, half_periodic_idx):
+        """Refresh leaves non-targeted envs untouched."""
+        ti = half_periodic_idx
+        N = 3
+        msm.set_trajectory_indices(torch.full((N,), ti, dtype=torch.long, device=DEVICE))
+        msm._ensure_phase_state(N)
+
+        msm.phase[:] = 0.3
+        msm.next_gate_idx[:] = 0
+        msm.gate_rel_phi[:] = torch.tensor([1.0, 2.0, 3.0], device=DEVICE)
+
+        msm._refresh_gate_rel_phi(torch.tensor([1], device=DEVICE))
+
+        # Only env 1 was refreshed; envs 0 and 2 keep poisoned values.
+        assert msm.gate_rel_phi[0].item() == pytest.approx(1.0)
+        assert msm.gate_rel_phi[1].item() == pytest.approx(0.3 - 0.5, abs=1e-6)
+        assert msm.gate_rel_phi[2].item() == pytest.approx(3.0)
+
+    # --- update_phase: gate_rel_phi accumulation -------------------------
+
+    def test_update_phase_no_wrap(self, msm, half_periodic_idx):
+        """Without a wrap, gate_rel_phi advances by step_dt / total."""
+        ti = half_periodic_idx
+        N = 1
+        msm.set_trajectory_indices(torch.tensor([ti], dtype=torch.long, device=DEVICE))
+        msm._ensure_phase_state(N)
+
+        total = msm.data["total_time"][ti].item()
+        step_dt = 0.02
+        delta = step_dt / total
+
+        msm.phase[:] = 0.30
+        msm.next_gate_idx[:] = 0
+        msm.gate_rel_phi[:] = 0.30 - 0.50
+
+        msm.update_phase(step_dt)
+
+        assert msm.phase[0].item() == pytest.approx(0.30 + delta, abs=1e-6)
+        assert msm.gate_rel_phi[0].item() == pytest.approx((0.30 - 0.50) + delta, abs=1e-6)
+
+    def test_update_phase_does_not_drift_when_gate_disarmed(self, msm, half_periodic_idx):
+        """``gate_rel_phi`` must not accumulate while ``next_gate_idx == -1``.
+
+        Without this guard, an env that ran on a no-gate trajectory and
+        later transitioned to a walking trajectory would see ``gate_rel_phi``
+        ramp linearly forever (no anchor) — visible in domain-info plots
+        as a monotonic line with no resets.
+        """
+        ti = half_periodic_idx
+        N = 1
+        msm.set_trajectory_indices(torch.tensor([ti], dtype=torch.long, device=DEVICE))
+        msm._ensure_phase_state(N)
+
+        msm.phase[:] = 0.30
+        msm.next_gate_idx[:] = -1  # disarmed
+        msm.gate_rel_phi[:] = 0.0
+
+        msm.update_phase(0.02)
+
+        # Phase still advances (the trajectory clock is independent).
+        assert msm.phase[0].item() > 0.30
+        # gate_rel_phi must stay put while the gate is disarmed.
+        assert msm.gate_rel_phi[0].item() == pytest.approx(0.0, abs=1e-7)
+
+    def test_update_phase_wrap_unwraps_gate_rel_phi(self, msm, half_periodic_idx):
+        """Across a phase wrap, gate_rel_phi advances by the un-wrapped delta."""
+        ti = half_periodic_idx
+        N = 1
+        msm.set_trajectory_indices(torch.tensor([ti], dtype=torch.long, device=DEVICE))
+        msm._ensure_phase_state(N)
+
+        total = msm.data["total_time"][ti].item()
+        step_dt = 0.02
+        delta = step_dt / total
+
+        # Set up just before the wrap with gate 1 (phi=1.0) armed.
+        prev_phase = 1.0 - 0.5 * delta  # advancing will cross 1.0
+        msm.phase[:] = prev_phase
+        msm.next_gate_idx[:] = 1
+        msm.gate_rel_phi[:] = prev_phase - 1.0  # small negative
+
+        msm.update_phase(step_dt)
+
+        # phase wrapped to a small positive
+        assert msm.phase[0].item() < prev_phase
+        # gate_rel_phi advanced by exactly delta (no wrap effect)
+        expected = (prev_phase - 1.0) + delta
+        assert msm.gate_rel_phi[0].item() == pytest.approx(expected, abs=1e-6)
+        # The wrap moved us from before the gate to past it.
+        assert msm.gate_rel_phi[0].item() > 0.0
+
+    def test_update_phase_does_not_advance_next_gate_idx(self, msm, half_periodic_idx):
+        """update_phase must not call _advance_gate_for_envs (auto-advance gone)."""
+        ti = half_periodic_idx
+        N = 1
+        msm.set_trajectory_indices(torch.tensor([ti], dtype=torch.long, device=DEVICE))
+        msm._ensure_phase_state(N)
+
+        # Phase set up to wrap with gate 1 (phi=1.0) armed — historically
+        # would have triggered wrap-advance. Must NOT advance now.
+        total = msm.data["total_time"][ti].item()
+        step_dt = 0.02
+        delta = step_dt / total
+
+        msm.phase[:] = 1.0 - 0.5 * delta
+        msm.next_gate_idx[:] = 1
+        msm._refresh_gate_rel_phi(torch.tensor([0], device=DEVICE))
+
+        msm.update_phase(step_dt)
+
+        assert msm.next_gate_idx[0].item() == 1, (
+            "update_phase should no longer auto-advance the gate index — "
+            "gate hand-off now happens via late-fire on contact."
+        )
+
+    # --- _advance_gate_for_envs ------------------------------------------
+
+    def test_advance_half_periodic_0_to_1(self, msm, half_periodic_idx):
+        """Half-periodic gate 0 → 1; gate_rel_phi recomputed against phi=1.0."""
+        ti = half_periodic_idx
+        N = 1
+        msm.set_trajectory_indices(torch.tensor([ti], dtype=torch.long, device=DEVICE))
+        msm._ensure_phase_state(N)
+
+        msm.phase[:] = 0.60  # past gate 0
+        msm.next_gate_idx[:] = 0
+        msm.gate_rel_phi[:] = 0.10
+
+        msm._advance_gate_for_envs(torch.tensor([0], device=DEVICE))
+
+        assert msm.next_gate_idx[0].item() == 1
+        # gate_rel_phi = phase - gate_phi[1] = 0.6 - 1.0 = -0.4
+        assert msm.gate_rel_phi[0].item() == pytest.approx(-0.40, abs=1e-6)
+
+    def test_advance_half_periodic_1_to_0(self, msm, half_periodic_idx):
+        """Half-periodic gate 1 → 0 (wraps); gate_rel_phi against phi=0.5."""
+        ti = half_periodic_idx
+        N = 1
+        msm.set_trajectory_indices(torch.tensor([ti], dtype=torch.long, device=DEVICE))
+        msm._ensure_phase_state(N)
+
+        msm.phase[:] = 0.05  # post-wrap phase
+        msm.next_gate_idx[:] = 1
+
+        msm._advance_gate_for_envs(torch.tensor([0], device=DEVICE))
+
+        assert msm.next_gate_idx[0].item() == 0
+        assert msm.gate_rel_phi[0].item() == pytest.approx(0.05 - 0.50, abs=1e-6)
+
+    def test_advance_episodic_to_neg_one_zeros_gate_rel_phi(self, msm):
+        """Episodic last gate fire → gate_idx=-1, gate_rel_phi=0."""
+        ti = _find_traj_of_type(msm, 2)  # _EPISODIC_INT
+        if ti < 0:
+            pytest.skip("No episodic trajectory in test data")
+        N = 1
+        msm.set_trajectory_indices(torch.tensor([ti], dtype=torch.long, device=DEVICE))
+        msm._ensure_phase_state(N)
+
+        # Episodic has one gate at phi=1.0; advancing past it sets gate=-1.
+        msm.phase[:] = 1.0
+        msm.next_gate_idx[:] = 0
+        msm.gate_rel_phi[:] = 99.0  # poison
+
+        msm._advance_gate_for_envs(torch.tensor([0], device=DEVICE))
+
+        assert msm.next_gate_idx[0].item() == -1
+        assert msm.gate_rel_phi[0].item() == 0.0
+
+    # --- snap operations -------------------------------------------------
+
+    def test_snap_to_new_domain(self, msm, half_periodic_idx):
+        """Early-fire snap: phase → gate_phi+eps, gate advances, gate_rel_phi consistent."""
+        ti = half_periodic_idx
+        N = 1
+        msm.set_trajectory_indices(torch.tensor([ti], dtype=torch.long, device=DEVICE))
+        msm._ensure_phase_state(N)
+
+        msm.phase[:] = 0.46  # in early window of gate 0 (phi=0.5)
+        msm.next_gate_idx[:] = 0
+
+        eps = 0.001
+
+        msm.snap_phase_to_new_domain(torch.tensor([0], device=DEVICE))
+
+        assert msm.next_gate_idx[0].item() == 1
+        assert msm.phase[0].item() == pytest.approx(0.50 + eps, abs=1e-6)
+        # gate_rel_phi = (0.5 + eps) - 1.0
+        assert msm.gate_rel_phi[0].item() == pytest.approx(-0.50 + eps, abs=1e-6)
+
+    def test_snap_to_start_of_current_domain(self, msm, half_periodic_idx):
+        """Late-fire snap: same numerical target as new-domain snap."""
+        ti = half_periodic_idx
+        N = 1
+        msm.set_trajectory_indices(torch.tensor([ti], dtype=torch.long, device=DEVICE))
+        msm._ensure_phase_state(N)
+
+        msm.phase[:] = 0.62  # past gate 0
+        msm.next_gate_idx[:] = 0
+
+        eps = 0.001
+
+        msm.snap_phase_to_start_of_current_domain(torch.tensor([0], device=DEVICE))
+
+        assert msm.next_gate_idx[0].item() == 1
+        assert msm.phase[0].item() == pytest.approx(0.50 + eps, abs=1e-6)
+        assert msm.gate_rel_phi[0].item() == pytest.approx(-0.50 + eps, abs=1e-6)
+
+    def test_snap_to_end_of_previous_domain(self, msm, half_periodic_idx):
+        """Hold-on snap: phase pulls back, gate idx unchanged, gate_rel_phi=-eps."""
+        ti = half_periodic_idx
+        N = 1
+        msm.set_trajectory_indices(torch.tensor([ti], dtype=torch.long, device=DEVICE))
+        msm._ensure_phase_state(N)
+
+        msm.phase[:] = 0.55
+        msm.next_gate_idx[:] = 0
+
+        eps = 0.001
+
+        msm.snap_phase_to_end_of_previous_domain(torch.tensor([0], device=DEVICE))
+
+        # Gate not advanced — still waiting for the contact.
+        assert msm.next_gate_idx[0].item() == 0
+        assert msm.phase[0].item() == pytest.approx(0.50 - eps, abs=1e-6)
+        # gate_rel_phi = (0.5 - eps) - 0.5 = -eps
+        assert msm.gate_rel_phi[0].item() == pytest.approx(-eps, abs=1e-6)
+
+    def test_snap_phi_1_gate_wraps_to_eps(self, msm, half_periodic_idx):
+        """Snap on phi=1.0 gate wraps phase to eps (mod 1.0)."""
+        ti = half_periodic_idx
+        N = 1
+        msm.set_trajectory_indices(torch.tensor([ti], dtype=torch.long, device=DEVICE))
+        msm._ensure_phase_state(N)
+
+        msm.phase[:] = 0.97  # in early window of gate 1 (phi=1.0)
+        msm.next_gate_idx[:] = 1
+
+        eps = 0.001
+
+        msm.snap_phase_to_new_domain(torch.tensor([0], device=DEVICE))
+
+        assert msm.next_gate_idx[0].item() == 0
+        assert msm.phase[0].item() == pytest.approx(eps, abs=1e-6)
+        # gate_rel_phi = eps - 0.5
+        assert msm.gate_rel_phi[0].item() == pytest.approx(eps - 0.50, abs=1e-6)
+
+    def test_snap_lands_in_intended_domain(self, msm, half_periodic_idx):
+        """``_eps_phi``-driven snaps must land phase in the domain promised
+        by each snap's docstring.
+
+        ``snap_phase_to_new_domain`` and
+        ``snap_phase_to_start_of_current_domain`` both set
+        ``phase = gate_phi + eps``; ``get_current_domains`` should report
+        the **new** domain (gate_idx + 1 within original domains).
+        ``snap_phase_to_end_of_previous_domain`` sets ``phase = gate_phi -
+        eps``; ``get_current_domains`` should report the **previous**
+        domain.  Sanity-checks that ``eps_phi = 0.001`` is large enough to
+        clear ``searchsorted(..., right=False)``'s tie boundary.
+        """
+        ti = half_periodic_idx
+        N = 1
+        msm.set_trajectory_indices(torch.tensor([ti], dtype=torch.long, device=DEVICE))
+        msm._ensure_phase_state(N)
+
+        # Gate 0 of half-periodic sits at phi=0.5; before the snap we're in
+        # the old (first) domain.
+        msm.phase[:] = 0.46
+        msm.next_gate_idx[:] = 0
+        old_domain = msm.get_current_domains(msm.phase).clone()
+
+        msm.snap_phase_to_new_domain(torch.tensor([0], device=DEVICE))
+        post = msm.get_current_domains(msm.phase)
+        assert post.item() != old_domain.item(), (
+            f"snap_phase_to_new_domain left phase ({msm.phase.item()}) in the "
+            f"old domain ({old_domain.item()})."
+        )
+
+        # Reset and exercise the late-fire snap (same target).
+        msm.phase[:] = 0.62
+        msm.next_gate_idx[:] = 0
+        msm.snap_phase_to_start_of_current_domain(torch.tensor([0], device=DEVICE))
+        post = msm.get_current_domains(msm.phase)
+        assert post.item() == old_domain.item() + 1, (
+            f"snap_phase_to_start_of_current_domain landed in domain "
+            f"{post.item()}; expected {old_domain.item() + 1}."
+        )
+
+        # Reset and exercise the hold-on snap (lands in OLD domain).
+        msm.phase[:] = 0.55
+        msm.next_gate_idx[:] = 0
+        msm.snap_phase_to_end_of_previous_domain(torch.tensor([0], device=DEVICE))
+        post = msm.get_current_domains(msm.phase)
+        assert post.item() == old_domain.item(), (
+            f"snap_phase_to_end_of_previous_domain landed in domain "
+            f"{post.item()}; expected {old_domain.item()}."
+        )

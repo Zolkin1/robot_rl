@@ -35,6 +35,11 @@ def act_traj_vel(env: ManagerBasedRLEnv, command_name:str = "hlip_ref") -> torch
     return act_traj_vel
 
 
+# TODO: Delete ``_phased_cmd``, ``ref_sin_phase``, ``ref_cos_phase``
+# along with :class:`PhasedTrajectoryCommand`.  The multi-skill bases
+# use :func:`multiskill_phase` (below) which reads the multi-skill
+# command's phase directly — replace any g1 single-skill obs that still
+# wires up sin/cos phase via ``_phased_cmd`` before removing.
 def _phased_cmd(env: ManagerBasedRLEnv, command_name: str) -> PhasedTrajectoryCommand:
     cmd = env.command_manager.get_term(command_name)
     if not isinstance(cmd, PhasedTrajectoryCommand):

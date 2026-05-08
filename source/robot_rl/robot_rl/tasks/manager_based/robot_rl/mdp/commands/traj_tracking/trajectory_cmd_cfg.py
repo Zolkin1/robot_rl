@@ -1,4 +1,9 @@
-"""Configuration for :class:`TrajectoryCommand`."""
+"""Configuration for :class:`TrajectoryCommand`.
+
+TODO: Delete with :mod:`trajectory_cmd`. Replaced by
+:class:`BatchedMultiSkillCommandCfg` once g1 single-skill configs are
+migrated.
+"""
 
 from isaaclab.utils import configclass
 

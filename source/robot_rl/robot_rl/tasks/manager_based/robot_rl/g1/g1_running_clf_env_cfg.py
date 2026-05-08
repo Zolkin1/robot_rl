@@ -3,6 +3,10 @@ from isaaclab.utils import configclass
 from .g1_clf_tracking_base import G1ClfTrackingEnvCfg
 
 
+# TODO: Migrate to BatchedMultiSkillCommandCfg (see
+# ``g1_clf_multiskill_base.G1MultiSkillCommandsCfg``).  Inherits the
+# single-skill ``traj_ref = TrajectoryCommandCfg(...)`` from
+# ``G1ClfTrackingEnvCfg``, which is slated for deletion.
 @configclass
 class G1RunningCLFEnvCfg(G1ClfTrackingEnvCfg):  #G1RunningGaitLibraryEnvCfg
     def __post_init__(self):

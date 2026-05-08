@@ -25,6 +25,7 @@ class G1WalkRunCLFEnvCfg(G1MultiSkillCLFEnvCfg):
         self.commands.base_velocity.ranges.heading = (-3.14,3.14)
         self.commands.base_velocity.resampling_time_range = (4.0, 8.0)
 
+
         # Note: Having the accerletaion in the teacher training seems to hurt the behavior
         # TODO: Consider using a max acc on some % (like 10) of the teacher so its not OOD
         # self.commands.base_velocity.max_acc = 1.0
@@ -58,6 +59,7 @@ class G1WalkRunCLFEnvCfg(G1MultiSkillCLFEnvCfg):
         self.scene.height_scanner = None
 
         self.commands.base_velocity.debug_vis = False
+
 
 @configclass
 class G1WalkRunCLFTransformerRLEnvCfg(G1WalkRunCLFEnvCfg):

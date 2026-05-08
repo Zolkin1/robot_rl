@@ -4,6 +4,10 @@ from robot_rl.tasks.manager_based.robot_rl.g1.g1_clf_tracking_base import G1ClfT
 
 # TODO: I should really put all the single skill cfgs in a single file just to clean up all the env cfg files.
 
+# TODO: Migrate to BatchedMultiSkillCommandCfg (see
+# ``g1_clf_multiskill_base.G1MultiSkillCommandsCfg``).  Inherits the
+# single-skill ``traj_ref = TrajectoryCommandCfg(...)`` from
+# ``G1ClfTrackingEnvCfg``, which is slated for deletion.
 @configclass
 class G1WalkingCLFEnvCfg(G1ClfTrackingEnvCfg):
     """Config for the G1 for walking."""

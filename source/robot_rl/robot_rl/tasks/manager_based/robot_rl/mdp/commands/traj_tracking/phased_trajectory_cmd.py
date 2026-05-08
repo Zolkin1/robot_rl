@@ -1,5 +1,11 @@
 """Trajectory command that exposes a phasing variable and hold-phi logic.
 
+TODO: Delete this file. Single-skill phase-as-observation path was
+superseded by :class:`BatchedMultiSkillCommand` (multi-skill manager
+holds phase directly). The remaining consumers are the single-skill
+g1 configs (walking/running/bow/bend) and ``observations._phased_cmd``;
+migrate those to the multi-skill path before removing this module.
+
 Single-skill trajectory commands (those that feed the phase into the
 observation and tie trajectory advancement to the base-velocity command)
 should extend this class.  Multi-skill commands that advance time
@@ -125,8 +131,3 @@ class PhasedTrajectoryCommand(BaseTrajectoryCommand):
         """Populate the phasing variable, then delegate to the base."""
         self.update_phasing_var(t, env_ids)
         super().get_desired_outputs(t, env_ids)
-
-    def _update_command(self):
-        """Run the base update and log CLF binned by phase."""
-        super()._update_command()
-        self.manager.log_v_on_phasing_var(self.phasing_var, self.v)

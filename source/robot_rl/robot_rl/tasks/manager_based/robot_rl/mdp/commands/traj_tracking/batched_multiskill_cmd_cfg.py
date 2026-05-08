@@ -30,25 +30,20 @@ class BatchedMultiSkillCommandCfg(BaseTrajectoryCommandCfg):
         ".batched_multiskill_cmd:BatchedMultiSkillCommand"
     )
 
-    random_start_phase: bool = True
-    """If ``True``, sample a uniform phase ∈ [0, 1) for each env at the
-    start of an episode (replaces the time-based ``random_start_time_max``
-    for this command).  If ``False``, every env starts at phase 0."""
-
     contact_gate_window_frac: float | None = 0.2
     """Fraction of the local domain (phi distance from the previous gate to
     this gate) used as the early-fire window.  With ``W=0.1`` a half-period
     gate gets a 0.05 phi early window and a full-period / episodic gate
     gets 0.10.  Inside the early window an expected contact snaps the
-    phase forward into the new domain.  The late side is unbounded for
-    fire purposes — any expected contact past the gate snaps the phase
-    backward to the start of the new domain (same numerical target, no
-    domain change).  A gate that ages out almost a full domain past
-    its boundary without firing auto-advances to its next instance.  Set
+    phase forward into the new domain.  The late side is unbounded — any
+    expected contact past the gate snaps the phase backward to the start
+    of the new domain, no matter how late.  The gate stays armed until
+    that contact lands; the manager's monotonic ``gate_rel_phi`` handles
+    cycle wraps so phi=1.0 gates work without special-casing.  Set
     ``hold_on_late_contact=True`` for the hold-at-boundary variant.  Set
     to ``None`` to disable contact gating entirely."""
 
-    contact_sensor_names: list[str] = ("left_foot_contact", "right_foot_contact")
+    contact_sensor_names: tuple[str, ...] = ("left_foot_contact", "right_foot_contact")
     """Names of the ContactSensor scene entities used by the contact gate.
     Their combined body list must cover every reference frame in the loaded
     trajectories' ``contact_bodies``.  Each contact body must appear in
@@ -66,22 +61,6 @@ class BatchedMultiSkillCommandCfg(BaseTrajectoryCommandCfg):
     contact arrives, at which point the phase snaps forward into the new
     domain.  If ``False`` (default), phase advances naturally past the
     gate; an expected contact at any point past the gate produces a
-    backward snap to the start of the new domain (no domain change).  If
-    contact never lands the gate auto-expires once phase has aged nearly
-    a full domain past it, and the next instance becomes armed.  Only
-    used when ``contact_gate_window_frac`` is not ``None``."""
-
-    track_traj_stats: bool = True
-    """If ``True``, the underlying :class:`MultiSkillManager` allocates a
-    per-trajectory CLF stats tracker (:class:`TrajectoryCLFStats`) updated
-    once per step from :meth:`log_v_on_phasing_var`. Required for adaptive
-    trajectory sampling."""
-
-    traj_stats_alpha: float = 0.005
-    """EMA factor for the per-trajectory tracker (matches ``skill_v_logs``)."""
-
-    traj_stats_reset_warmup: int = 2
-    """Frames after each env reset that are excluded from the tracker."""
-
-    traj_stats_transition_warmup: int = 3
-    """Frames after each skill transition that are excluded from the tracker."""
+    backward snap to the start of the new domain (no domain change).
+    The gate stays armed indefinitely until contact lands.  Only used
+    when ``contact_gate_window_frac`` is not ``None``."""

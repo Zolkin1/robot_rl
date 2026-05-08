@@ -1,4 +1,9 @@
-"""Single-skill trajectory command backed by a single trajectory or library."""
+"""Single-skill trajectory command backed by a single trajectory or library.
+
+TODO: Delete this file. Single-skill commands have been superseded by
+:class:`BatchedMultiSkillCommand`. Consumers (g1 walking/running/bow/bend
+configs) need to migrate to the multi-skill path first.
+"""
 
 from __future__ import annotations
 

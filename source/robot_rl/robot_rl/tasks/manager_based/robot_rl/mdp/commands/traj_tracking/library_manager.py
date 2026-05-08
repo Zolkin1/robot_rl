@@ -1,3 +1,7 @@
+"""TODO: Delete this file. :class:`MultiSkillManager` subsumes
+``LibraryManager`` (loops-per-trajectory replaced with batched tensor
+ops). Only :class:`TrajectoryCommand` (slated for deletion) imports it.
+"""
 import os
 from pathlib import Path
 from typing import Any
@@ -8,7 +12,7 @@ from torch import Tensor
 from .manager_base import ManagerBase
 from .trajectory_manager import TrajectoryManager
 
-# TODO: Test with new changes
+
 class LibraryManager(ManagerBase):
     """Manages a library of trajectories, selecting the appropriate one based on a conditioning variable."""
 
