@@ -11,6 +11,8 @@ from robot_rl.tasks.manager_based.robot_rl.g1.g1_clf_tracking_base import G1ClfT
 from robot_rl.tasks.manager_based.robot_rl.g1.g1_clf_multiskill_base import G1MultiSkillCLFEnvCfg, G1MultiSkillObservationCfg
 from robot_rl.tasks.manager_based.robot_rl.terrains import LONG_STAIRS_CFG
 
+from ..mdp.commands.multiskill_velocity_commands_cfg import VelocityBucketCfg
+
 # Body-contact sensors (declared on the base scene cfg) that should terminate the
 # episode when they touch the terrain. Feet are intentionally excluded.
 _TERRAIN_CONTACT_TERMINATION_SENSORS = (
@@ -20,6 +22,7 @@ _TERRAIN_CONTACT_TERMINATION_SENSORS = (
     "left_elbow_contact",
     "right_elbow_contact",
 )
+# TODO: Should probably add the head and/or hands to this list
 
 @configclass
 class G1StairsTrackingSceneCfg(G1ClfTrackingSceneCfg):
@@ -29,7 +32,7 @@ class G1StairsTrackingSceneCfg(G1ClfTrackingSceneCfg):
         prim_path="{ENV_REGEX_NS}/Robot/Geometry/pelvis_link",
         offset=RayCasterCfg.OffsetCfg(pos=(0.0, 0.0, 20.0)),
         ray_alignment="yaw",
-        pattern_cfg=patterns.GridPatternCfg(resolution=0.1, size=[1.6, 1.0]),
+        pattern_cfg=patterns.GridPatternCfg(resolution=0.1, size=[1.0, 1.0]),
         debug_vis=False,
         mesh_prim_paths=["/World/ground"],
     )
@@ -69,7 +72,6 @@ class G1StairsObservationCfg(G1MultiSkillObservationCfg):
 
     @configclass
     class StudentCfg(PolicyCfg):
-        # skill_one_hot = ObsTerm(func=mdp.skill_one_hot, params={"command_name": "base_velocity"})
         ref_traj = None
         act_traj = None
         ref_traj_vel = None
@@ -98,10 +100,30 @@ class G1StairsCLFEnvCfg(G1MultiSkillCLFEnvCfg):
         self.commands.traj_ref.path = "trajectories/retargeted/2026-04-30_14-43-20_stairs_up"
 
         # Configure velocity ranges for different gaits
-        self.commands.base_velocity.ranges.lin_vel_x = (0.4, 0.4)  # Allow full range
+        self.commands.base_velocity.ranges.lin_vel_x = (0.4, 0.4)
         self.commands.base_velocity.ranges.lin_vel_y = (0, 0)  # (-0.5, 0.5)
         self.commands.base_velocity.ranges.ang_vel_z = (0, 0)  # (-0.75, 0.75)
         self.commands.base_velocity.ranges.heading = (0.0, 0.0)
+
+        self.commands.base_velocity.velocity_buckets = [
+            VelocityBucketCfg(percentage=1.0, lin_vel_x=(0.4, 0.4)),
+        ]
+
+        ##
+        # Events
+        ##
+        self.events.push_robot = None
+
+        ##
+        # Rewards
+        ##
+        # Velocity Tracking
+        self.rewards.xy_vel.params["std"] = 0.3
+        self.rewards.yaw_vel.params["std"] = 0.3
+
+        self.rewards.clf_reward.params["max_eta_err"] = 4.0 # 10
+        self.rewards.clf_decreasing_condition.params["eta_max"] = 4.0 # 10
+        self.rewards.clf_decreasing_condition.params["eta_dot_max"] = 9.0 # 20
 
         ##
         # Observations
@@ -113,7 +135,6 @@ class G1StairsCLFEnvCfg(G1MultiSkillCLFEnvCfg):
         self.scene.terrain.terrain_type = "generator"
         self.scene.terrain.terrain_generator = LONG_STAIRS_CFG
         self.scene.terrain.max_init_terrain_level = 0
-        # self.scene.height_scanner = None
 
         ##
         # Terminations: end the episode if any non-foot body takes a hard hit.
@@ -132,7 +153,7 @@ class G1StairsCLFEnvCfg(G1MultiSkillCLFEnvCfg):
 
         self.terminations.base_orientation = DoneTerm(
             func=mdp.base_orientation,
-            params={"cmd_name": "traj_ref", "roll_limit_deg": 25.0, "pitch_limit_deg": 25.0},
+            params={"cmd_name": "traj_ref", "roll_limit_deg": 65.0, "pitch_limit_deg": 65.0},
         )
 
 @configclass
@@ -146,8 +167,10 @@ class G1StairsCLFEnvCfg_PLAY(G1StairsCLFEnvCfg):
         self.scene.num_envs = 2
         self.scene.env_spacing = 2.5
         self.observations.policy.enable_corruption = False
-        # One staircase per env (overrides the 1x1 default in LONG_STAIRS_CFG).
-        # These fields live on TerrainGeneratorCfg, not TerrainImporterCfg.
+        # One staircase per env, laid out in a single row so robots render
+        # side-by-side. These fields live on TerrainGeneratorCfg, not
+        # TerrainImporterCfg.
+        self.scene.terrain.terrain_generator.num_rows = 1
         self.scene.terrain.terrain_generator.num_cols = self.scene.num_envs
 
         self.episode_length_s = 8.0

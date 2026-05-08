@@ -131,7 +131,7 @@ def reset_on_reference(
     base_ori_quat_w = y_sampled[:, ori_indices]  # Shape: [num_env, 4] - quaternion (x, y, z, w)
 
     # Add the ground->ankle_roll_link offset
-    base_pos_rel[:, 2] += base_z_offset   # TODO: Delete
+    # base_pos_rel[:, 2] += base_z_offset   # TODO: Delete
 
     # Per-env spawn offset = stair-origin offset (per-trajectory, top-level YAML)
     # + ref-frame offset (per-domain). Spline outputs are ref-frame-relative, so
