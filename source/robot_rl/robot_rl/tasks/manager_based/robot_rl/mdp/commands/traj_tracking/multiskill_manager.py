@@ -572,6 +572,34 @@ class MultiSkillManager(ManagerBase):
         """Invalidate the per-step cache.  Call once at the start of each step."""
         self._cache_valid = False
 
+    def commit_traj_state(self, env_ids: Tensor | None = None) -> None:
+        """Snapshot the current cached trajectory assignment as the
+        "previous" state used by the next :meth:`_ensure_cache` call to
+        detect transitions.
+
+        Decoupled from :meth:`_ensure_cache` so external callers (reset
+        events, observation queries, snap helpers, loggers) do not
+        silently consume ``_traj_changed`` / ``_skill_changed`` before
+        the owning command's ``_pre_update_phase`` has read them.  The
+        owning command term must call this exactly once per step,
+        after gate re-arm and any other consumers have run.
+
+        Args:
+            env_ids: Optional subset; ``None`` commits the full batch.
+        """
+        if self._cached_global_indices is None:
+            return
+        if env_ids is None:
+            self._prev_global_indices = self._cached_global_indices.clone()
+            self._prev_skill_indices = self.data["skill_idx"][
+                self._cached_global_indices
+            ].clone()
+        else:
+            self._prev_global_indices[env_ids] = self._cached_global_indices[env_ids]
+            self._prev_skill_indices[env_ids] = self.data["skill_idx"][
+                self._cached_global_indices[env_ids]
+            ]
+
     def set_trajectory_indices(self, global_indices: Tensor) -> None:
         """Directly set the trajectory index for each environment.
 
@@ -604,26 +632,33 @@ class MultiSkillManager(ManagerBase):
             new_indices = self._select_trajectories(conditioner)
 
             # --- Skill / trajectory transition detection ------------------
+            # Compute the per-env transition flags against the previous
+            # snapshot, but DO NOT update ``_prev_*`` here.  Many callers
+            # (reset events, observation fns, snap helpers, the logger)
+            # invoke ``_ensure_cache`` between two ``_pre_update_phase``
+            # calls; if they updated the prev arrays they would silently
+            # consume the transition before the owning command term saw
+            # it.  The owning term must call :meth:`commit_traj_state`
+            # exactly once per step, after gate re-arm and any other
+            # transition consumers have run.
             new_skill_indices = self.data["skill_idx"][new_indices]
             if self._prev_skill_indices is not None:
                 if env_ids is not None:
                     self._skill_changed = new_skill_indices != self._prev_skill_indices[env_ids]
                     self._traj_changed = new_indices != self._prev_global_indices[env_ids]
-                    self._prev_skill_indices[env_ids] = new_skill_indices
-                    self._prev_global_indices[env_ids] = new_indices
                 else:
                     self._skill_changed = new_skill_indices != self._prev_skill_indices
                     self._traj_changed = new_indices != self._prev_global_indices
-                    self._prev_skill_indices = new_skill_indices
-                    self._prev_global_indices = new_indices
             else:
+                # First-call init: prev arrays must be populated so
+                # subsequent comparisons have a baseline.  This is the
+                # only place ``_ensure_cache`` writes them.
                 self._skill_changed = torch.zeros(
                     new_indices.shape[0], dtype=torch.bool, device=self.device,
                 )
                 self._traj_changed = torch.zeros(
                     new_indices.shape[0], dtype=torch.bool, device=self.device,
                 )
-                # First call — store full-batch size regardless of env_ids
                 if env_ids is not None:
                     N_total = self.env.num_envs
                     self._prev_skill_indices = torch.zeros(
@@ -635,8 +670,8 @@ class MultiSkillManager(ManagerBase):
                     self._prev_skill_indices[env_ids] = new_skill_indices
                     self._prev_global_indices[env_ids] = new_indices
                 else:
-                    self._prev_skill_indices = new_skill_indices
-                    self._prev_global_indices = new_indices
+                    self._prev_skill_indices = new_skill_indices.clone()
+                    self._prev_global_indices = new_indices.clone()
 
             self._cached_global_indices = new_indices
         else:

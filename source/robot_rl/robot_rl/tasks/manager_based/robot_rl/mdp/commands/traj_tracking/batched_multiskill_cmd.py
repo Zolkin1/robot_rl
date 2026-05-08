@@ -236,24 +236,38 @@ class BatchedMultiSkillCommand(BaseTrajectoryCommand):
         Idempotent across the same env step: IsaacLab's
         ``CommandTerm.compute`` calls ``_update_command`` twice when a
         resample fires (once from ``_resample_command`` and once
-        directly).  Keyed on ``episode_length_buf``, the second call is a
-        no-op.
+        directly).  Idempotency is per-env: only envs whose
+        ``episode_length_buf`` actually advanced since the last call
+        get their phase advanced.  Using a full-tensor ``torch.equal``
+        guard would fail any time *any* env reset between the two
+        calls — re-advancing every non-resetting env's phase a second
+        time.  In a multi-env training run with frequent resets that
+        compounds to roughly 2× the correct phase rate.
         """
         ep_len = self.env.episode_length_buf
-        if (
-            self._last_compute_step is not None
-            and torch.equal(self._last_compute_step, ep_len)
-        ):
+
+        in_window = (ep_len > 0) & (ep_len < self.env.max_episode_length)
+        if self._last_compute_step is None:
+            advance_mask = in_window
+        else:
+            advance_mask = in_window & (ep_len != self._last_compute_step)
+
+        if not advance_mask.any():
+            # Nothing to advance — keep the snapshot fresh and skip the
+            # gate logic.  No call to ``_ensure_cache`` happens here, so
+            # ``_traj_changed`` / ``_skill_changed`` retain whatever
+            # state the previous tick's commit left them in (always
+            # all-False after a successful commit).
+            self._last_compute_step = ep_len.clone()
             return
 
-        advancing_mask = (ep_len > 0) & (ep_len < self.env.max_episode_length)
-        if advancing_mask.any():
-            adv_ids = torch.where(advancing_mask)[0]
-            self.manager.update_phase(self.env.step_dt, env_ids=adv_ids)
+        adv_ids = torch.where(advance_mask)[0]
+        self.manager.update_phase(self.env.step_dt, env_ids=adv_ids)
 
         # Resolve current trajectory assignment after any phase mutations.
-        # Populates ``manager._traj_changed`` for any env whose conditioner
-        # routed it to a different trajectory this step.
+        # Populates ``manager._traj_changed`` / ``_skill_changed`` against
+        # the previous-tick snapshot.  Crucially this no longer commits
+        # the snapshot — see ``MultiSkillManager.commit_traj_state``.
         self.manager.invalidate_cache()
         self.manager.get_current_trajectory_indices()
 
@@ -269,5 +283,12 @@ class BatchedMultiSkillCommand(BaseTrajectoryCommand):
 
             contact_now = self._read_contact_now()
             self._apply_contact_gate(contact_now)
+
+        # Commit the trajectory snapshot only after every consumer of
+        # ``_traj_changed`` / ``_skill_changed`` has run.  Subsequent
+        # intra-step ``_ensure_cache`` calls (logger, reset events,
+        # observation fns) will then correctly report no further change
+        # for the current step.
+        self.manager.commit_traj_state()
 
         self._last_compute_step = ep_len.clone()
