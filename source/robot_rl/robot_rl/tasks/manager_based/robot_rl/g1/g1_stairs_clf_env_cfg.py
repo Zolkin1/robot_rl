@@ -106,9 +106,12 @@ class G1StairsCLFEnvCfg(G1MultiSkillCLFEnvCfg):
         self.commands.base_velocity.ranges.ang_vel_z = (0, 0)  # (-0.75, 0.75)
         self.commands.base_velocity.ranges.heading = (0.0, 0.0)
 
-        self.commands.base_velocity.velocity_buckets = [
-            VelocityBucketCfg(percentage=1.0, lin_vel_x=(0.4, 0.4)),
-        ]
+        # Skill keys must equal the terrain importer's ``skill_list`` (set
+        # below) — only ``stair_up`` is declared by ``LONG_STAIRS_CFG``'s
+        # sub-terrains, so that's the only bucket needed here.
+        self.commands.base_velocity.velocity_buckets = {
+            "stair_up": VelocityBucketCfg(lin_vel_x=(0.4, 0.4)),
+        }
 
         self.commands.base_velocity.debug_vis = False
 
@@ -147,6 +150,9 @@ class G1StairsCLFEnvCfg(G1MultiSkillCLFEnvCfg):
             physics_material=base_terrain.physics_material,
             visual_material=base_terrain.visual_material,
             debug_vis=base_terrain.debug_vis,
+            # Match the skills declared by ``LONG_STAIRS_CFG``'s ``stairs_up``
+            # sub-terrain so the post-process skill_probs check passes.
+            skill_list=["stair_up"],
         )
 
         ##

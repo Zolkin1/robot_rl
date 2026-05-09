@@ -41,6 +41,12 @@ class MetaStairTerrainImporter(MetaTerrainImporter):
 
     @override
     def _post_process_meta_data(self):
+        # First run the base post-process so ``is_border``, ``skill_probs``,
+        # and ``skill_to_idx`` are populated. The stair-specific projection
+        # build below relies on the per-cell metadata dict, which the base
+        # impl iterates but does not mutate, so the order is safe.
+        super()._post_process_meta_data()
+
         num_rows, num_cols = self.terrain_origins.shape[:2]
         size_x = float(self.cfg.terrain_generator.size[0])
         size_y = float(self.cfg.terrain_generator.size[1])
@@ -87,20 +93,16 @@ class MetaStairTerrainImporter(MetaTerrainImporter):
     def _world_to_subterrain(self, xy: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         """Map world ``(x, y)`` to ``(row, col)`` indices and per-cell local coords.
 
-        The full grid is centered at the world origin (see
-        :meth:`isaaclab.terrains.terrain_generator.TerrainGenerator.__init__`),
-        so sub-terrain ``(r, c)`` spans
-        ``[r*size_x - num_rows*size_x/2, (r+1)*size_x - num_rows*size_x/2]`` in x.
+        Row/col come from the shared :meth:`MetaTerrainImporter.world_xy_to_cell`
+        utility; this method adds the stair-specific local-corner ``(local_x,
+        local_y)`` needed by :meth:`_project_world`.
         """
         size_x, size_y = self._stair_size[0], self._stair_size[1]
         nrows, ncols = int(self._stair_grid[0]), int(self._stair_grid[1])
 
+        r, c = self.world_xy_to_cell(xy)
         rel_x = xy[..., 0] + nrows * size_x / 2.0
         rel_y = xy[..., 1] + ncols * size_y / 2.0
-
-        r = torch.div(rel_x, size_x, rounding_mode="floor").long().clamp(0, nrows - 1)
-        c = torch.div(rel_y, size_y, rounding_mode="floor").long().clamp(0, ncols - 1)
-
         local_x = rel_x - r.to(rel_x.dtype) * size_x
         local_y = rel_y - c.to(rel_y.dtype) * size_y
         return r, c, local_x, local_y

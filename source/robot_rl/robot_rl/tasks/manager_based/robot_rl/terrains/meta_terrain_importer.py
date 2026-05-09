@@ -207,6 +207,36 @@ class MetaTerrainImporter(TerrainImporter):
         env_origins[:] = origins[self.terrain_levels, self._actual_terrain_cols]
         return env_origins
 
+    def world_xy_to_cell(self, xy_w: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        """Map world ``(x, y)`` points to their terrain ``(row, col)`` indices.
+
+        The full grid is centred at the world origin (the standard
+        :class:`isaaclab.terrains.terrain_generator.TerrainGenerator` centres
+        the mesh in ``__init__``), so sub-terrain ``(r, c)`` spans
+        ``[r*size_x - num_rows*size_x/2, (r+1)*size_x - num_rows*size_x/2]`` in x
+        (and the analogous span in y).
+
+        All cells are the same size, so the mapping is a simple integer
+        division. Indices are clamped into the valid grid range so points
+        outside the field still resolve to a boundary cell.
+
+        Args:
+            xy_w: World-frame xy positions with last dimension 2 and arbitrary
+                leading shape.
+
+        Returns:
+            ``(rows, cols)`` long tensors with the same leading shape as
+            ``xy_w[..., 0]``.
+        """
+        size_x, size_y = self.cfg.terrain_generator.size
+        nrows, ncols = self.terrain_origins.shape[:2]
+
+        rel_x = xy_w[..., 0] + nrows * size_x / 2.0
+        rel_y = xy_w[..., 1] + ncols * size_y / 2.0
+        rows = torch.div(rel_x, size_x, rounding_mode="floor").long().clamp(0, nrows - 1)
+        cols = torch.div(rel_y, size_y, rounding_mode="floor").long().clamp(0, ncols - 1)
+        return rows, cols
+
     @override
     def update_env_origins(self, env_ids: torch.Tensor, move_up: torch.Tensor, move_down: torch.Tensor):
         """Update the environment origins based on terrain levels."""

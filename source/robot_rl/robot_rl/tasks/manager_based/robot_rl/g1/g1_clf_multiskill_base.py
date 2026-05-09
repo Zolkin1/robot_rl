@@ -97,11 +97,16 @@ class G1MultiSkillCommandsCfg(G1ClfTrackingCommandCfg):
             y_kp=(1.2, 1.8),
             y_kd=(0.2, 0.4),
         ),
-        velocity_buckets=[
-            VelocityBucketCfg(percentage=0.10, lin_vel_x=(0.0, 0.1)),   # Standing
-            VelocityBucketCfg(percentage=0.45, lin_vel_x=(0.1, 1.5)),   # Walking
-            VelocityBucketCfg(percentage=0.45, lin_vel_x=(1.5, 3.7)),   # Running
-        ]
+        # Skill keys must match the terrain importer's ``skill_list`` at
+        # construction time. The base scene's plain ``TerrainImporterCfg``
+        # doesn't expose ``skill_probs``, so this command will refuse to
+        # construct here — subclasses must swap in a meta importer (see
+        # ``g1_stairs_clf_env_cfg.py`` for an example).
+        velocity_buckets={
+            "standing": VelocityBucketCfg(lin_vel_x=(0.0, 0.1)),
+            "walk_forward": VelocityBucketCfg(lin_vel_x=(0.1, 1.5)),
+            "running": VelocityBucketCfg(lin_vel_x=(1.5, 3.7)),
+        },
     )
 
 @configclass
