@@ -69,7 +69,14 @@ from isaaclab.sim import SimulationCfg, SimulationContext
 from isaaclab.terrains.sub_terrain_cfg import SubTerrainBaseCfg
 from isaaclab.terrains.terrain_generator_cfg import TerrainGeneratorCfg
 from isaaclab.terrains.terrain_importer import TerrainImporter
-from isaaclab.utils.assets import ISAACLAB_NUCLEUS_DIR
+from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR, ISAACLAB_NUCLEUS_DIR
+
+from robot_rl.tasks.manager_based.robot_rl.terrains.meta_terrain_generator_cfg import (
+    MetaTerrainGeneratorCfg,
+)
+from robot_rl.tasks.manager_based.robot_rl.terrains.meta_terrain_importer_cfg import (
+    MetaTerrainImporterCfg,
+)
 
 
 def load_terrain(import_path: str) -> Any:
@@ -125,9 +132,11 @@ def fit_camera(sim: SimulationContext, generator_cfg: TerrainGeneratorCfg) -> No
 
 
 def spawn_probe_balls(sim: SimulationContext, importer: TerrainImporter) -> None:
-    """Clone a sphere over every terrain cell and drop it above the cell's origin.
+    """Drop one sphere above each env spawn origin.
 
-    Places exactly one ball per ``(row, col)`` sub-terrain so each cell has a probe.
+    Reflects exactly where the training-time envs would spawn. Border columns
+    are absent because the meta importer already excludes them from
+    ``env_origins`` upstream.
     """
     physics_material_cfg = sim_utils.RigidBodyMaterialCfg(
         static_friction=0.2, dynamic_friction=1.0, restitution=0.0,
@@ -142,10 +151,7 @@ def spawn_probe_balls(sim: SimulationContext, importer: TerrainImporter) -> None
         physics_material=physics_material_cfg,
     )
 
-    if importer.terrain_origins is not None:
-        targets = importer.terrain_origins.reshape(-1, 3).clone()
-    else:
-        targets = importer.env_origins.clone()
+    targets = importer.env_origins.clone()
     num_balls = int(targets.shape[0])
 
     cloner = GridCloner(spacing=2.0, stage=sim.stage)
@@ -173,7 +179,11 @@ def main() -> None:
     sim = SimulationContext(SimulationCfg())
     fit_camera(sim, generator_cfg)
 
-    importer_cfg = terrain_gen.TerrainImporterCfg(
+    importer_cls = (
+        MetaTerrainImporterCfg if isinstance(generator_cfg, MetaTerrainGeneratorCfg)
+        else terrain_gen.TerrainImporterCfg
+    )
+    importer_cfg = importer_cls(
         num_envs=max(args_cli.num_envs, 1), env_spacing=3.0,
         prim_path="/World/ground", max_init_terrain_level=None,
         terrain_type="generator", terrain_generator=generator_cfg,
@@ -190,10 +200,16 @@ def main() -> None:
             texture_scale=(0.25, 0.25),
         ),
     )
-    importer = TerrainImporter(importer_cfg)
+    # Use ``class_type`` so the meta importer is resolved through the same
+    # string-based path the env uses (no stale runtime import).
+    importer = importer_cfg.class_type(importer_cfg)
 
-    light_cfg = sim_utils.DistantLightCfg(intensity=1000.0)
-    light_cfg.func("/World/Light", light_cfg)
+    # Sky dome — same HDRI the play envs use (see ``G1ClfTrackingSceneCfg.sky_light``).
+    sky_cfg = sim_utils.DomeLightCfg(
+        intensity=750.0,
+        texture_file=f"{ISAAC_NUCLEUS_DIR}/Materials/Textures/Skies/PolyHaven/kloofendal_43d_clear_puresky_4k.hdr",
+    )
+    sky_cfg.func("/World/skyLight", sky_cfg)
 
     if not args_cli.no_balls:
         spawn_probe_balls(sim, importer)

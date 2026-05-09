@@ -11,6 +11,9 @@ from isaaclab.terrains.terrain_generator_cfg import TerrainGeneratorCfg
 from robot_rl.tasks.manager_based.robot_rl.terrains.meta_terrain_generator_cfg import (
     MetaTerrainGeneratorCfg,
 )
+from robot_rl.tasks.manager_based.robot_rl.terrains.trimesh.flat_cfg import (
+    MeshFlatTerrainCfg,
+)
 from robot_rl.tasks.manager_based.robot_rl.terrains.trimesh.stair_cfg import (
     MeshXStairsDownTerrainCfg,
     MeshXStairsUpTerrainCfg,
@@ -79,6 +82,44 @@ LONG_STAIRS_CFG = MetaTerrainGeneratorCfg(
             wall_prob=0.0,
             pole_prob=0.0,
         ),
+    },
+)
+
+# Config for both stair climbing and walking, with the two terrain types
+# allocated to disjoint column ranges (curriculum=True), separated by a flat
+# unspawnable strip. ``num_cols`` is bumped to 22 to absorb the 2 border
+# columns (20m strip / 10m cell_y) so the spawnable count stays 20.
+STAIR_WALK_CFG = MetaTerrainGeneratorCfg(
+    curriculum=True,
+    size=(_LONG_STAIRS_NUM_STEPS * _LONG_STAIRS_STEP_DEPTH, 10.0),
+    border_width=20.0,
+    num_rows=10,
+    num_cols=22,
+    inter_column_borders=[("stairs_up", 20.0)],
+    horizontal_scale=0.1,
+    vertical_scale=0.005,
+    slope_threshold=0.75,
+    use_cache=False,
+    sub_terrains={
+        "stairs_up": MeshXStairsUpTerrainCfg(
+            proportion=0.5,
+            step_dim_options=[(_LONG_STAIRS_STEP_HEIGHT, _LONG_STAIRS_STEP_DEPTH)],
+            stair_width_range=(1.5, 1.5),
+            origin_distance_from_back=(_LONG_STAIRS_NUM_STEPS // 2 + 0.5) * _LONG_STAIRS_STEP_DEPTH,
+            float_prob=0.0,
+            wall_prob=0.0,
+            pole_prob=0.0,
+        ),
+        # "stairs_down": MeshXStairsDownTerrainCfg(
+        #     proportion=0.5,
+        #     step_dim_options=[(_LONG_STAIRS_STEP_HEIGHT, _LONG_STAIRS_STEP_DEPTH)],
+        #     stair_width_range=(1.5, 1.5),
+        #     origin_distance_from_back=(_LONG_STAIRS_NUM_STEPS // 2 + 0.5) * _LONG_STAIRS_STEP_DEPTH,
+        #     float_prob=0.0,
+        #     wall_prob=0.0,
+        #     pole_prob=0.0,
+        # ),
+        "flat": MeshFlatTerrainCfg(proportion=0.5),
     },
 )
 

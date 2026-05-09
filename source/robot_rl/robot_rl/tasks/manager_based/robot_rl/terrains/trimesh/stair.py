@@ -217,6 +217,8 @@ def _build_stairs(
         "direction": "up" if going_up else "down",
         "stair_top_centers": centers_t,
         "project": _make_project_fn(centers_t, step_depth, num_steps),
+        # Sampling probability per skill — must sum to 1.0.
+        "skill_probs": {"stair_up": 1.0} if going_up else {"stair_down": 1.0},
     }
     return meshes, origin, meta_data
 

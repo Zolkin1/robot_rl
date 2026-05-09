@@ -96,11 +96,16 @@ class MetaTerrainGenerator(TerrainGenerator):
         # Origin at center
         origin = np.array([0.0, 0.0, 0.0])
 
-        # Metadata marking this as a border (non-spawnable, steppable)
+        # Metadata marking this as a border (non-spawnable, steppable). Borders
+        # are flat ground a robot can walk onto, so they advertise the same
+        # locomotion skills a regular flat sub-terrain does — just not the ones
+        # tied to elevation changes (no running on a thin strip). Sampling
+        # probabilities must sum to 1.0.
         meta_data = {
             "needs_projection": False,  # Flat terrain - no projection needed
             "needs_directional_cmd": False,
             "is_border": True,  # Mark as border for spawning exclusion
+            "skill_probs": {"walk_forward": 0.5, "standing": 0.5},
         }
 
         return mesh, origin, meta_data

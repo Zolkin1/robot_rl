@@ -13,3 +13,5 @@ class MetaTerrainImporterCfg(TerrainImporterCfg):
     """
 
     class_type: type | str = "{DIR}.meta_terrain_importer:MetaTerrainImporter"
+
+    skill_list: list[str] = ["standing"]
