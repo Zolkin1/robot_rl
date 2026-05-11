@@ -586,7 +586,7 @@ class MultiSkillManager(ManagerBase):
 
         if self.env is not None and self.conditioner_generator_name:
             conditioner = self._get_conditioner_from_env(env_ids)
-            new_indices = self._select_trajectories(conditioner)
+            new_indices = self._select_trajectories(conditioner, env_ids=env_ids)
 
             # --- Trajectory transition detection --------------------------
             # Compute ``_traj_changed`` against the previous snapshot, but
@@ -690,7 +690,11 @@ class MultiSkillManager(ManagerBase):
         )
         self._skill_filter_ready = True
 
-    def _select_trajectories(self, conditioner: Tensor) -> Tensor:
+    def _select_trajectories(
+        self,
+        conditioner: Tensor,
+        env_ids: Tensor | None = None,
+    ) -> Tensor:
         """Select the nearest trajectory per env, restricted to the env's skill.
 
         Each env's velocity command term holds a per-env ``skill_id`` (sampled
@@ -702,6 +706,10 @@ class MultiSkillManager(ManagerBase):
             conditioner: ``(N, C)`` conditioning vectors. Only the first three
                 dims (vel_x, vel_y, vel_yaw) participate in matching now —
                 skill replaces the legacy terrain-dim filter.
+            env_ids: Optional env subset matching ``conditioner``'s rows. When
+                provided, ``cond_term.skill_id`` is sliced the same way so
+                row counts stay aligned (callers like ``reset_on_reference``
+                pass an env subset).
 
         Returns:
             ``(N,)`` global trajectory indices.
@@ -710,10 +718,11 @@ class MultiSkillManager(ManagerBase):
 
         cond_term = self.env.command_manager.get_term(self.conditioner_generator_name)
         vel_skill_ids: Tensor = cond_term.skill_id  # (num_envs,)
+        if env_ids is not None:
+            vel_skill_ids = vel_skill_ids[env_ids]
 
-        # Callers (``_ensure_cache``) always pass the full-batch conditioner;
-        # this guard catches future call sites that try to slice the
-        # conditioner without slicing skill ids the same way.
+        # Sanity guard: catches any future caller that slices the conditioner
+        # without also passing the matching ``env_ids`` (or vice versa).
         if conditioner.shape[0] != vel_skill_ids.shape[0]:
             raise RuntimeError(
                 f"conditioner ({conditioner.shape[0]}) and vel_cmd.skill_id "
