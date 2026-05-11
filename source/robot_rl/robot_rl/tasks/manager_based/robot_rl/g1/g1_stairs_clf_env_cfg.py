@@ -201,6 +201,7 @@ class G1StairsCLFEnvCfg_PLAY(G1StairsCLFEnvCfg):
         self.events.push_robot = None
         self.events.gain_randomization = None
 
-        self.commands.base_velocity.debug_vis = False
+        self.commands.traj_ref.debug_vis = True
+        self.commands.base_velocity.debug_vis = True #False
         self.scene.height_scanner.debug_vis = True
 

@@ -1116,6 +1116,23 @@ class MultiSkillManager(ManagerBase):
                 if mgr.traj_data.trajectory_type == TrajectoryType.HALF_PERIODIC:
                     # Reflected half reuses the same offset.
                     ref_frame_offset[i, di + mgr.num_domains, :] = dd.ref_frame_offset
+            # Fail loudly if no domain declares any contact bodies. The most
+            # common cause is a YAML field-name typo (e.g. ``contact_frames``
+            # instead of the expected ``contact_bodies``), or values that
+            # don't match the scene's URDF link names — both of which
+            # silently produce empty lists here, an all-zero contact table,
+            # and a frozen ``ref_poses`` that's almost impossible to debug
+            # from symptoms alone.
+            if not any(bodies_list):
+                traj_name = getattr(mgr.traj_data, "name", f"<index {i}>")
+                raise ValueError(
+                    f"Trajectory '{traj_name}' has no contact bodies declared "
+                    f"in any of its {len(bodies_list)} domain(s). Check the "
+                    f"trajectory YAML: per-domain field must be named "
+                    f"'contact_bodies' and values must match scene URDF link "
+                    f"names (got {bodies_list!r})."
+                )
+
             contact_bodies_per_domain.append(bodies_list)
             ref_frame_per_domain.append(frames_list)
 

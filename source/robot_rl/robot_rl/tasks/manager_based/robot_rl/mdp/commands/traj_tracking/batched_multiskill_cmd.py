@@ -5,9 +5,27 @@ from __future__ import annotations
 import torch
 import warp as wp
 
+from isaaclab.utils.math import quat_apply, yaw_quat
+
 from .base_trajectory_cmd import BaseTrajectoryCommand
 from .manager_base import ManagerBase
 from .multiskill_manager import MultiSkillManager
+
+
+# Per-ref-frame color palette for debug viz polylines. Cycled if there are
+# more reference frames than colors.
+_DEBUG_VIZ_COLORS: tuple[tuple[float, float, float, float], ...] = (
+    (1.0, 0.2, 0.2, 0.9),   # red
+    (0.2, 0.4, 1.0, 0.9),   # blue
+    (0.2, 1.0, 0.2, 0.9),   # green
+    (1.0, 0.85, 0.2, 0.9),  # yellow
+    (0.2, 1.0, 1.0, 0.9),   # cyan
+    (1.0, 0.2, 1.0, 0.9),   # magenta
+)
+_DEBUG_VIZ_NUM_SAMPLES: int = 32
+# Isaac Sim's debug_draw.draw_lines expects ints for line widths (see
+# ``isaacsim/util/debug_draw/tests/test_debug_draw.py``).
+_DEBUG_VIZ_LINE_THICKNESS: int = 3
 
 
 class BatchedMultiSkillCommand(BaseTrajectoryCommand):
@@ -25,6 +43,11 @@ class BatchedMultiSkillCommand(BaseTrajectoryCommand):
     current phase value as-is.  All downstream manager evaluations
     (``get_output``, ``get_contact_state``, ...) take the phase directly.
     """
+
+    # Class-level default: the parent ``CommandTerm.__init__`` calls
+    # ``set_debug_vis`` (and therefore ``_set_debug_vis_impl``) *before*
+    # ``_post_init`` runs, so the per-instance attribute may not exist yet.
+    _debug_draw_iface: object | None = None
 
     def _create_manager(self, cfg, env) -> ManagerBase:
         """Create a :class:`MultiSkillManager` from a folder of skill subfolders.
@@ -101,6 +124,46 @@ class BatchedMultiSkillCommand(BaseTrajectoryCommand):
             self._contact_body_local_idx = torch.tensor(
                 per_body_local_idx, dtype=torch.long, device=self.device
             )
+
+        # --- Debug viz state ---------------------------------------------
+        # Discover every named frame in ``ordered_pos_output_names`` that has
+        # a complete (pos_x, pos_y, pos_z) triplet. This includes both ref
+        # frames (the feet) and non-ref frames (pelvis, hands, ...).
+        # ``self._debug_frame_names`` keeps the discovery order; the
+        # corresponding ``self._debug_frame_pos_idx`` holds the slice
+        # tensors. Skips ``joint:*`` entries.
+        seen_frames: list[str] = []
+        for name in self.ordered_pos_output_names:
+            if ":pos_" not in name:
+                continue
+            frame, _ = name.split(":", 1)
+            if frame == "joint":
+                continue
+            if frame in seen_frames:
+                continue
+            seen_frames.append(frame)
+        # Only keep frames that have all three pos_* components present.
+        self._debug_frame_names: list[str] = []
+        self._debug_frame_pos_idx: list[torch.Tensor] = []
+        for frame in seen_frames:
+            try:
+                idx = [self.ordered_pos_output_names.index(f"{frame}:pos_{a}") for a in ("x", "y", "z")]
+            except ValueError:
+                continue
+            self._debug_frame_names.append(frame)
+            self._debug_frame_pos_idx.append(
+                torch.tensor(idx, dtype=torch.long, device=self.device)
+            )
+        # Per-frame colour, cycled through the palette.
+        self._debug_frame_colors: list[tuple[float, float, float, float]] = [
+            _DEBUG_VIZ_COLORS[i % len(_DEBUG_VIZ_COLORS)] for i in range(len(self._debug_frame_names))
+        ]
+        # NOTE: do NOT reset ``self._debug_draw_iface`` here. The parent
+        # ``CommandTerm.__init__`` calls ``_set_debug_vis_impl`` *before*
+        # this method runs, and that's where the iface is acquired and
+        # stored on the instance. Clobbering it here breaks per-frame
+        # drawing. The class-level default (see top of class) covers the
+        # case where ``_set_debug_vis_impl`` is called with ``False``.
 
     @property
     def traj_time(self) -> torch.Tensor:
@@ -286,3 +349,108 @@ class BatchedMultiSkillCommand(BaseTrajectoryCommand):
         self.manager.commit_traj_state()
 
         self._last_compute_step = ep_len.clone()
+
+    # ------------------------------------------------------------------
+    # Debug visualization
+    # ------------------------------------------------------------------
+
+    def _set_debug_vis_impl(self, debug_vis: bool) -> None:
+        """Acquire / release the Isaac Sim debug-draw interface.
+
+        Uses Isaac Sim's ``isaacsim.util.debug_draw`` extension (only
+        importable after AppLauncher has started Kit, hence the deferred
+        import). The actual per-step drawing happens in
+        :meth:`_debug_vis_callback`.
+        """
+        if debug_vis:
+            if self._debug_draw_iface is None:
+                try:
+                    from isaacsim.util.debug_draw import _debug_draw  # type: ignore
+                    self._debug_draw_iface = _debug_draw.acquire_debug_draw_interface()
+                except Exception as exc:
+                    print(f"[WARN BatchedMultiSkillCommand] "
+                          f"Could not acquire debug_draw interface: {exc}")
+                    self._debug_draw_iface = None
+        else:
+            if self._debug_draw_iface is not None:
+                try:
+                    self._debug_draw_iface.clear_lines()
+                except Exception:
+                    pass
+            self._debug_draw_iface = None
+
+    def _debug_vis_callback(self, event) -> None:  # noqa: D401 — IsaacLab convention
+        """Draw, for each env and reference frame, the bezier curve of the
+        currently-active domain in world coordinates.
+
+        Vectorised across envs and samples: one ``draw_lines`` call covers
+        ``num_envs × num_ref_frames × (S − 1)`` line segments.
+        """
+        if self._debug_draw_iface is None:
+            return
+        if not self.robot.is_initialized:
+            return
+        # ``_post_init`` may not have run yet on the very first
+        # ``set_debug_vis(True)`` triggered from the parent ``__init__``.
+        if not hasattr(self, "_debug_frame_pos_idx"):
+            return
+
+        self._debug_draw_iface.clear_lines()
+
+        manager = self.manager
+        phase = manager.phase                                         # (N,)
+        traj_idx = manager.get_current_trajectory_indices()           # (N,)
+        domain_idx = manager._get_domain_indices(phase, traj_idx)     # (N,)
+
+        coeffs_pos = manager.data["coeffs_pos"][traj_idx, domain_idx]  # (N, P, K+1)
+        N, P_dim, K1 = coeffs_pos.shape
+        S = _DEBUG_VIZ_NUM_SAMPLES
+
+        # Bernstein-polynomial evaluation, vectorised across S samples.
+        degree = K1 - 1
+        coefs = manager._binomial_coeffs[degree]                      # (K+1,)
+        i_vec = torch.arange(K1, device=self.device)                  # (K+1,)
+        tau = torch.linspace(0.0, 1.0, S, device=self.device)         # (S,)
+        tau_pow = tau.unsqueeze(1) ** i_vec                           # (S, K+1)
+        one_minus_pow = (1.0 - tau).unsqueeze(1) ** (degree - i_vec)  # (S, K+1)
+        weights = coefs * tau_pow * one_minus_pow                     # (S, K+1)
+        local_outs = torch.einsum("sd,npd->nsp", weights, coeffs_pos) # (N, S, P)
+
+        # Local → world via the env's current ref-frame anchor.
+        anchor = self.ref_poses[:, :3]                                # (N, 3)
+        ref_quat = self.ref_poses[:, 3:]                              # (N, 4) xyzw
+        yaw_q = yaw_quat(ref_quat)                                    # (N, 4)
+        yaw_q_exp = yaw_q.unsqueeze(1).expand(N, S, 4)                # (N, S, 4)
+        anchor_exp = anchor.unsqueeze(1)                              # (N, 1, 3)
+
+        # Build a curve per discovered frame (feet, pelvis, hands, ...) and
+        # stack into one flat ``draw_lines`` call.
+        starts_chunks: list[torch.Tensor] = []
+        ends_chunks: list[torch.Tensor] = []
+        colors_chunks: list[torch.Tensor] = []
+        for frame_i, pos_idx in enumerate(self._debug_frame_pos_idx):
+            local_pos = local_outs[:, :, pos_idx]                     # (N, S, 3)
+            world_pos = anchor_exp + quat_apply(yaw_q_exp, local_pos) # (N, S, 3)
+            starts_chunks.append(world_pos[:, :-1, :].reshape(-1, 3))
+            ends_chunks.append(world_pos[:, 1:, :].reshape(-1, 3))
+            color = torch.tensor(
+                self._debug_frame_colors[frame_i], device=self.device
+            )
+            colors_chunks.append(
+                color.expand(starts_chunks[-1].shape[0], 4)
+            )
+
+        # ``draw_lines`` expects list[tuple[float, float, float]] for points,
+        # list[tuple[float, float, float, float]] for colors, list[int] for
+        # widths. tolist() yields list[list[float]] which most pybind11
+        # bindings accept, but make the tuple-ness explicit to be safe.
+        starts_raw = torch.cat(starts_chunks, dim=0).cpu().tolist()
+        ends_raw = torch.cat(ends_chunks, dim=0).cpu().tolist()
+        colors_raw = torch.cat(colors_chunks, dim=0).cpu().tolist()
+        starts_t = [tuple(p) for p in starts_raw]
+        ends_t = [tuple(p) for p in ends_raw]
+        colors_t = [tuple(c) for c in colors_raw]
+        thicknesses = [_DEBUG_VIZ_LINE_THICKNESS] * len(starts_t)
+
+        if starts_t:
+            self._debug_draw_iface.draw_lines(starts_t, ends_t, colors_t, thicknesses)
