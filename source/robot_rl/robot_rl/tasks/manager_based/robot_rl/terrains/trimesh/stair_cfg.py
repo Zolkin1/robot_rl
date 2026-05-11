@@ -61,9 +61,16 @@ class MeshXStairsUpTerrainCfg(SubTerrainBaseCfg):
     pole_height: float = 1.5
     """Height of poles above the highest stair's top surface."""
 
+    start_z_zero: bool = True
+    """If True (default), anchor the lowest stair's top surface at z=0 so the
+    whole staircase rises above z=0.  Set to False to recover the legacy
+    behavior where the staircase is vertically centred around z=0."""
+
 
 @configclass
 class MeshXStairsDownTerrainCfg(MeshXStairsUpTerrainCfg):
-    """Stairs descending in +x, vertically centered at z=0. Same fields as up."""
+    """Stairs descending in +x. Vertically centred at z=0 by default; set
+    ``start_z_zero=True`` to put the lowest stair top at z=0 (so the bottom
+    of the descent sits at ground level and the top sits above z=0)."""
 
     function = x_stairs_down_terrain

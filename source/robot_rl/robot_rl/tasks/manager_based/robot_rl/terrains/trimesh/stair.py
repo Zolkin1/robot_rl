@@ -144,10 +144,17 @@ def _build_stairs(
     num_steps = max(1, int(round(size_x / float(step_depth_nominal))))
     step_depth = size_x / num_steps
 
-    # 3. Center the staircase vertically around z = 0.
-    half_range = (num_steps - 1) * step_height / 2.0
-    z_lowest_top = -half_range
-    z_highest_top = half_range
+    # 3. Vertical anchoring.  Default: centre the staircase around z = 0.
+    # If ``start_z_zero`` is set on the cfg, anchor the lowest stair's top at
+    # z = 0 so the whole staircase rises above z = 0 (and the env origin can
+    # spawn at ground level on the first stair).
+    if getattr(cfg, "start_z_zero", False):
+        z_lowest_top = 0.0
+        z_highest_top = (num_steps - 1) * step_height
+    else:
+        half_range = (num_steps - 1) * step_height / 2.0
+        z_lowest_top = -half_range
+        z_highest_top = half_range
     y_center = size_y / 2.0
 
     # 4. Floating treads vs solid step boxes.

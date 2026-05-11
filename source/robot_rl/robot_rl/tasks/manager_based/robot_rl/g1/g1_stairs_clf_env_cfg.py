@@ -180,7 +180,7 @@ class G1StairsCLFEnvCfg(G1MultiSkillCLFEnvCfg):
           params={
               "cmd_name": "traj_ref",
               "frame_names": ["pelvis_link", "left_ankle_roll_link", "right_ankle_roll_link"],
-              "max_frac": 0.25,
+              "max_frac": 0.3, #0.25,
               "min_dist": 0.1,
           },
         )
@@ -202,7 +202,7 @@ class G1StairsCLFEnvCfg_PLAY(G1StairsCLFEnvCfg):
         self.scene.terrain.terrain_generator.num_rows = 1
         self.scene.terrain.terrain_generator.num_cols = self.scene.num_envs
 
-        self.episode_length_s = 2.0
+        self.episode_length_s = 20.0 #2.0
 
         self.events.randomize_ground_contact_friction = None
         self.events.add_base_mass = None

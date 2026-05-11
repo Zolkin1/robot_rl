@@ -43,6 +43,9 @@ _DEBUG_VIZ_HIDDEN_FRAME_SUBSTRINGS: tuple[str, ...] = ("wrist", "hand")
 # the actual cutoff.
 _DEBUG_VIZ_END_SPHERE_DIST_FRAC: float = 0.25
 _DEBUG_VIZ_END_SPHERE_MIN_RADIUS: float = 0.1
+# Master toggle for the end-of-trajectory spheres.  Set to False to hide
+# them entirely (no prototype, no per-step viz emission).
+_DEBUG_VIZ_SHOW_END_SPHERES: bool = False
 
 
 class BatchedMultiSkillCommand(BaseTrajectoryCommand):
@@ -434,11 +437,14 @@ class BatchedMultiSkillCommand(BaseTrajectoryCommand):
         # radius is applied via the ``scales`` arg in ``_debug_vis_callback``.
         # Sphere prototype indices are ``F..2F-1``, matching the cylinder
         # frame order so frame ``i`` re-uses its colour for the end marker.
-        for name, color in zip(self._debug_frame_names, self._debug_frame_colors):
-            prototypes[f"_{name}_end_sphere"] = sim_utils.SphereCfg(
-                radius=1.0,
-                visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=tuple(color)),
-            )
+        # Gated by ``_DEBUG_VIZ_SHOW_END_SPHERES`` so prototypes and emission
+        # stay consistent.
+        if _DEBUG_VIZ_SHOW_END_SPHERES:
+            for name, color in zip(self._debug_frame_names, self._debug_frame_colors):
+                prototypes[f"_{name}_end_sphere"] = sim_utils.SphereCfg(
+                    radius=1.0,
+                    visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=tuple(color)),
+                )
         cfg = VisualizationMarkersCfg(prim_path=_DEBUG_VIZ_PRIM_PATH, markers=prototypes)
         try:
             return VisualizationMarkers(cfg)
@@ -542,30 +548,32 @@ class BatchedMultiSkillCommand(BaseTrajectoryCommand):
         # cylinder frame order.  Radius matches the
         # ``frame_deviation_from_reference`` termination scale: per-env
         # per-frame ``max(frac * current_domain_chord, min_radius)``.
-        frame_start = world_pos[:, 0, :, :]                                    # (N, F, 3)
-        frame_end = world_pos[:, -1, :, :]                                     # (N, F, 3)
-        frame_dist = torch.linalg.norm(frame_end - frame_start, dim=-1)        # (N, F)
-        sphere_radius = torch.clamp(
-            frame_dist * _DEBUG_VIZ_END_SPHERE_DIST_FRAC,
-            min=_DEBUG_VIZ_END_SPHERE_MIN_RADIUS,
-        )                                                                       # (N, F)
-        sphere_translations = frame_end.reshape(-1, 3)                         # (N*F, 3)
-        sphere_scales = sphere_radius.unsqueeze(-1).expand(N, F, 3).reshape(-1, 3)
-        sphere_quats = quat_from_angle_axis(
-            torch.zeros(N * F, device=self.device),
-            torch.tensor([1.0, 0.0, 0.0], device=self.device).expand(N * F, 3),
-        )
-        sphere_indices = (
-            (torch.arange(F, device=self.device, dtype=torch.long) + F)
-            .view(1, F)
-            .expand(N, F)
-            .reshape(-1)
-        )
+        # Gated by ``_DEBUG_VIZ_SHOW_END_SPHERES``.
+        if _DEBUG_VIZ_SHOW_END_SPHERES:
+            frame_start = world_pos[:, 0, :, :]                                    # (N, F, 3)
+            frame_end = world_pos[:, -1, :, :]                                     # (N, F, 3)
+            frame_dist = torch.linalg.norm(frame_end - frame_start, dim=-1)        # (N, F)
+            sphere_radius = torch.clamp(
+                frame_dist * _DEBUG_VIZ_END_SPHERE_DIST_FRAC,
+                min=_DEBUG_VIZ_END_SPHERE_MIN_RADIUS,
+            )                                                                       # (N, F)
+            sphere_translations = frame_end.reshape(-1, 3)                         # (N*F, 3)
+            sphere_scales = sphere_radius.unsqueeze(-1).expand(N, F, 3).reshape(-1, 3)
+            sphere_quats = quat_from_angle_axis(
+                torch.zeros(N * F, device=self.device),
+                torch.tensor([1.0, 0.0, 0.0], device=self.device).expand(N * F, 3),
+            )
+            sphere_indices = (
+                (torch.arange(F, device=self.device, dtype=torch.long) + F)
+                .view(1, F)
+                .expand(N, F)
+                .reshape(-1)
+            )
 
-        translations = torch.cat([translations, sphere_translations], dim=0)
-        quats = torch.cat([quats, sphere_quats], dim=0)
-        scales_flat = torch.cat([scales_flat, sphere_scales], dim=0)
-        marker_indices = torch.cat([marker_indices, sphere_indices], dim=0)
+            translations = torch.cat([translations, sphere_translations], dim=0)
+            quats = torch.cat([quats, sphere_quats], dim=0)
+            scales_flat = torch.cat([scales_flat, sphere_scales], dim=0)
+            marker_indices = torch.cat([marker_indices, sphere_indices], dim=0)
 
         self._debug_markers.visualize(
             translations=translations,

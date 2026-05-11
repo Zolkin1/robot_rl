@@ -54,11 +54,13 @@ CUSTOM_STAIR_CFG = MetaTerrainGeneratorCfg(
 
 # Single-skill ascending-stairs preset for the G1 stair-tracking env.
 # Cell x is sized to fit exactly ``num_steps`` treads of ``step_depth`` so the
-# generator tiles cleanly. ``num_steps`` is odd so the middle stair's tread top
-# lands exactly on z=0 (``_build_stairs`` centres the staircase vertically
-# around z=0). 10 x 20 = 200 cells distribute 4096 envs at ~20 envs/cell,
-# matching the broadphase density the default rough cfg is sized for.
-_LONG_STAIRS_NUM_STEPS = 29
+# generator tiles cleanly.  With ``start_z_zero=True`` below, the lowest stair
+# top sits at z=0, the env origin spawns on that first stair, and the whole
+# staircase rises above z=0 — so you can use roughly half the steps you'd need
+# under the centred layout to cover the same climb.  10 x 20 = 200 cells
+# distribute 4096 envs at ~20 envs/cell, matching the broadphase density the
+# default rough cfg is sized for.
+_LONG_STAIRS_NUM_STEPS = 70 #29
 _LONG_STAIRS_STEP_DEPTH = 0.233
 _LONG_STAIRS_STEP_HEIGHT = 0.135
 
@@ -77,7 +79,10 @@ LONG_STAIRS_CFG = MetaTerrainGeneratorCfg(
             proportion=1.0,
             step_dim_options=[(_LONG_STAIRS_STEP_HEIGHT, _LONG_STAIRS_STEP_DEPTH)],
             stair_width_range=(1.5, 1.5),
-            origin_distance_from_back=(_LONG_STAIRS_NUM_STEPS // 2 + 0.5) * _LONG_STAIRS_STEP_DEPTH,
+            # Lowest stair top sits at z=0; spawn the env on stair 0 (ground
+            # level) rather than the middle of the staircase.
+            start_z_zero=True,
+            origin_distance_from_back=0.5 * _LONG_STAIRS_STEP_DEPTH,
             float_prob=0.0,
             wall_prob=0.0,
             pole_prob=0.0,
