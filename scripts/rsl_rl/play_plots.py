@@ -249,6 +249,101 @@ def plot_base_velocity(
         plt.close(fig)
 
 
+def plot_skill_and_terrain(
+    data: dict[str, np.ndarray],
+    metadata: dict[str, Any],
+    save_dir: str,
+    env_ids: list[int],
+) -> None:
+    """Per-env step plot of the sampled skill and the current terrain (row, col).
+
+    Two stacked subplots sharing a time x-axis:
+
+      * top: the velocity-command's per-env ``skill_id`` over time, with the
+        y-axis labelled by skill name (e.g. ``stair_up``, ``walk_forward``).
+      * bottom: the env's current terrain ``row`` and ``col`` as step lines.
+        Border-column ranges (from ``MetaTerrainImporter._spawnable_columns``)
+        are shaded so it's obvious when the robot wanders onto an
+        unspawnable strip.
+
+    Skips silently if the env didn't expose either ``skill_id`` or
+    ``terrain_row``/``terrain_col``.
+    """
+    has_skill = "skill_id" in data
+    has_terrain = "terrain_row" in data and "terrain_col" in data
+    if not has_skill and not has_terrain:
+        print("[WARN plot_skill_and_terrain] No skill or terrain data, skipping.")
+        return
+
+    dt = metadata.get("dt", 1.0)
+    skill_list = metadata.get("skill_list")
+    border_cols = metadata.get("border_cols", [])
+    num_cols = metadata.get("terrain_num_cols")
+    num_rows = metadata.get("terrain_num_rows")
+
+    # Pre-compute the contiguous border-col ranges for axhspan shading.
+    border_spans: list[tuple[int, int]] = []
+    if border_cols:
+        sorted_cols = sorted(border_cols)
+        start = prev = sorted_cols[0]
+        for c in sorted_cols[1:]:
+            if c == prev + 1:
+                prev = c
+            else:
+                border_spans.append((start, prev))
+                start = prev = c
+        border_spans.append((start, prev))
+
+    skill_arr = data.get("skill_id")
+    row_arr = data.get("terrain_row")
+    col_arr = data.get("terrain_col")
+    n_steps = (skill_arr if skill_arr is not None else row_arr).shape[0]
+    time_s = np.arange(n_steps) * dt
+
+    for env_id in env_ids:
+        nplots = int(has_skill) + int(has_terrain)
+        fig, axs = plt.subplots(nplots, 1, figsize=(10, 3 * nplots), sharex=True)
+        if nplots == 1:
+            axs = [axs]
+        fig.suptitle(f"Skill & Terrain (Env {env_id})", fontsize=14)
+
+        ax_idx = 0
+        if has_skill:
+            ax = axs[ax_idx]
+            ax.step(time_s, skill_arr[:, env_id], where="post", linewidth=2)
+            ax.set_ylabel("Skill")
+            ax.set_title("Sampled skill")
+            ax.grid(True, alpha=0.3)
+            if skill_list:
+                ax.set_yticks(range(len(skill_list)))
+                ax.set_yticklabels(skill_list)
+                ax.set_ylim(-0.5, len(skill_list) - 0.5)
+            ax_idx += 1
+
+        if has_terrain:
+            ax = axs[ax_idx]
+            ax.step(time_s, row_arr[:, env_id], where="post", linewidth=2, label="row")
+            ax.step(time_s, col_arr[:, env_id], where="post", linewidth=2, label="col")
+            for lo, hi in border_spans:
+                ax.axhspan(lo - 0.5, hi + 0.5, color="grey", alpha=0.15,
+                           label="border cols" if (lo, hi) == border_spans[0] else None)
+            ax.set_ylabel("Cell index")
+            ax.set_title("Current terrain cell")
+            ax.grid(True, alpha=0.3)
+            ax.legend(loc="upper right", fontsize=8)
+            # Force integer ticks; bound to known grid size if available.
+            if num_rows is not None and num_cols is not None:
+                ax.set_ylim(-0.5, max(num_rows, num_cols) - 0.5)
+            ax.yaxis.set_major_locator(plt.MaxNLocator(integer=True))
+            ax_idx += 1
+
+        axs[-1].set_xlabel("Time (s)")
+        plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+        plt.savefig(os.path.join(save_dir, f"skill_and_terrain_env{env_id}.png"),
+                    dpi=300, bbox_inches="tight")
+        plt.close(fig)
+
+
 def _plot_gate_offset(
     ax: "plt.Axes",
     time_s: np.ndarray,
@@ -732,6 +827,7 @@ PLOT_REGISTRY: dict[str, Callable] = {
     "teacher_vs_student": plot_teacher_vs_student_actions,
     "torques": plot_torques,
     "base_velocity": plot_base_velocity,
+    "skill_and_terrain": plot_skill_and_terrain,
     "domain_info": plot_domain_info,
     "reference_frame": plot_reference_frame,
     "clf": plot_clf,

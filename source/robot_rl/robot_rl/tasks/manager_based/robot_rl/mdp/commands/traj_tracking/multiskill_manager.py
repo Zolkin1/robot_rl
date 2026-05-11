@@ -207,6 +207,17 @@ class MultiSkillManager(ManagerBase):
         # --- Build per-skill metadata --------------------------------------
         self._build_skill_data(skill_labels, conditioner_datas)
 
+        # --- Skill filter state (lazy-init at first selection) -------------
+        # ``_traj_skill_idx`` is the per-trajectory skill index (built by
+        # ``_build_global_tensors`` at ``data["skill_idx"]``). Cached here as a
+        # plain Tensor for the per-env skill mask in ``_select_trajectories``.
+        # The vel→traj skill-id gather and the alignment check are deferred to
+        # ``_lazy_init_skill_filter`` because the conditioner command term may
+        # not exist on ``env.command_manager`` at manager-construction time.
+        self._traj_skill_idx: Tensor = self.data["skill_idx"].to(self.device)
+        self._vel_skill_to_traj_skill: Tensor | None = None
+        self._skill_filter_ready: bool = False
+
         # --- Pre-compute binomial coefficients for Bezier evaluation -------
         self._binomial_coeffs: dict[int, Tensor] = {}
         for d in range(self.spline_order + 1):
@@ -636,47 +647,89 @@ class MultiSkillManager(ManagerBase):
         cond[:, :min(raw.shape[1], C)] = raw[:, :min(raw.shape[1], C)]
         return cond
 
-    def _select_trajectories(self, conditioner: Tensor) -> Tensor:
-        """Select the nearest trajectory per environment across all skills.
+    def _lazy_init_skill_filter(self) -> None:
+        """One-time validation + skill-id mapping build.
 
-        Selection logic:
-        1. If the commanded terrain dims are zero (flat), match on velocity
-           dims only against all flat trajectories.
-        2. If the commanded terrain dims are non-zero, first filter to
-           trajectories with matching terrain, then select by velocity.
+        Resolves the conditioner term, requires it to be a
+        :class:`MultiskillVelocityTrackingCommand`-shaped object exposing a
+        per-env ``skill_id`` and an ordered ``_skill_list``. Validates that
+        the velocity command's skills equal the trajectory manager's skills
+        exactly, then caches a gather tensor that maps vel-cmd skill indices
+        to trajectory-manager skill indices.
+
+        Deferred to first selection because the conditioner term may not be
+        registered on ``env.command_manager`` at manager construction time.
+        """
+        if self._skill_filter_ready:
+            return
+
+        cond_term = self.env.command_manager.get_term(self.conditioner_generator_name)
+        for required in ("skill_id", "_skill_list"):
+            if not hasattr(cond_term, required):
+                raise TypeError(
+                    f"MultiSkillManager requires its conditioner term "
+                    f"'{self.conditioner_generator_name}' to expose '{required}'. "
+                    f"Got {type(cond_term).__name__}; this manager needs a "
+                    f"MultiskillVelocityTrackingCommand."
+                )
+
+        vel_skills: list[str] = list(cond_term._skill_list)
+        traj_skills = set(self.skill_name_to_idx.keys())
+        if set(vel_skills) != traj_skills:
+            missing_in_traj = sorted(set(vel_skills) - traj_skills)
+            missing_in_vel = sorted(traj_skills - set(vel_skills))
+            raise KeyError(
+                "Skill name mismatch between velocity command and trajectory "
+                f"folders. In vel_cmd but no trajectories: {missing_in_traj}. "
+                f"In trajectories but not in vel_cmd: {missing_in_vel}."
+            )
+
+        self._vel_skill_to_traj_skill = torch.tensor(
+            [self.skill_name_to_idx[name] for name in vel_skills],
+            dtype=torch.long, device=self.device,
+        )
+        self._skill_filter_ready = True
+
+    def _select_trajectories(self, conditioner: Tensor) -> Tensor:
+        """Select the nearest trajectory per env, restricted to the env's skill.
+
+        Each env's velocity command term holds a per-env ``skill_id`` (sampled
+        from the terrain importer's ``skill_probs``). We translate that into
+        the trajectory manager's skill space and mask the cdist matrix so
+        only same-skill trajectories are considered before ``argmin``.
 
         Args:
-            conditioner: ``[N, C]`` conditioning vectors where
-                ``C = [vel_x, vel_y, vel_yaw, terrain_w, terrain_h, terrain_l]``.
+            conditioner: ``(N, C)`` conditioning vectors. Only the first three
+                dims (vel_x, vel_y, vel_yaw) participate in matching now —
+                skill replaces the legacy terrain-dim filter.
 
         Returns:
-            ``[N]`` global trajectory indices.
+            ``(N,)`` global trajectory indices.
         """
-        cmd_terrain = conditioner[:, 3:]  # [N, 3]
-        cmd_is_flat = cmd_terrain.abs().sum(dim=1) == 0  # [N]
+        self._lazy_init_skill_filter()
 
-        # --- Flat terrain: match on velocity only -------------------------
-        vel_cmd = conditioner[:, :3]  # [N, 3]
-        vel_global = self._global_conditioning[:, :3]  # [T, 3]
-        vel_dists = torch.cdist(vel_cmd, vel_global)  # [N, T]
+        cond_term = self.env.command_manager.get_term(self.conditioner_generator_name)
+        vel_skill_ids: Tensor = cond_term.skill_id  # (num_envs,)
 
-        # For flat commands, mask out terrain trajectories (set dist to inf)
-        if self._terrain_mask.any():
-            vel_dists[cmd_is_flat.unsqueeze(1).expand_as(vel_dists) &
-                      self._terrain_mask.unsqueeze(0).expand_as(vel_dists)] = float("inf")
+        # Callers (``_ensure_cache``) always pass the full-batch conditioner;
+        # this guard catches future call sites that try to slice the
+        # conditioner without slicing skill ids the same way.
+        if conditioner.shape[0] != vel_skill_ids.shape[0]:
+            raise RuntimeError(
+                f"conditioner ({conditioner.shape[0]}) and vel_cmd.skill_id "
+                f"({vel_skill_ids.shape[0]}) must have matching env count."
+            )
 
-        # --- Terrain: match terrain dims first, then velocity -------------
-        # For non-flat commands, mask out flat trajectories
-        if (~cmd_is_flat).any() and (~self._terrain_mask).any():
-            vel_dists[(~cmd_is_flat).unsqueeze(1).expand_as(vel_dists) &
-                      (~self._terrain_mask).unsqueeze(0).expand_as(vel_dists)] = float("inf")
+        env_traj_skill_ids = self._vel_skill_to_traj_skill[vel_skill_ids]  # (N,)
 
-        # TODO: For terrain, a two-stage selection (terrain dims first, then
-        #   velocity within the matched set) would be more robust. For now,
-        #   the distance in the velocity space is sufficient since terrain
-        #   trajectories are not yet in use.
+        vel_cmd = conditioner[:, :3]                           # (N, 3)
+        vel_global = self._global_conditioning[:, :3]          # (T, 3)
+        vel_dists = torch.cdist(vel_cmd, vel_global)           # (N, T)
 
-        return vel_dists.argmin(dim=1)  # [N] global trajectory indices
+        allowed = self._traj_skill_idx.unsqueeze(0) == env_traj_skill_ids.unsqueeze(1)
+        vel_dists = vel_dists.masked_fill(~allowed, float("inf"))
+
+        return vel_dists.argmin(dim=1)
 
     # ------------------------------------------------------------------
     # Core batched helpers

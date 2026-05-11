@@ -185,7 +185,27 @@ class DataLogger:
         except Exception as exc:
             self._warn("robot_data", f"Could not read robot articulation data: {exc}")
 
-        # 5. Phase observations
+        # 5. Skill + terrain row/col (only for envs that use
+        # ``MultiskillVelocityTrackingCommand`` + ``MetaTerrainImporter``).
+        try:
+            vel_cmd = unwrapped.command_manager.get_term("base_velocity")
+            if hasattr(vel_cmd, "skill_id"):
+                step["skill_id"] = vel_cmd.skill_id.clone()
+        except Exception as exc:
+            self._warn("skill_id", f"Could not read vel_cmd.skill_id: {exc}")
+
+        try:
+            terrain = unwrapped.scene["terrain"]
+            robot = unwrapped.scene.articulations["robot"]
+            if hasattr(terrain, "world_xy_to_cell"):
+                xy_w = _to_torch(robot.data.root_pos_w)[:, :2]
+                rows, cols = terrain.world_xy_to_cell(xy_w)
+                step["terrain_row"] = rows.clone()
+                step["terrain_col"] = cols.clone()
+        except Exception as exc:
+            self._warn("terrain_rc", f"Could not compute terrain (row, col): {exc}")
+
+        # 6. Phase observations
         if self._phase_term_type == "multiskill":
             try:
                 step["phase_obs"] = multiskill_phase(unwrapped, self._phase_frequency_list, self._traj_term_name).clone()
@@ -354,6 +374,33 @@ class DataLogger:
             self.metadata["joint_names"] = list(robot.data.joint_names)
         except Exception as exc:
             print(f"[WARN DataLogger] Could not read joint names: {exc}")
+
+        # Skill + terrain metadata (only populated for envs that use
+        # ``MultiskillVelocityTrackingCommand`` + ``MetaTerrainImporter``).
+        # ``_skill_list`` is private but it's the canonical ordered list the
+        # command pre-builds; no public alias exists today.
+        try:
+            vel_cmd = unwrapped.command_manager.get_term("base_velocity")
+            if hasattr(vel_cmd, "_skill_list"):
+                self.metadata["skill_list"] = list(vel_cmd._skill_list)
+        except Exception as exc:
+            print(f"[WARN DataLogger] Could not read vel command skill_list: {exc}")
+
+        try:
+            terrain = unwrapped.scene["terrain"]
+            if hasattr(terrain, "terrain_origins") and terrain.terrain_origins is not None:
+                num_rows, num_cols = terrain.terrain_origins.shape[:2]
+                self.metadata["terrain_num_rows"] = int(num_rows)
+                self.metadata["terrain_num_cols"] = int(num_cols)
+            if hasattr(terrain, "_spawnable_columns") and terrain._spawnable_columns is not None:
+                spawn_cols = set(terrain._spawnable_columns.cpu().tolist())
+                border_cols = sorted(
+                    c for c in range(self.metadata.get("terrain_num_cols", 0))
+                    if c not in spawn_cols
+                )
+                self.metadata["border_cols"] = border_cols
+        except Exception as exc:
+            print(f"[WARN DataLogger] Could not read terrain grid metadata: {exc}")
 
     def _collect_traj_names(self, manager) -> list[str] | None:
         """Build a per-trajectory display name list from the multiskill manager.
