@@ -5,27 +5,30 @@ from __future__ import annotations
 import torch
 import warp as wp
 
-from isaaclab.utils.math import quat_apply, yaw_quat
+from isaaclab.utils.math import quat_apply, quat_from_angle_axis, yaw_quat
 
 from .base_trajectory_cmd import BaseTrajectoryCommand
 from .manager_base import ManagerBase
 from .multiskill_manager import MultiSkillManager
 
 
-# Per-ref-frame color palette for debug viz polylines. Cycled if there are
-# more reference frames than colors.
-_DEBUG_VIZ_COLORS: tuple[tuple[float, float, float, float], ...] = (
-    (1.0, 0.2, 0.2, 0.9),   # red
-    (0.2, 0.4, 1.0, 0.9),   # blue
-    (0.2, 1.0, 0.2, 0.9),   # green
-    (1.0, 0.85, 0.2, 0.9),  # yellow
-    (0.2, 1.0, 1.0, 0.9),   # cyan
-    (1.0, 0.2, 1.0, 0.9),   # magenta
+# Per-frame color palette for debug viz cylinder prototypes. Cycled if there
+# are more reference frames than colors.
+_DEBUG_VIZ_COLORS: tuple[tuple[float, float, float], ...] = (
+    (1.0, 0.2, 0.2),   # red
+    (0.2, 0.4, 1.0),   # blue
+    (0.2, 1.0, 0.2),   # green
+    (1.0, 0.85, 0.2),  # yellow
+    (0.2, 1.0, 1.0),   # cyan
+    (1.0, 0.2, 1.0),   # magenta
 )
 _DEBUG_VIZ_NUM_SAMPLES: int = 32
-# Isaac Sim's debug_draw.draw_lines expects ints for line widths (see
-# ``isaacsim/util/debug_draw/tests/test_debug_draw.py``).
-_DEBUG_VIZ_LINE_THICKNESS: int = 3
+# Cylinder radius used for the segment prototypes (metres).  The cylinder's
+# native height is 1.0 m — per-segment length is applied via the z-scale
+# component at ``visualize`` time.
+_DEBUG_VIZ_CYLINDER_RADIUS: float = 0.005
+_DEBUG_VIZ_EPS: float = 1e-6
+_DEBUG_VIZ_PRIM_PATH: str = "/Visuals/traj_ref_segments"
 
 
 class BatchedMultiSkillCommand(BaseTrajectoryCommand):
@@ -47,7 +50,11 @@ class BatchedMultiSkillCommand(BaseTrajectoryCommand):
     # Class-level default: the parent ``CommandTerm.__init__`` calls
     # ``set_debug_vis`` (and therefore ``_set_debug_vis_impl``) *before*
     # ``_post_init`` runs, so the per-instance attribute may not exist yet.
-    _debug_draw_iface: object | None = None
+    # ``_debug_markers`` is lazily constructed once frame discovery in
+    # ``_post_init`` has populated ``_debug_frame_names``; ``_debug_vis_pending``
+    # remembers a ``set_debug_vis(True)`` request that arrived before then.
+    _debug_markers: object | None = None
+    _debug_vis_pending: bool = False
 
     def _create_manager(self, cfg, env) -> ManagerBase:
         """Create a :class:`MultiSkillManager` from a folder of skill subfolders.
@@ -154,16 +161,23 @@ class BatchedMultiSkillCommand(BaseTrajectoryCommand):
             self._debug_frame_pos_idx.append(
                 torch.tensor(idx, dtype=torch.long, device=self.device)
             )
-        # Per-frame colour, cycled through the palette.
-        self._debug_frame_colors: list[tuple[float, float, float, float]] = [
+        # Per-frame RGB colour, cycled through the palette.  One marker
+        # prototype per frame uses this as its ``PreviewSurfaceCfg``
+        # diffuse colour, so the resulting cylinders inherit the per-frame
+        # tint without needing per-instance colour at ``visualize`` time.
+        self._debug_frame_colors: list[tuple[float, float, float]] = [
             _DEBUG_VIZ_COLORS[i % len(_DEBUG_VIZ_COLORS)] for i in range(len(self._debug_frame_names))
         ]
-        # NOTE: do NOT reset ``self._debug_draw_iface`` here. The parent
-        # ``CommandTerm.__init__`` calls ``_set_debug_vis_impl`` *before*
-        # this method runs, and that's where the iface is acquired and
-        # stored on the instance. Clobbering it here breaks per-frame
-        # drawing. The class-level default (see top of class) covers the
-        # case where ``_set_debug_vis_impl`` is called with ``False``.
+
+        # If ``set_debug_vis(True)`` arrived before this point (the parent
+        # ``CommandTerm.__init__`` calls it before ``_post_init`` runs),
+        # construct the marker instance now that we know how many frame
+        # prototypes to allocate.
+        if self._debug_vis_pending and self._debug_markers is None:
+            self._debug_markers = self._create_debug_markers()
+            if self._debug_markers is not None:
+                self._debug_markers.set_visibility(True)
+            self._debug_vis_pending = False
 
     @property
     def traj_time(self) -> torch.Tensor:
@@ -355,47 +369,77 @@ class BatchedMultiSkillCommand(BaseTrajectoryCommand):
     # ------------------------------------------------------------------
 
     def _set_debug_vis_impl(self, debug_vis: bool) -> None:
-        """Acquire / release the Isaac Sim debug-draw interface.
+        """Toggle the trajectory-segment marker visualizer.
 
-        Uses Isaac Sim's ``isaacsim.util.debug_draw`` extension (only
-        importable after AppLauncher has started Kit, hence the deferred
-        import). The actual per-step drawing happens in
-        :meth:`_debug_vis_callback`.
+        Uses :class:`isaaclab.markers.VisualizationMarkers` to render one
+        cylinder per Bezier-sample segment per discovered reference frame.
+        The actual per-step update happens in :meth:`_debug_vis_callback`.
         """
         if debug_vis:
-            if self._debug_draw_iface is None:
-                try:
-                    from isaacsim.util.debug_draw import _debug_draw  # type: ignore
-                    self._debug_draw_iface = _debug_draw.acquire_debug_draw_interface()
-                except Exception as exc:
-                    print(f"[WARN BatchedMultiSkillCommand] "
-                          f"Could not acquire debug_draw interface: {exc}")
-                    self._debug_draw_iface = None
+            # Frame discovery happens in ``_post_init``, which the parent
+            # ``CommandTerm.__init__`` calls *after* ``_set_debug_vis_impl``
+            # — defer construction until we know the prototype layout.
+            if self._debug_markers is None and hasattr(self, "_debug_frame_pos_idx"):
+                self._debug_markers = self._create_debug_markers()
+            if self._debug_markers is not None:
+                self._debug_markers.set_visibility(True)
+            else:
+                self._debug_vis_pending = True
         else:
-            if self._debug_draw_iface is not None:
-                try:
-                    self._debug_draw_iface.clear_lines()
-                except Exception:
-                    pass
-            self._debug_draw_iface = None
+            self._debug_vis_pending = False
+            if self._debug_markers is not None:
+                self._debug_markers.set_visibility(False)
+
+    def _create_debug_markers(self):
+        """Instantiate the :class:`VisualizationMarkers` with one cylinder
+        prototype per discovered frame.
+
+        Returns ``None`` if Isaac Lab's markers / sim subpackages aren't
+        importable at this point (most commonly when the simulator has
+        not been launched yet — :meth:`_set_debug_vis_impl` will retry
+        the next time it's called with ``True``).
+        """
+        try:
+            import isaaclab.sim as sim_utils
+            from isaaclab.markers import VisualizationMarkers, VisualizationMarkersCfg
+        except Exception as exc:
+            print(f"[WARN BatchedMultiSkillCommand] "
+                  f"Could not import VisualizationMarkers: {exc}")
+            return None
+
+        prototypes: dict[str, sim_utils.CylinderCfg] = {}
+        for name, color in zip(self._debug_frame_names, self._debug_frame_colors):
+            prototypes[name] = sim_utils.CylinderCfg(
+                radius=_DEBUG_VIZ_CYLINDER_RADIUS,
+                height=1.0,
+                visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=tuple(color)),
+            )
+        cfg = VisualizationMarkersCfg(prim_path=_DEBUG_VIZ_PRIM_PATH, markers=prototypes)
+        try:
+            return VisualizationMarkers(cfg)
+        except Exception as exc:
+            print(f"[WARN BatchedMultiSkillCommand] "
+                  f"Could not create VisualizationMarkers: {exc}")
+            return None
 
     def _debug_vis_callback(self, event) -> None:  # noqa: D401 — IsaacLab convention
-        """Draw, for each env and reference frame, the bezier curve of the
-        currently-active domain in world coordinates.
+        """Push one batched ``visualize`` call per tick.
 
-        Vectorised across envs and samples: one ``draw_lines`` call covers
-        ``num_envs × num_ref_frames × (S − 1)`` line segments.
+        Per-env Bezier samples for every discovered frame are stacked
+        into a flat list of ``num_envs × num_frames × (S − 1)`` cylinders;
+        the prototype index of each cylinder picks the frame's colour.
         """
-        if self._debug_draw_iface is None:
+        # Frame discovery may not have run yet (parent ``__init__``
+        # invokes ``_set_debug_vis_impl`` before ``_post_init``).
+        if not hasattr(self, "_debug_frame_pos_idx"):
             return
         if not self.robot.is_initialized:
             return
-        # ``_post_init`` may not have run yet on the very first
-        # ``set_debug_vis(True)`` triggered from the parent ``__init__``.
-        if not hasattr(self, "_debug_frame_pos_idx"):
-            return
-
-        self._debug_draw_iface.clear_lines()
+        if self._debug_markers is None:
+            self._debug_markers = self._create_debug_markers()
+            if self._debug_markers is None:
+                return
+            self._debug_markers.set_visibility(True)
 
         manager = self.manager
         phase = manager.phase                                         # (N,)
@@ -403,8 +447,11 @@ class BatchedMultiSkillCommand(BaseTrajectoryCommand):
         domain_idx = manager._get_domain_indices(phase, traj_idx)     # (N,)
 
         coeffs_pos = manager.data["coeffs_pos"][traj_idx, domain_idx]  # (N, P, K+1)
-        N, P_dim, K1 = coeffs_pos.shape
+        N, _, K1 = coeffs_pos.shape
         S = _DEBUG_VIZ_NUM_SAMPLES
+        F = len(self._debug_frame_pos_idx)
+        if F == 0 or N == 0 or S < 2:
+            return
 
         # Bernstein-polynomial evaluation, vectorised across S samples.
         degree = K1 - 1
@@ -416,41 +463,58 @@ class BatchedMultiSkillCommand(BaseTrajectoryCommand):
         weights = coefs * tau_pow * one_minus_pow                     # (S, K+1)
         local_outs = torch.einsum("sd,npd->nsp", weights, coeffs_pos) # (N, S, P)
 
+        # Gather the (x, y, z) slice for every discovered frame at once.
+        frame_idx = torch.stack(self._debug_frame_pos_idx, dim=0)     # (F, 3)
+        local_pos = local_outs[:, :, frame_idx]                       # (N, S, F, 3)
+
         # Local → world via the env's current ref-frame anchor.
         anchor = self.ref_poses[:, :3]                                # (N, 3)
         ref_quat = self.ref_poses[:, 3:]                              # (N, 4) xyzw
         yaw_q = yaw_quat(ref_quat)                                    # (N, 4)
-        yaw_q_exp = yaw_q.unsqueeze(1).expand(N, S, 4)                # (N, S, 4)
-        anchor_exp = anchor.unsqueeze(1)                              # (N, 1, 3)
+        yaw_q_exp = yaw_q.view(N, 1, 1, 4).expand(N, S, F, 4)
+        anchor_exp = anchor.view(N, 1, 1, 3)
+        world_pos = anchor_exp + quat_apply(yaw_q_exp, local_pos)     # (N, S, F, 3)
 
-        # Build a curve per discovered frame (feet, pelvis, hands, ...) and
-        # stack into one flat ``draw_lines`` call.
-        starts_chunks: list[torch.Tensor] = []
-        ends_chunks: list[torch.Tensor] = []
-        colors_chunks: list[torch.Tensor] = []
-        for frame_i, pos_idx in enumerate(self._debug_frame_pos_idx):
-            local_pos = local_outs[:, :, pos_idx]                     # (N, S, 3)
-            world_pos = anchor_exp + quat_apply(yaw_q_exp, local_pos) # (N, S, 3)
-            starts_chunks.append(world_pos[:, :-1, :].reshape(-1, 3))
-            ends_chunks.append(world_pos[:, 1:, :].reshape(-1, 3))
-            color = torch.tensor(
-                self._debug_frame_colors[frame_i], device=self.device
-            )
-            colors_chunks.append(
-                color.expand(starts_chunks[-1].shape[0], 4)
-            )
+        # Per-segment endpoints, midpoint, direction, length.
+        starts = world_pos[:, :-1, :, :]                              # (N, S-1, F, 3)
+        ends = world_pos[:, 1:, :, :]
+        centers = 0.5 * (starts + ends)                               # (N, S-1, F, 3)
+        vecs = ends - starts
+        lens = torch.linalg.norm(vecs, dim=-1).clamp(min=_DEBUG_VIZ_EPS)
+        dirs = vecs / lens.unsqueeze(-1)                              # (N, S-1, F, 3)
 
-        # ``draw_lines`` expects list[tuple[float, float, float]] for points,
-        # list[tuple[float, float, float, float]] for colors, list[int] for
-        # widths. tolist() yields list[list[float]] which most pybind11
-        # bindings accept, but make the tuple-ness explicit to be safe.
-        starts_raw = torch.cat(starts_chunks, dim=0).cpu().tolist()
-        ends_raw = torch.cat(ends_chunks, dim=0).cpu().tolist()
-        colors_raw = torch.cat(colors_chunks, dim=0).cpu().tolist()
-        starts_t = [tuple(p) for p in starts_raw]
-        ends_t = [tuple(p) for p in ends_raw]
-        colors_t = [tuple(c) for c in colors_raw]
-        thicknesses = [_DEBUG_VIZ_LINE_THICKNESS] * len(starts_t)
+        # Quaternion that rotates the cylinder's local +z onto ``dirs``.
+        # ``axis = +z × dir = (-dir.y, dir.x, 0)`` is zero whenever ``dir``
+        # is parallel to ±z — pick the +x axis as a fallback (any axis in
+        # the xy-plane gives the correct ±π rotation).
+        z_dot_dir = dirs[..., 2].clamp(-1.0, 1.0)
+        angle = torch.acos(z_dot_dir)
+        axis = torch.stack(
+            [-dirs[..., 1], dirs[..., 0], torch.zeros_like(dirs[..., 0])],
+            dim=-1,
+        )
+        axis_norm = torch.linalg.norm(axis, dim=-1, keepdim=True)
+        fallback = torch.tensor([1.0, 0.0, 0.0], device=self.device).expand_as(axis)
+        axis = torch.where(axis_norm > _DEBUG_VIZ_EPS, axis, fallback)
+        quats = quat_from_angle_axis(angle.reshape(-1), axis.reshape(-1, 3))  # (M, 4) xyzw
 
-        if starts_t:
-            self._debug_draw_iface.draw_lines(starts_t, ends_t, colors_t, thicknesses)
+        # Scale: cylinder native radius/height are baked into the prototype;
+        # we only scale here, including stretching height along z by segment
+        # length.
+        scales = torch.ones_like(dirs)                                # (N, S-1, F, 3)
+        scales[..., 2] = lens                                         # z scale = segment length
+
+        # Marker index per cylinder == frame index in
+        # ``self._debug_frame_names`` (== prototype dict insertion order).
+        frame_indices = torch.arange(F, device=self.device, dtype=torch.long)
+        marker_indices = frame_indices.view(1, 1, F).expand(N, S - 1, F).reshape(-1)
+
+        translations = centers.reshape(-1, 3)
+        scales_flat = scales.reshape(-1, 3)
+
+        self._debug_markers.visualize(
+            translations=translations,
+            orientations=quats,
+            scales=scales_flat,
+            marker_indices=marker_indices,
+        )
