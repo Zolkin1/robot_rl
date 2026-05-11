@@ -26,6 +26,7 @@ from isaaclab.utils.math import (
 from .clf import CLF
 from .manager_base import ManagerBase
 from .sagittal_reflector import NamedReflector, SagittalReflectionConfig
+from .terrain_aware_ref import apply_terrain_aware_ref
 from .trajectory_manager import TrajectoryType
 
 
@@ -238,14 +239,26 @@ class BaseTrajectoryCommand(CommandTerm):
         if env_ids is None:
             if torch.any(changed_and_contact):
                 env_indices = torch.where(changed_and_contact)[0]
-                self.ref_poses[env_indices, :] = ref_poses[env_indices, ref_frame_indices[env_indices], :]
+                default_new = ref_poses[env_indices, ref_frame_indices[env_indices], :]
+                self.ref_poses[env_indices, :] = apply_terrain_aware_ref(
+                    cmd=self,
+                    env_indices=env_indices,
+                    default_new_ref=default_new,
+                    new_domain=new_domains[env_indices],
+                )
         else:
             if torch.any(changed_and_contact):
                 subset_indices = torch.where(changed_and_contact)[0]
                 global_env_indices = env_ids[subset_indices]
-                self.ref_poses[global_env_indices, :] = ref_poses[
+                default_new = ref_poses[
                     global_env_indices, ref_frame_indices[subset_indices], :
                 ]
+                self.ref_poses[global_env_indices, :] = apply_terrain_aware_ref(
+                    cmd=self,
+                    env_indices=global_env_indices,
+                    default_new_ref=default_new,
+                    new_domain=new_domains[subset_indices],
+                )
 
         # Compute measured outputs using current ref_poses
         self.compute_measured_output(self.ref_poses[:, :3], self.ref_poses[:, 3:])
