@@ -1,9 +1,8 @@
-import math
-
 from isaaclab.utils import configclass
 from isaaclab.sensors import RayCasterCfg, patterns
 from isaaclab.managers import ObservationTermCfg as ObsTerm
 from isaaclab.managers import SceneEntityCfg
+from isaaclab.managers import TerminationTermCfg as DoneTerm
 from isaaclab.utils.noise import UniformNoiseCfg as Unoise
 
 from ..mdp.commands.multiskill_velocity_commands_cfg import VelocityBucketCfg
@@ -11,6 +10,19 @@ from ..mdp.commands.multiskill_velocity_commands_cfg import VelocityBucketCfg
 from robot_rl.tasks.manager_based.robot_rl import mdp
 from robot_rl.tasks.manager_based.robot_rl.g1.g1_clf_tracking_base import G1ClfTrackingSceneCfg
 from robot_rl.tasks.manager_based.robot_rl.g1.g1_clf_multiskill_base import G1MultiSkillCLFEnvCfg, G1MultiSkillObservationCfg
+from robot_rl.tasks.manager_based.robot_rl.terrains.config.terrain_cfgs import STAIR_WALK_CFG
+from robot_rl.tasks.manager_based.robot_rl.terrains.meta_stair_importer_cfg import MetaStairTerrainImporterCfg
+
+
+# Body-contact sensors (declared on the base scene cfg) that should terminate
+# the episode when they touch the terrain.  Feet are intentionally excluded.
+_TERRAIN_CONTACT_TERMINATION_SENSORS = (
+    "torso_contact",
+    "left_thigh_contact",
+    "right_thigh_contact",
+    "left_elbow_contact",
+    "right_elbow_contact",
+)
 
 
 @configclass
@@ -84,16 +96,26 @@ class G1TerrainMultiskillCLFEnvCfg(G1MultiSkillCLFEnvCfg):
         ##
         # Commands
         ##
-        # TODO: Pull the correct trajectories!
-        self.commands.traj_ref.path = "trajectories/retargeted/2026-04-10_11-41-19_merged"
+        self.commands.traj_ref.path = "trajectories/retargeted/2026-05-11_12-34-50_merged"
 
-        # TODO: Make it so that i have velocity dependent on terrain
         # Configure velocity ranges for different gaits
-        self.commands.base_velocity.ranges.lin_vel_x = (0.0, 3.7)
-        self.commands.base_velocity.ranges.lin_vel_y = (0, 0) #(-0.5, 0.5)
-        self.commands.base_velocity.ranges.ang_vel_z = (0, 0) #(-0.75, 0.75)
+        # self.commands.base_velocity.ranges.lin_vel_x = (0.0, 3.7)
+        # self.commands.base_velocity.ranges.lin_vel_y = (0, 0) #(-0.5, 0.5)
+        # self.commands.base_velocity.ranges.ang_vel_z = (0, 0) #(-0.75, 0.75)
         self.commands.base_velocity.ranges.heading = (-3.14,3.14)
         self.commands.base_velocity.resampling_time_range = (4.0, 8.0)
+
+        # Per-skill velocity ranges.  Keys MUST equal the terrain importer's
+        # ``skill_list`` exactly (validated at construction); the per-env skill
+        # is sampled from ``terrain.skill_probs`` and indexes into this dict.
+        # lin_vel_y / ang_vel_z default to (0, 0) — bump them later when the
+        # tasks need lateral / turning motion.
+        self.commands.base_velocity.velocity_buckets = {
+            "standing":     VelocityBucketCfg(lin_vel_x=(0.0, 0.1)),
+            "walk_forward": VelocityBucketCfg(lin_vel_x=(0.1, 1.5)),
+            "running":      VelocityBucketCfg(lin_vel_x=(1.5, 3.7)),
+            "stair_up":     VelocityBucketCfg(lin_vel_x=(0.4, 0.4)),
+        }
 
 
         ##
@@ -120,11 +142,40 @@ class G1TerrainMultiskillCLFEnvCfg(G1MultiSkillCLFEnvCfg):
         ##
         # Terrain
         ##
-        self.scene.terrain.terrain_type = "plane"
-        self.scene.terrain.terrain_generator = None
-        self.scene.height_scanner = None
+        base_terrain = self.scene.terrain
+        self.scene.terrain = MetaStairTerrainImporterCfg(
+            prim_path=base_terrain.prim_path,
+            terrain_type="generator",
+            terrain_generator=STAIR_WALK_CFG,
+            max_init_terrain_level=0,
+            collision_group=base_terrain.collision_group,
+            physics_material=base_terrain.physics_material,
+            visual_material=base_terrain.visual_material,
+            debug_vis=base_terrain.debug_vis,
+            skill_list=["stair_up", "walk_forward", "running", "standing"],
+        )
 
         self.commands.base_velocity.debug_vis = False
+
+        ##
+        # Terminations: end the episode if any non-foot body takes a hard hit.
+        # Threshold is set high enough that incidental self-collision doesn't
+        # trip it — only a real impact against the staircase will.
+        ##
+        for sensor_name in _TERRAIN_CONTACT_TERMINATION_SENSORS:
+            setattr(
+                self.terminations,
+                f"{sensor_name}_terrain",
+                DoneTerm(
+                    func=mdp.illegal_terrain_contact,
+                    params={"sensor_cfg": SceneEntityCfg(sensor_name), "threshold": 50.0},
+                ),
+            )
+
+        self.terminations.base_orientation = DoneTerm(
+            func=mdp.base_orientation,
+            params={"cmd_name": "traj_ref", "roll_limit_deg": 65.0, "pitch_limit_deg": 65.0},
+        )
 
 
 @configclass
@@ -137,11 +188,13 @@ class G1TerrainMultiskillCLFDistillationEnvCfg(G1TerrainMultiskillCLFEnvCfg):
         self.observations.critic.enable_corruption = False
 
         self.commands.base_velocity.resampling_time_range = (2.0, 6.0)
-        self.commands.base_velocity.velocity_buckets=[
-            VelocityBucketCfg(percentage=0.10, lin_vel_x=(0.0, 0.1)),   # Standing
-            VelocityBucketCfg(percentage=0.45, lin_vel_x=(0.1, 1.5)),   # Walking
-            VelocityBucketCfg(percentage=0.45, lin_vel_x=(1.5, 3.7)),   # Running
-        ]
+        # Per-skill velocity ranges are inherited from the parent
+        # ``G1TerrainMultiskillCLFEnvCfg``.  The old percentage-based bucket
+        # list no longer applies — under the terrain-driven sampler, the
+        # per-env skill distribution comes from ``terrain.skill_probs``
+        # rather than from cfg percentages.  Override individual buckets
+        # here (e.g. ``self.commands.base_velocity.velocity_buckets["running"]
+        # .lin_vel_x = (2.0, 3.5)``) if distillation needs tighter ranges.
         self.commands.base_velocity.max_acc = 1.0
         self.commands.base_velocity.max_acc_frac = 1.0
 

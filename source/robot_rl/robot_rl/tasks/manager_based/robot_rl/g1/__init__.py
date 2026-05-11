@@ -447,6 +447,26 @@ if not _registered:
         },
     )
 
+    # Multiskill terrain
+    gym.register(
+        id="G1-multiskill-terrain-clf",
+        entry_point="isaaclab.envs:ManagerBasedRLEnv",
+        disable_env_checker=True,
+        kwargs={
+            "env_cfg_entry_point": f"{__name__}.g1_terrain_multiskill_env_cfg:G1TerrainMultiskillCLFEnvCfg",
+            "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_rl_ppo_cfg:SymmetricHalfPeriodicPPORunnerCfg",
+        },
+    )
+
+    gym.register(
+        id="G1-multiskill-terrain-clf-play",
+        entry_point="isaaclab.envs:ManagerBasedRLEnv",
+        disable_env_checker=True,
+        kwargs={
+            "env_cfg_entry_point": f"{__name__}.g1_terrain_multiskill_env_cfg:G1TerrainMultiskillCLFEnvCfgPlay",
+            "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_rl_ppo_cfg:SymmetricHalfPeriodicPPORunnerCfg",
+        },
+    )
     _registered = True
 
 
