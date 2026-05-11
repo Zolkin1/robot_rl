@@ -66,6 +66,89 @@ def base_orientation(env, cmd_name: str, roll_limit_deg: float = 30.0, pitch_lim
     return (roll_err.abs() > roll_limit) | (pitch_err.abs() > pitch_limit)
 
 
+def frame_deviation_from_reference(
+    env,
+    cmd_name: str,
+    frame_names: list[str],
+    max_frac: float,
+    min_dist: float = 0.0,
+) -> torch.Tensor:
+    """Terminate when any listed frame deviates from its reference by more
+    than ``max(max_frac * chord, min_dist)``.
+
+    For each frame the deviation is the (ref-frame-local) position-error
+    norm ``||y_act_xyz - y_des_xyz||``.  The reference scale is the
+    **current domain's** Bezier chord length per frame
+    (``||last_cp - first_cp||``) — the same scalar the debug-viz sphere
+    uses.  Because stance frames have chord ≈ 0 in their stance domain,
+    ``min_dist`` (metres) sets an absolute floor on the threshold so
+    those frames don't terminate trivially.  The effective threshold per
+    env per frame is ``max(max_frac * chord, min_dist)``.
+
+    Args:
+        env: The IsaacLab environment.
+        cmd_name: Trajectory command term exposing ``y_act``, ``y_des``,
+            ``ordered_pos_output_names``, and a multiskill ``manager``.
+        frame_names: Frames to monitor.  Each must have
+            ``{frame_name}:pos_{x,y,z}`` in the command's
+            ``ordered_pos_output_names``.
+        max_frac: Allowed fractional deviation (e.g. ``0.5`` for 50%).
+        min_dist: Absolute minimum threshold in metres.  Default ``0.0``
+            disables the floor — set this above the noise floor / typical
+            stance-foot drift to avoid spurious termination.
+
+    Returns:
+        Boolean tensor of shape ``[num_envs]`` — ``True`` for envs that
+        should terminate this step.
+
+    Raises:
+        ValueError: If any name in ``frame_names`` lacks a complete
+            ``pos_{x,y,z}`` triplet in the command's outputs.
+    """
+    cmd = env.command_manager.get_term(cmd_name)
+    output_names = cmd.ordered_pos_output_names
+
+    pos_indices: list[list[int]] = []
+    missing: list[str] = []
+    for name in frame_names:
+        try:
+            xyz = [output_names.index(f"{name}:pos_{a}") for a in ("x", "y", "z")]
+        except ValueError:
+            missing.append(name)
+            continue
+        pos_indices.append(xyz)
+    if missing:
+        available = sorted({
+            n.split(":", 1)[0] for n in output_names
+            if ":pos_" in n and not n.startswith("joint:")
+        })
+        raise ValueError(
+            f"Frames {missing} do not have a full ``pos_{{x,y,z}}`` triplet "
+            f"in '{cmd_name}'.ordered_pos_output_names. "
+            f"Frames with a pos triplet available: {available}."
+        )
+
+    device = cmd.y_des.device
+    pos_idx_t = torch.tensor(pos_indices, dtype=torch.long, device=device)    # (F, 3)
+
+    # Position error per frame (ref-frame-local coords).
+    err = (cmd.y_act - cmd.y_des)[:, pos_idx_t]                                # (N, F, 3)
+    err_norm = torch.linalg.norm(err, dim=-1)                                  # (N, F)
+
+    # Current-domain chord per frame: ||last_cp - first_cp||.
+    manager = cmd.manager
+    traj_idx = manager.get_current_trajectory_indices()                        # (N,)
+    domain_idx = manager._get_domain_indices(manager.phase, traj_idx)          # (N,)
+    coeffs_pos = manager.data["coeffs_pos"][traj_idx, domain_idx]              # (N, P, K+1)
+    frame_coeffs = coeffs_pos[:, pos_idx_t, :]                                 # (N, F, 3, K+1)
+    chord_len = torch.linalg.norm(
+        frame_coeffs[..., -1] - frame_coeffs[..., 0], dim=-1
+    )                                                                           # (N, F)
+
+    threshold = torch.clamp(max_frac * chord_len, min=min_dist)                # (N, F)
+    return (err_norm > threshold).any(dim=-1)                                  # (N,)
+
+
 def illegal_terrain_contact(
     env, threshold: float, sensor_cfg: SceneEntityCfg
 ) -> torch.Tensor:

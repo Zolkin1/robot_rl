@@ -1,3 +1,5 @@
+import copy
+
 from isaaclab.utils import configclass
 from isaaclab.sensors import RayCasterCfg, patterns
 from isaaclab.managers import ObservationTermCfg as ObsTerm
@@ -241,10 +243,18 @@ class G1TerrainMultiskillCLFEnvCfgPlay(G1TerrainMultiskillCLFEnvCfg):
         self.scene.num_envs = 2
         self.scene.env_spacing = 2.5
         self.observations.policy.enable_corruption = False
-        self.scene.terrain.size = (3, 3)
-        self.scene.terrain.border_width = 0.0
-        self.scene.terrain.num_rows = 3
-        self.scene.terrain.num_cols = 2
+
+        # Shrink the play terrain.  The actual grid is driven by the
+        # ``terrain_generator`` (STAIR_WALK_CFG) — overriding fields on the
+        # importer cfg has no effect.  Deepcopy first so we don't mutate the
+        # shared module-level config used by the training env.
+        self.scene.terrain.terrain_generator = copy.deepcopy(
+            self.scene.terrain.terrain_generator
+        )
+        self.scene.terrain.terrain_generator.num_rows = 2
+        self.scene.terrain.terrain_generator.num_cols = 2
+        self.scene.terrain.terrain_generator.border_width = 0.0
+        self.scene.terrain.terrain_generator.inter_column_borders = []
 
         self.events.randomize_ground_contact_friction = None
         self.events.add_base_mass = None
@@ -253,3 +263,7 @@ class G1TerrainMultiskillCLFEnvCfgPlay(G1TerrainMultiskillCLFEnvCfg):
         self.events.push_robot = None
         self.events.gain_randomization = None
         # self.events.joint_friction_params = None  # Can't use this - friction goes out of distribution
+
+        self.commands.traj_ref.debug_vis = True
+        self.commands.base_velocity.debug_vis = True #False
+        self.scene.height_scanner.debug_vis = True

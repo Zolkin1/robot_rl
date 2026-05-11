@@ -170,9 +170,19 @@ class G1StairsCLFEnvCfg(G1MultiSkillCLFEnvCfg):
                 ),
             )
 
-        self.terminations.base_orientation = DoneTerm(
-            func=mdp.base_orientation,
-            params={"cmd_name": "traj_ref", "roll_limit_deg": 65.0, "pitch_limit_deg": 65.0},
+        # self.terminations.base_orientation = DoneTerm(
+        #     func=mdp.base_orientation,
+        #     params={"cmd_name": "traj_ref", "roll_limit_deg": 65.0, "pitch_limit_deg": 65.0},
+        # )
+
+        self.terminations.frame_drift = DoneTerm(
+          func=mdp.frame_deviation_from_reference,
+          params={
+              "cmd_name": "traj_ref",
+              "frame_names": ["pelvis_link", "left_ankle_roll_link", "right_ankle_roll_link"],
+              "max_frac": 0.25,
+              "min_dist": 0.1,
+          },
         )
 
 @configclass
@@ -192,7 +202,7 @@ class G1StairsCLFEnvCfg_PLAY(G1StairsCLFEnvCfg):
         self.scene.terrain.terrain_generator.num_rows = 1
         self.scene.terrain.terrain_generator.num_cols = self.scene.num_envs
 
-        self.episode_length_s = 8.0
+        self.episode_length_s = 2.0
 
         self.events.randomize_ground_contact_friction = None
         self.events.add_base_mass = None
