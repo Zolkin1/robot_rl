@@ -164,21 +164,25 @@ class G1TerrainMultiskillCLFEnvCfg(G1MultiSkillCLFEnvCfg):
         # Threshold is set high enough that incidental self-collision doesn't
         # trip it — only a real impact against the staircase will.
         ##
-        for sensor_name in _TERRAIN_CONTACT_TERMINATION_SENSORS:
-            setattr(
-                self.terminations,
-                f"{sensor_name}_terrain",
-                DoneTerm(
-                    func=mdp.illegal_terrain_contact,
-                    params={"sensor_cfg": SceneEntityCfg(sensor_name), "threshold": 50.0},
-                ),
-            )
+        # for sensor_name in _TERRAIN_CONTACT_TERMINATION_SENSORS:
+        #     setattr(
+        #         self.terminations,
+        #         f"{sensor_name}_terrain",
+        #         DoneTerm(
+        #             func=mdp.illegal_terrain_contact,
+        #             params={"sensor_cfg": SceneEntityCfg(sensor_name), "threshold": 50.0},
+        #         ),
+        #     )
 
-        self.terminations.base_orientation = DoneTerm(
-            func=mdp.base_orientation,
-            params={"cmd_name": "traj_ref", "roll_limit_deg": 65.0, "pitch_limit_deg": 65.0},
+        self.terminations.frame_drift = DoneTerm(
+          func=mdp.frame_deviation_from_reference,
+          params={
+              "cmd_name": "traj_ref",
+              "frame_names": ["pelvis_link", "left_ankle_roll_link", "right_ankle_roll_link"],
+              "max_frac": 0.3, #0.25,
+              "min_dist": 0.1,
+          },
         )
-
 
 @configclass
 class G1TerrainMultiskillCLFDistillationEnvCfg(G1TerrainMultiskillCLFEnvCfg):

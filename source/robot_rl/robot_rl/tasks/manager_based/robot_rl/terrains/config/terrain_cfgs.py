@@ -60,7 +60,7 @@ CUSTOM_STAIR_CFG = MetaTerrainGeneratorCfg(
 # under the centred layout to cover the same climb.  10 x 20 = 200 cells
 # distribute 4096 envs at ~20 envs/cell, matching the broadphase density the
 # default rough cfg is sized for.
-_LONG_STAIRS_NUM_STEPS = 70 #29
+_LONG_STAIRS_NUM_STEPS = 60
 _LONG_STAIRS_STEP_DEPTH = 0.233
 _LONG_STAIRS_STEP_HEIGHT = 0.135
 
@@ -110,7 +110,9 @@ STAIR_WALK_CFG = MetaTerrainGeneratorCfg(
             proportion=0.5,
             step_dim_options=[(_LONG_STAIRS_STEP_HEIGHT, _LONG_STAIRS_STEP_DEPTH)],
             stair_width_range=(1.5, 1.5),
-            origin_distance_from_back=(_LONG_STAIRS_NUM_STEPS // 2 + 0.5) * _LONG_STAIRS_STEP_DEPTH,
+            # Lowest stair top sits at z=0 (default ``start_z_zero=True``);
+            # spawn the env on stair 0 so the robot starts at ground level.
+            origin_distance_from_back=0.5 * _LONG_STAIRS_STEP_DEPTH,
             float_prob=0.0,
             wall_prob=0.0,
             pole_prob=0.0,
