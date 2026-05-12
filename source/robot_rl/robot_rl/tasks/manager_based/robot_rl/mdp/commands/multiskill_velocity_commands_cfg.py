@@ -58,6 +58,15 @@ class MultiskillVelocityTrackingCommandCfg(VelocityTrackingCommandCfg):
     the velocity within that skill's bucket. If None, skills are sampled
     independently from the per-env probability vector each resample."""
 
+    gate_skill_change_on_contact: bool = True
+    """If True (default), a freshly sampled skill that differs from the env's
+    current skill is buffered in a pending slot and only committed to
+    ``skill_id`` when the trajectory command fires a contact gate for that
+    env (a new foot landing).  Resamples that keep the same skill, or any
+    resample issued on the reset path (``episode_length_buf == 0``), commit
+    immediately.  Set to False to fall back to the legacy instant-skill-flip
+    behaviour."""
+
     max_acc_frac: float | None = None
     """Fraction of envs that have the ``max_acc`` clamp applied. If None, no
     envs are clamped (commanded velocity snaps directly to the sampled

@@ -144,15 +144,23 @@ def frame_deviation_from_reference(
     err = (cmd.y_act - cmd.y_des)[:, pos_idx_t]                                # (N, F, 3)
     err_norm = torch.linalg.norm(err, dim=-1)                                  # (N, F)
 
-    # Current-domain chord per frame: ||last_cp - first_cp||.
-    manager = cmd.manager
-    traj_idx = manager.get_current_trajectory_indices()                        # (N,)
-    domain_idx = manager._get_domain_indices(manager.phase, traj_idx)          # (N,)
-    coeffs_pos = manager.data["coeffs_pos"][traj_idx, domain_idx]              # (N, P, K+1)
-    frame_coeffs = coeffs_pos[:, pos_idx_t, :]                                 # (N, F, 3, K+1)
-    chord_len = torch.linalg.norm(
-        frame_coeffs[..., -1] - frame_coeffs[..., 0], dim=-1
-    )                                                                           # (N, F)
+    # Current-target chord per frame.  Prefer the cmd's accessor when it
+    # exists — for ``BatchedMultiSkillCommand`` that returns an
+    # alpha-blended chord during a cross-fade transition, keeping the
+    # scale consistent with the (likewise blended) ``y_des`` the numerator
+    # is measured against.  Fallback (single-skill commands without the
+    # accessor) computes the raw current-domain chord on the new traj.
+    if hasattr(cmd, "current_chord_per_frame"):
+        chord_len = cmd.current_chord_per_frame(pos_idx_t)                     # (N, F)
+    else:
+        manager = cmd.manager
+        traj_idx = manager.get_current_trajectory_indices()
+        domain_idx = manager._get_domain_indices(manager.phase, traj_idx)
+        coeffs_pos = manager.data["coeffs_pos"][traj_idx, domain_idx]
+        frame_coeffs = coeffs_pos[:, pos_idx_t, :]
+        chord_len = torch.linalg.norm(
+            frame_coeffs[..., -1] - frame_coeffs[..., 0], dim=-1
+        )                                                                       # (N, F)
 
     threshold = torch.clamp(max_frac * chord_len, min=min_dist)                # (N, F)
     terminate = (err_norm > threshold).any(dim=-1)                             # (N,)

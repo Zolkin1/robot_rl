@@ -184,7 +184,8 @@ class G1TerrainMultiskillCLFEnvCfg(G1MultiSkillCLFEnvCfg):
               "frame_names": ["pelvis_link", "left_ankle_roll_link", "right_ankle_roll_link"],
               "max_frac": 0.3, #0.25,
               "min_dist": 0.1,
-              "grace_period_s": 2.0,
+              "grace_period_s": 2.0, #2.0,    # TODO: This probably makes critic learning hard as sometimes these states terminate and sometimes they don't.
+                                        #   Depends on when traj was switched, which isn't an observation currently.
           },
         )
 
@@ -241,10 +242,7 @@ class G1TerrainMultiskillCLFEnvCfgPlay(G1TerrainMultiskillCLFEnvCfg):
         # self.commands.base_velocity.ranges.lin_vel_x = (1.1, 3.7)
         # self.commands.base_velocity.ranges.lin_vel_y = (-0.75, 0.75)
         # self.commands.base_velocity.ranges.ang_vel_z = (-0.75, 0.75)
-        # NOTE: ``resampling_time_range`` lives on the cfg root, not on
-        # ``ranges`` — setting ``ranges.resampling_time_range`` silently
-        # creates an unused attribute and the inherited training value
-        # (4.0, 8.0) keeps running.
+
         self.commands.base_velocity.resampling_time_range = (2.0, 2.0)
         self.commands.base_velocity.skill_transition_prob = 1.0
         self.commands.base_velocity.debug_vis = False
@@ -263,8 +261,8 @@ class G1TerrainMultiskillCLFEnvCfgPlay(G1TerrainMultiskillCLFEnvCfg):
         self.scene.terrain.terrain_generator = copy.deepcopy(
             self.scene.terrain.terrain_generator
         )
-        # self.scene.terrain.terrain_generator.num_rows = 2
-        # self.scene.terrain.terrain_generator.num_cols = 2
+        self.scene.terrain.terrain_generator.num_rows = self.scene.num_envs
+        self.scene.terrain.terrain_generator.num_cols = 4
         # self.scene.terrain.terrain_generator.border_width = 0.0
         # self.scene.terrain.terrain_generator.inter_column_borders = []
 

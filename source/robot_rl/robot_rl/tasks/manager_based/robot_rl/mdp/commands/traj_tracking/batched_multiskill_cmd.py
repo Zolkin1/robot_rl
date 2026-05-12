@@ -10,6 +10,7 @@ from isaaclab.utils.math import quat_apply, quat_from_angle_axis, yaw_quat
 from .base_trajectory_cmd import BaseTrajectoryCommand
 from .manager_base import ManagerBase
 from .multiskill_manager import MultiSkillManager
+from .skill_transition import blend_outputs
 
 
 # Per-frame color palette for debug viz cylinder prototypes. Cycled if there
@@ -125,8 +126,71 @@ class BatchedMultiSkillCommand(BaseTrajectoryCommand):
             (self.num_envs,), 1.0e6, device=self.device
         )
 
+        # --- Skill-transition cross-fade state ---------------------------
+        # Set when ``_apply_contact_gate`` fires a gate AND the velocity
+        # command had a pending skill change committed for that env.  The
+        # next ``_transform_desired_outputs`` calls blend the (synthetic-
+        # traj-idx) old trajectory output into the cached new trajectory
+        # output, weighted by ``transition_phi_elapsed / blend_end_phi``.
+        self.transition_active = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
+        self.transition_old_traj_idx = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
+        self.transition_phi_elapsed = torch.zeros(self.num_envs, device=self.device)
+        # Snapshot of ``manager.phase`` taken at the top of each
+        # ``_pre_update_phase`` so ``_transform_desired_outputs`` can
+        # compute the per-env phase delta (with periodic wrap).
+        self._phase_at_step_start = self.manager.phase.clone()
+
+        # --- Precomputed orientation-quat index groups for SLERP ---------
+        # For each body frame in the position outputs that has a complete
+        # (ori_x, ori_y, ori_z, ori_w) quartet, store the 4 column indices
+        # so the cross-fade can SLERP that quaternion instead of linearly
+        # blending it.  Frames without all four ori components are skipped.
+        ori_groups: list[list[int]] = []
+        for name in self.ordered_pos_output_names:
+            if ":ori_x" not in name:
+                continue
+            frame, _ = name.split(":", 1)
+            if frame == "joint":
+                continue
+            try:
+                quad = [
+                    self.ordered_pos_output_names.index(f"{frame}:ori_{a}")
+                    for a in ("x", "y", "z", "w")
+                ]
+            except ValueError:
+                continue
+            ori_groups.append(quad)
+        if ori_groups:
+            self._transition_quat_index_groups = torch.tensor(
+                ori_groups, dtype=torch.long, device=self.device
+            )
+        else:
+            self._transition_quat_index_groups = None
+
         # --- Contact-gate wiring -----------------------------------------
         self._gating_enabled = self.cfg.contact_gate_window_frac is not None
+
+        # If the contact gate is disabled but the velocity-command's pending
+        # mechanism is on, the pending queue can never drain — every
+        # cross-skill resample defers to a gate fire that will never happen,
+        # leaving the env locked on its initial skill.  Auto-disable
+        # ``gate_skill_change_on_contact`` on the conditioner to avoid the
+        # silent deadlock; the operator can re-enable it after also setting
+        # ``contact_gate_window_frac`` to a non-None value.
+        if not self._gating_enabled:
+            cond_term = self.env.command_manager.get_term(
+                self.cfg.conditioner_generator_name
+            )
+            if getattr(cond_term.cfg, "gate_skill_change_on_contact", False):
+                import logging
+                logging.getLogger(__name__).warning(
+                    "BatchedMultiSkillCommand: contact_gate_window_frac is None "
+                    "but conditioner '%s' has gate_skill_change_on_contact=True; "
+                    "pending skill changes would never commit.  Forcing "
+                    "gate_skill_change_on_contact=False for this run.",
+                    self.cfg.conditioner_generator_name,
+                )
+                cond_term.cfg.gate_skill_change_on_contact = False
 
         if self._gating_enabled:
             self.manager.set_gate_contact_layout(self.contact_bodies)
@@ -304,6 +368,7 @@ class BatchedMultiSkillCommand(BaseTrajectoryCommand):
 
             self.manager.snap_phase_to_new_domain(early_ids)
             self.manager.snap_phase_to_start_of_current_domain(late_ids)
+            fire_ids = torch.cat([early_ids, late_ids])
         else:
             # Hold-on mode: phase that crossed the gate without contact is
             # pulled back to the end of the old domain each step.  Contact
@@ -317,6 +382,199 @@ class BatchedMultiSkillCommand(BaseTrajectoryCommand):
 
             self.manager.snap_phase_to_end_of_previous_domain(end_prev_ids)
             self.manager.snap_phase_to_new_domain(new_dom_ids)
+            # Only the "new domain" snaps actually advance into a new
+            # cycle / half-cycle — those are the contact-switch events.
+            # End-of-previous-domain snaps are hold-back, not a contact
+            # landing, so they don't trigger a skill commit.
+            fire_ids = new_dom_ids
+
+        # If any of the envs that just fired a gate has a pending skill
+        # change buffered on the velocity command, commit it now and start
+        # the cross-fade.
+        if fire_ids.numel() > 0:
+            self._commit_pending_skill_change_and_start_transition(fire_ids, cur_traj)
+
+    def current_chord_per_frame(self, frame_pos_indices: torch.Tensor) -> torch.Tensor:
+        """Per-env per-frame Bezier chord length of the current target.
+
+        For envs not in an active transition this is just the new
+        trajectory's current-domain ``||last_cp - first_cp||`` per frame.
+        For envs that ARE transitioning, the chord is alpha-blended with
+        the old trajectory's current-domain chord using the same alpha
+        applied to ``y_des`` in :meth:`_transform_desired_outputs` —
+        ``(1 - alpha) * old_chord + alpha * new_chord``.  That keeps the
+        scale tensor used by
+        :func:`mdp.frame_deviation_from_reference` self-consistent with
+        the (possibly blended) ``y_des`` the same termination compares
+        against; the threshold morphs from pure-old to pure-new as the
+        blend progresses instead of jumping at gate-fire time.
+
+        Args:
+            frame_pos_indices: ``[F, 3]`` long tensor of column indices
+                into ``ordered_pos_output_names`` (xyz per frame).
+
+        Returns:
+            ``[N, F]`` chord length per env per frame.
+        """
+        mgr = self.manager
+
+        # New (target) chord — always.
+        traj_idx = mgr.get_current_trajectory_indices()
+        dom_idx = mgr._get_domain_indices(mgr.phase, traj_idx)
+        coeffs = mgr.data["coeffs_pos"][traj_idx, dom_idx]            # (N, P, K+1)
+        frame_coeffs = coeffs[:, frame_pos_indices, :]                # (N, F, 3, K+1)
+        new_chord = torch.linalg.norm(
+            frame_coeffs[..., -1] - frame_coeffs[..., 0], dim=-1
+        )                                                             # (N, F)
+
+        if (
+            self.cfg.transition_blend_end_phi <= 0.0
+            or not self.transition_active.any()
+        ):
+            return new_chord
+
+        # Old (fading-out) chord for transitioning envs only.
+        tx_ids = torch.where(self.transition_active)[0]                # (M,)
+        old_traj = self.transition_old_traj_idx[tx_ids]
+        phase_m = mgr.phase[tx_ids]
+        old_dom = mgr._get_domain_indices(phase_m, old_traj)
+        old_coeffs = mgr.data["coeffs_pos"][old_traj, old_dom]         # (M, P, K+1)
+        old_frame_coeffs = old_coeffs[:, frame_pos_indices, :]         # (M, F, 3, K+1)
+        old_chord = torch.linalg.norm(
+            old_frame_coeffs[..., -1] - old_frame_coeffs[..., 0], dim=-1
+        )                                                              # (M, F)
+
+        alpha = (
+            self.transition_phi_elapsed[tx_ids]
+            / self.cfg.transition_blend_end_phi
+        ).clamp(0.0, 1.0).unsqueeze(-1)                                # (M, 1)
+
+        blended = (1.0 - alpha) * old_chord + alpha * new_chord[tx_ids]
+        new_chord[tx_ids] = blended
+        return new_chord
+
+    def _commit_pending_skill_change_and_start_transition(
+        self, fire_ids: torch.Tensor, cur_traj_pre_commit: torch.Tensor,
+    ) -> None:
+        """Commit any pending skill change for ``fire_ids`` and start the
+        cross-fade transition for envs whose commit actually flipped the
+        skill.
+
+        Args:
+            fire_ids: ``[K]`` global env indices that just fired a contact
+                gate (early + late snaps).
+            cur_traj_pre_commit: ``[N]`` trajectory indices that were
+                current *before* the commit, used as the fade-out source.
+        """
+        cond_term = self.env.command_manager.get_term(self.cfg.conditioner_generator_name)
+        if not hasattr(cond_term, "commit_pending_skill_change"):
+            # Velocity command doesn't implement the pending mechanism
+            # (e.g. single-skill setups via a different conditioner).
+            return
+
+        committed_mask = cond_term.commit_pending_skill_change(fire_ids)
+        if not committed_mask.any():
+            return
+        commit_ids = fire_ids[committed_mask]
+
+        # Snapshot the pre-commit trajectory as the fade-out source.
+        self.transition_old_traj_idx[commit_ids] = cur_traj_pre_commit[commit_ids]
+        self.transition_phi_elapsed[commit_ids] = 0.0
+        self.transition_active[commit_ids] = True
+
+        # Force the manager to rebuild its trajectory assignment with the
+        # newly committed skill, then re-arm the contact gate for these envs
+        # so ``next_gate_idx`` points at the new trajectory's gate layout.
+        self.manager.invalidate_cache()
+        self.manager.get_current_trajectory_indices()
+        self.manager._reseed_gate_for_envs(commit_ids)
+
+    def _transform_desired_outputs(
+        self,
+        phase: torch.Tensor,
+        y_pos: torch.Tensor,
+        y_vel: torch.Tensor,
+        env_ids: torch.Tensor = None,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Cross-fade the cached new-trajectory outputs with the old skill's
+        trajectory outputs for envs in an active transition.
+
+        The single phase ``manager.phase`` (already passed in via ``phase``)
+        is used to sample BOTH the new trajectory (already done — that's
+        what ``y_pos``/``y_vel`` hold) and the old trajectory (computed
+        here via the synthetic-traj-idx trick).  ``alpha_blend`` ramps
+        from 0 (pure old) to 1 (pure new) over
+        ``cfg.transition_blend_end_phi`` worth of phase since the gate
+        fire, then the env exits the transition.
+        """
+        if self.cfg.transition_blend_end_phi <= 0.0 or not self.transition_active.any():
+            return y_pos, y_vel
+
+        # Resolve env-id subset alignment between transition_* (global) and
+        # the y_pos/y_vel batch (which may be a subset).
+        if env_ids is None:
+            subset_ids = torch.arange(self.num_envs, device=self.device)
+        else:
+            subset_ids = env_ids if isinstance(env_ids, torch.Tensor) else torch.as_tensor(
+                env_ids, dtype=torch.long, device=self.device
+            )
+        tx_mask = self.transition_active[subset_ids]
+        if not tx_mask.any():
+            return y_pos, y_vel
+
+        tx_global = subset_ids[tx_mask]                              # [M]
+        old_traj = self.transition_old_traj_idx[tx_global]            # [M]
+        phase_m = phase[tx_mask]                                      # [M]
+
+        # Evaluate the old trajectory at the same phase via the synthetic
+        # traj-idx trick.  ``_get_domain_indices`` and
+        # ``_compute_normalized_tau`` handle the old traj's domain layout
+        # and any half-periodic reflection.
+        mgr = self.manager
+        old_dom = mgr._get_domain_indices(phase_m, old_traj)
+        old_coeffs_pos = mgr.data["coeffs_pos"][old_traj, old_dom]
+        old_coeffs_vel = mgr.data["coeffs_vel"][old_traj, old_dom]
+        old_T_dom = mgr.data["domain_times"][old_traj, old_dom]
+        old_tau = mgr._compute_normalized_tau(phase_m, old_traj, old_dom)
+        y_pos_old = mgr._compute_bezier_batched(old_tau, old_coeffs_pos, old_T_dom, derivative=False)
+        y_vel_old = mgr._compute_bezier_batched(old_tau, old_coeffs_vel, old_T_dom, derivative=False)
+
+        # Per-env blend weight; clamp to [0, 1].
+        alpha = (
+            self.transition_phi_elapsed[tx_global]
+            / self.cfg.transition_blend_end_phi
+        ).clamp(0.0, 1.0)
+
+        y_pos_new = y_pos[tx_mask]
+        y_vel_new = y_vel[tx_mask]
+        y_pos_blended = blend_outputs(y_pos_old, y_pos_new, alpha, self._transition_quat_index_groups)
+        # Velocities have no quaternion components (vel outputs use angular
+        # velocity 3-vectors, not quats), so linear blend everywhere.
+        y_vel_blended = blend_outputs(y_vel_old, y_vel_new, alpha, None)
+
+        # Scatter back.  ``y_pos`` and ``y_vel`` are the caller-owned
+        # buffers; clone first so the caller's write to ``self.y_des``
+        # sees the blended values without aliasing the manager's output.
+        y_pos = y_pos.clone()
+        y_vel = y_vel.clone()
+        y_pos[tx_mask] = y_pos_blended
+        y_vel[tx_mask] = y_vel_blended
+
+        # Advance per-env transition phi.  Wrap-aware diff against the
+        # pre-step snapshot: if a snap happened this step the phase
+        # decreased — adding 1.0 recovers the natural delta.
+        phase_now = self.manager.phase[tx_global]
+        phase_prev = self._phase_at_step_start[tx_global]
+        delta = phase_now - phase_prev
+        delta = torch.where(delta < 0, delta + 1.0, delta)
+        self.transition_phi_elapsed[tx_global] = self.transition_phi_elapsed[tx_global] + delta
+
+        # End the transition for envs whose blend has saturated.
+        done = self.transition_phi_elapsed[tx_global] >= self.cfg.transition_blend_end_phi
+        if done.any():
+            self.transition_active[tx_global[done]] = False
+
+        return y_pos, y_vel
 
     def _pre_update_phase(self) -> None:
         """Advance ``manager.phase`` and run the contact gate.
@@ -347,6 +605,21 @@ class BatchedMultiSkillCommand(BaseTrajectoryCommand):
         """
         ep_len = self.env.episode_length_buf
 
+        # Clear any leftover cross-fade state on freshly reset envs.  The
+        # reset path doesn't go through CommandTerm.reset for this term, so
+        # without this clear an env could re-enter training with a stale
+        # transition_old_traj_idx and a non-zero transition_phi_elapsed.
+        just_reset = ep_len == 0
+        if just_reset.any():
+            self.transition_active[just_reset] = False
+            self.transition_phi_elapsed[just_reset] = 0.0
+
+        # Snapshot pre-advance phase so ``_transform_desired_outputs`` can
+        # compute a wrap-aware per-env phase delta to accumulate into
+        # ``transition_phi_elapsed``.  Captured here (idempotently per
+        # step) before ``update_phase`` and any gate snap mutate it.
+        self._phase_at_step_start = self.manager.phase.clone()
+
         in_window = (ep_len > 0) & (ep_len < self.env.max_episode_length)
         if self._last_compute_step is None:
             advance_mask = in_window
@@ -371,24 +644,6 @@ class BatchedMultiSkillCommand(BaseTrajectoryCommand):
         self.manager.invalidate_cache()
         self.manager.get_current_trajectory_indices()
 
-        # Update the post-traj-change grace timer.  Only advance the timer
-        # for envs that actually stepped this tick (``advance_mask``);
-        # idempotent-skip envs, fresh-reset envs, and done-this-step envs
-        # didn't accumulate sim time so their timer must not move.  Then
-        # reset to 0 for fresh resets and for envs the manager just
-        # swapped a trajectory on (covers within-skill bucket swaps and
-        # full skill changes — every skill change reassigns the
-        # trajectory).  Read by ``mdp.frame_deviation_from_reference`` to
-        # suppress termination during the grace window after a transition.
-        self.time_since_traj_change_s[advance_mask] = (
-            self.time_since_traj_change_s[advance_mask] + self.env.step_dt
-        )
-        if (ep_len == 0).any():
-            self.time_since_traj_change_s[ep_len == 0] = 0.0
-        traj_changed = self.manager._traj_changed
-        if traj_changed is not None and traj_changed.any():
-            self.time_since_traj_change_s[traj_changed] = 0.0
-
         if self._gating_enabled:
             # Re-arm the gate for envs that just changed trajectory.  Without
             # this, ``next_gate_idx`` stays bound to the old trajectory's
@@ -399,8 +654,51 @@ class BatchedMultiSkillCommand(BaseTrajectoryCommand):
                 changed_ids = torch.where(traj_changed)[0]
                 self.manager._reseed_gate_for_envs(changed_ids)
 
+            # Also reseed any env that is disarmed (``next_gate_idx == -1``)
+            # but whose current trajectory does have gates.  Catches the
+            # init state: ``_ensure_cache``'s first-call init sets
+            # ``_traj_changed = all False`` even when each env's selected
+            # traj differs from the freshly-zeroed ``_prev_global_indices``
+            # — so the block above never fires for these envs.  With the
+            # pending-skill mechanism deferring most resamples, the
+            # conditioner doesn't change → ``_traj_changed`` keeps reading
+            # False → the gate stays disarmed forever → no pending ever
+            # commits.  This catches that case for *any* env, not just
+            # post-traj-swap ones.
+            disarmed = self.manager.next_gate_idx == -1
+            if disarmed.any():
+                traj_idx_full = self.manager.get_current_trajectory_indices()
+                num_gates = self.manager._num_gates_per_traj[traj_idx_full]
+                needs_arm = disarmed & (num_gates > 0)
+                if needs_arm.any():
+                    arm_ids = torch.where(needs_arm)[0]
+                    self.manager._reseed_gate_for_envs(arm_ids)
+
             contact_now = self._read_contact_now()
             self._apply_contact_gate(contact_now)
+
+        # Update the post-traj-change grace timer.  Only advance the timer
+        # for envs that actually stepped this tick (``advance_mask``);
+        # idempotent-skip envs, fresh-reset envs, and done-this-step envs
+        # didn't accumulate sim time so their timer must not move.  Then
+        # reset to 0 for fresh resets and for envs the manager just
+        # swapped a trajectory on — covers both within-skill bucket swaps
+        # and full skill changes since the commit step inside
+        # ``_apply_contact_gate`` invalidates + rebuilds the cache, which
+        # re-populates ``_traj_changed`` against the still-unchanged
+        # ``_prev_global_indices``.  Placed AFTER the gate so we see
+        # post-commit changes; placed BEFORE ``commit_traj_state`` so
+        # ``_traj_changed`` is still meaningful.  Read by
+        # ``mdp.frame_deviation_from_reference`` to suppress termination
+        # during the grace window after a transition.
+        self.time_since_traj_change_s[advance_mask] = (
+            self.time_since_traj_change_s[advance_mask] + self.env.step_dt
+        )
+        if (ep_len == 0).any():
+            self.time_since_traj_change_s[ep_len == 0] = 0.0
+        traj_changed = self.manager._traj_changed
+        if traj_changed is not None and traj_changed.any():
+            self.time_since_traj_change_s[traj_changed] = 0.0
 
         # Commit the trajectory snapshot only after gate re-arm has read
         # ``_traj_changed``.  Subsequent intra-step ``_ensure_cache`` calls

@@ -54,6 +54,15 @@ class BatchedMultiSkillCommandCfg(BaseTrajectoryCommandCfg):
     """Net contact-force magnitude (N) above which a contact body is
     considered in contact for gating purposes."""
 
+    transition_blend_end_phi: float = 1.0
+    """Phi window over which the post-skill-change cross-fade ramps from the
+    old skill's trajectory to the new skill's trajectory.  At gate-fire
+    time the per-env ``alpha_blend = 0`` (pure old); after
+    ``transition_blend_end_phi`` worth of (new-trajectory) phase has
+    elapsed, ``alpha_blend = 1`` and the env tracks pure new output.
+    Set to ``0`` to disable cross-fading entirely (gate-only behaviour:
+    skill commit at the gate, but no blend afterwards)."""
+
     hold_on_late_contact: bool = False
     """If ``True``, when phase has crossed the gate boundary without an
     expected contact each step pulls the phase back to

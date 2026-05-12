@@ -51,8 +51,28 @@ def reset_on_reference(
     # Get the robot asset and trajectory command
     asset: Articulation = env.scene[asset_cfg.name]
     cmd = env.command_manager.get_term(command_name)
-    env.command_manager.get_term(conditioner_command_name)._resample(env_ids)   #     env.command_manager.get_term(conditioner_command_name).reset(env_ids)
-    env.command_manager.get_term(conditioner_command_name)._update_command()
+    cond_term = env.command_manager.get_term(conditioner_command_name)
+    # Flip the reset-event mask True around the conditioner resample so the
+    # velocity command's ``_resample_command`` can detect that we're on the
+    # reset path.  IsaacLab zeros ``episode_length_buf`` *after* reset
+    # events run, so ``ep_len == 0`` alone is unreliable here.  The flag is
+    # cleared right after so subsequent regular resamples see it False.
+    if hasattr(cond_term, "_reset_env_mask"):
+        cond_term._reset_env_mask[env_ids] = True
+    cond_term._resample(env_ids)
+    # Snap the ramped target ``vel_target_b`` to the freshly sampled value
+    # before ``_update_command`` runs.  The parent ``CommandTerm`` snap
+    # (``cmd.reset``) is gated on ``time_left <= 0``, but ``_resample`` above
+    # has already reset ``time_left`` to ``resampling_time_range``, so that
+    # path would silently skip the snap on reset.  Without this, the
+    # max-acc clamp inside ``_update_command`` ramps the new episode's
+    # commanded velocity from the previous episode's final value, which is
+    # meaningless across a reset discontinuity.
+    if hasattr(cond_term, "vel_target_b") and hasattr(cond_term, "vel_target_sampled_b"):
+        cond_term.vel_target_b[env_ids] = cond_term.vel_target_sampled_b[env_ids]
+    cond_term._update_command()
+    if hasattr(cond_term, "_reset_env_mask"):
+        cond_term._reset_env_mask[env_ids] = False
     num_env = len(env_ids)
 
     if num_env == 0:
