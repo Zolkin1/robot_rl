@@ -116,6 +116,15 @@ class BatchedMultiSkillCommand(BaseTrajectoryCommand):
         # advance + gate.
         self._last_compute_step: torch.Tensor | None = None
 
+        # Per-env seconds since the last trajectory change (or fresh
+        # episode reset).  Initialised large so the very first compute is
+        # not treated as "just changed".  Read by
+        # ``mdp.frame_deviation_from_reference`` to suppress its
+        # termination during the post-transition grace window.
+        self.time_since_traj_change_s = torch.full(
+            (self.num_envs,), 1.0e6, device=self.device
+        )
+
         # --- Contact-gate wiring -----------------------------------------
         self._gating_enabled = self.cfg.contact_gate_window_frac is not None
 
@@ -361,6 +370,24 @@ class BatchedMultiSkillCommand(BaseTrajectoryCommand):
         # ``MultiSkillManager.commit_traj_state``.
         self.manager.invalidate_cache()
         self.manager.get_current_trajectory_indices()
+
+        # Update the post-traj-change grace timer.  Only advance the timer
+        # for envs that actually stepped this tick (``advance_mask``);
+        # idempotent-skip envs, fresh-reset envs, and done-this-step envs
+        # didn't accumulate sim time so their timer must not move.  Then
+        # reset to 0 for fresh resets and for envs the manager just
+        # swapped a trajectory on (covers within-skill bucket swaps and
+        # full skill changes — every skill change reassigns the
+        # trajectory).  Read by ``mdp.frame_deviation_from_reference`` to
+        # suppress termination during the grace window after a transition.
+        self.time_since_traj_change_s[advance_mask] = (
+            self.time_since_traj_change_s[advance_mask] + self.env.step_dt
+        )
+        if (ep_len == 0).any():
+            self.time_since_traj_change_s[ep_len == 0] = 0.0
+        traj_changed = self.manager._traj_changed
+        if traj_changed is not None and traj_changed.any():
+            self.time_since_traj_change_s[traj_changed] = 0.0
 
         if self._gating_enabled:
             # Re-arm the gate for envs that just changed trajectory.  Without

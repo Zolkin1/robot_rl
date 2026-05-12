@@ -72,6 +72,7 @@ def frame_deviation_from_reference(
     frame_names: list[str],
     max_frac: float,
     min_dist: float = 0.0,
+    grace_period_s: float = 0.0,
 ) -> torch.Tensor:
     """Terminate when any listed frame deviates from its reference by more
     than ``max(max_frac * chord, min_dist)``.
@@ -96,6 +97,14 @@ def frame_deviation_from_reference(
         min_dist: Absolute minimum threshold in metres.  Default ``0.0``
             disables the floor — set this above the noise floor / typical
             stance-foot drift to avoid spurious termination.
+        grace_period_s: Seconds after a trajectory swap (within-skill bucket
+            swap or full skill change) and after a fresh episode reset
+            during which this termination is suppressed.  Reads
+            ``cmd.time_since_traj_change_s`` (populated by
+            ``BatchedMultiSkillCommand._pre_update_phase``).  Default 0
+            disables the grace.  Silently no-ops if the command term does
+            not expose ``time_since_traj_change_s`` (e.g. single-skill
+            commands).
 
     Returns:
         Boolean tensor of shape ``[num_envs]`` — ``True`` for envs that
@@ -146,7 +155,14 @@ def frame_deviation_from_reference(
     )                                                                           # (N, F)
 
     threshold = torch.clamp(max_frac * chord_len, min=min_dist)                # (N, F)
-    return (err_norm > threshold).any(dim=-1)                                  # (N,)
+    terminate = (err_norm > threshold).any(dim=-1)                             # (N,)
+
+    if grace_period_s > 0.0:
+        time_since = getattr(cmd, "time_since_traj_change_s", None)
+        if time_since is not None:
+            terminate = terminate & (time_since >= grace_period_s)
+
+    return terminate
 
 
 def illegal_terrain_contact(
