@@ -198,12 +198,13 @@ class BaseTrajectoryCommand(CommandTerm):
         """Return the left-right symmetric reflection of *contacts*.
 
         Args:
-            contacts: ``[N, num_contacts]`` contact states.
+            contacts: ``[N, num_contacts]`` or
+                ``[N, history_length * num_contacts]`` contact states.
 
         Returns:
             Symmetric contacts of the same shape.
         """
-        return self._contact_reflector.reflect(contacts)
+        return self._contact_reflector.reflect_with_history(contacts)
 
     # ------------------------------------------------------------------
     # Trajectory type
@@ -434,14 +435,16 @@ class BaseTrajectoryCommand(CommandTerm):
         Swaps left/right outputs and negates pos_y, ori_x, ori_z, roll, yaw.
 
         Args:
-            traj: ``[N, num_outputs]`` trajectory tensor.
+            traj: ``[N, num_outputs]`` or ``[N, history_length * num_outputs]``
+                trajectory tensor.  The history-stacked layout shows up when
+                the corresponding obs term has ``history_length > 1``.
             traj_type: ``"vel"`` or ``"pos"`` to select the output name list.
 
         Returns:
             Symmetric trajectory of the same shape.
         """
         reflector = self._traj_vel_reflector if traj_type == "vel" else self._traj_pos_reflector
-        return reflector.reflect(traj)
+        return reflector.reflect_with_history(traj)
 
     # ------------------------------------------------------------------
     # CommandTerm interface
