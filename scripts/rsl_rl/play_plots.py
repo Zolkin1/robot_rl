@@ -255,24 +255,40 @@ def plot_skill_and_terrain(
     save_dir: str,
     env_ids: list[int],
 ) -> None:
-    """Per-env step plot of the sampled skill and the current terrain (row, col).
+    """Per-env step plot of the skill state and current terrain cell.
 
-    Two stacked subplots sharing a time x-axis:
+    Three stacked subplots sharing a time x-axis:
 
-      * top: the velocity-command's per-env ``skill_id`` over time, with the
-        y-axis labelled by skill name (e.g. ``stair_up``, ``walk_forward``).
-      * bottom: the env's current terrain ``row`` and ``col`` as step lines.
-        Border-column ranges (from ``MetaTerrainImporter._spawnable_columns``)
-        are shaded so it's obvious when the robot wanders onto an
-        unspawnable strip.
+      * **Skills overlay**: three series on a y-axis labelled by skill
+        name —
+          - ``active_skill_id`` (solid) — what the trajectory cmd's
+            ``MultiSkillManager`` is filtering trajectories on; this is
+            the bucket the *ramped* ``vel_target_b`` is in.
+          - ``sampled_skill_id`` (dashed) — what the velocity cmd most
+            recently sampled (informational; can lead the active skill
+            across the ``max_acc`` ramp + gate-on-contact defer window).
+          - ``pending_skill_id`` (dotted, drawn only where ≥ 0) — the
+            bucket queued on ``traj_ref.pending``, awaiting a contact
+            gate fire.
+        Falls back to a single ``skill_id`` series if running against an
+        old log without the split keys.
+      * **Terrain row/col**: row + col step lines; border-column ranges
+        shaded.
+      * **Trajectory index** (when available): per-env ``traj_idx`` as
+        a step plot.  Annotated with the per-traj name for indices that
+        actually appear in the trace.
 
-    Skips silently if the env didn't expose either ``skill_id`` or
-    ``terrain_row``/``terrain_col``.
+    Skips silently if no relevant data was logged.
     """
-    has_skill = "skill_id" in data
+    has_active = "active_skill_id" in data
+    has_sampled = "sampled_skill_id" in data
+    has_pending = "pending_skill_id" in data
+    has_skill_legacy = (not has_active) and ("skill_id" in data)
+    has_skill = has_active or has_skill_legacy or has_sampled
     has_terrain = "terrain_row" in data and "terrain_col" in data
-    if not has_skill and not has_terrain:
-        print("[WARN plot_skill_and_terrain] No skill or terrain data, skipping.")
+    has_traj = "traj_idx" in data
+    if not (has_skill or has_terrain or has_traj):
+        print("[WARN plot_skill_and_terrain] No skill / terrain / traj data, skipping.")
         return
 
     dt = metadata.get("dt", 1.0)
@@ -280,6 +296,7 @@ def plot_skill_and_terrain(
     border_cols = metadata.get("border_cols", [])
     num_cols = metadata.get("terrain_num_cols")
     num_rows = metadata.get("terrain_num_rows")
+    per_traj_names = metadata.get("per_traj_names")
 
     # Pre-compute the contiguous border-col ranges for axhspan shading.
     border_spans: list[tuple[int, int]] = []
@@ -294,14 +311,19 @@ def plot_skill_and_terrain(
                 start = prev = c
         border_spans.append((start, prev))
 
-    skill_arr = data.get("skill_id")
-    row_arr = data.get("terrain_row")
-    col_arr = data.get("terrain_col")
-    n_steps = (skill_arr if skill_arr is not None else row_arr).shape[0]
+    # Pick a representative array to derive n_steps from.
+    n_steps_source = (
+        data.get("active_skill_id")
+        if has_active else data.get("skill_id")
+        if has_skill_legacy else data.get("sampled_skill_id")
+        if has_sampled else data.get("terrain_row")
+        if has_terrain else data.get("traj_idx")
+    )
+    n_steps = n_steps_source.shape[0]
     time_s = np.arange(n_steps) * dt
 
     for env_id in env_ids:
-        nplots = int(has_skill) + int(has_terrain)
+        nplots = int(has_skill) + int(has_terrain) + int(has_traj)
         fig, axs = plt.subplots(nplots, 1, figsize=(10, 3 * nplots), sharex=True)
         if nplots == 1:
             axs = [axs]
@@ -310,20 +332,44 @@ def plot_skill_and_terrain(
         ax_idx = 0
         if has_skill:
             ax = axs[ax_idx]
-            ax.step(time_s, skill_arr[:, env_id], where="post", linewidth=2)
+            if has_active:
+                ax.step(
+                    time_s, data["active_skill_id"][:, env_id], where="post",
+                    linewidth=2.0, color="C0", label="active (traj_ref)",
+                )
+            if has_sampled:
+                ax.step(
+                    time_s, data["sampled_skill_id"][:, env_id], where="post",
+                    linewidth=1.5, linestyle="--", color="C1",
+                    label="sampled (base_velocity)",
+                )
+            if has_pending:
+                pending = data["pending_skill_id"][:, env_id].astype(float)
+                pending_masked = np.where(pending >= 0, pending, np.nan)
+                ax.step(
+                    time_s, pending_masked, where="post",
+                    linewidth=1.5, linestyle=":", color="C3",
+                    label="pending (traj_ref)",
+                )
+            if has_skill_legacy:
+                ax.step(
+                    time_s, data["skill_id"][:, env_id], where="post",
+                    linewidth=2.0, label="skill_id",
+                )
             ax.set_ylabel("Skill")
-            ax.set_title("Sampled skill")
+            ax.set_title("Skill state")
             ax.grid(True, alpha=0.3)
             if skill_list:
                 ax.set_yticks(range(len(skill_list)))
                 ax.set_yticklabels(skill_list)
                 ax.set_ylim(-0.5, len(skill_list) - 0.5)
+            ax.legend(loc="upper right", fontsize=8)
             ax_idx += 1
 
         if has_terrain:
             ax = axs[ax_idx]
-            ax.step(time_s, row_arr[:, env_id], where="post", linewidth=2, label="row")
-            ax.step(time_s, col_arr[:, env_id], where="post", linewidth=2, label="col")
+            ax.step(time_s, data["terrain_row"][:, env_id], where="post", linewidth=2, label="row")
+            ax.step(time_s, data["terrain_col"][:, env_id], where="post", linewidth=2, label="col")
             for lo, hi in border_spans:
                 ax.axhspan(lo - 0.5, hi + 0.5, color="grey", alpha=0.15,
                            label="border cols" if (lo, hi) == border_spans[0] else None)
@@ -331,16 +377,163 @@ def plot_skill_and_terrain(
             ax.set_title("Current terrain cell")
             ax.grid(True, alpha=0.3)
             ax.legend(loc="upper right", fontsize=8)
-            # Force integer ticks; bound to known grid size if available.
             if num_rows is not None and num_cols is not None:
                 ax.set_ylim(-0.5, max(num_rows, num_cols) - 0.5)
             ax.yaxis.set_major_locator(plt.MaxNLocator(integer=True))
+            ax_idx += 1
+
+        if has_traj:
+            ax = axs[ax_idx]
+            traj_series = data["traj_idx"][:, env_id]
+            ax.step(time_s, traj_series, where="post", linewidth=2)
+            ax.set_ylabel("Trajectory index")
+            ax.set_title("Active trajectory")
+            ax.grid(True, alpha=0.3)
+            ax.yaxis.set_major_locator(plt.MaxNLocator(integer=True))
+            # Annotate the per-traj YAML name for indices that actually appear.
+            if per_traj_names:
+                seen = sorted(set(int(v) for v in np.unique(traj_series)))
+                ax.set_yticks(seen)
+                ax.set_yticklabels(
+                    [per_traj_names[i] if 0 <= i < len(per_traj_names) else str(i)
+                     for i in seen],
+                    fontsize=7,
+                )
             ax_idx += 1
 
         axs[-1].set_xlabel("Time (s)")
         plt.tight_layout(rect=[0, 0.03, 1, 0.95])
         plt.savefig(os.path.join(save_dir, f"skill_and_terrain_env{env_id}.png"),
                     dpi=300, bbox_inches="tight")
+        plt.close(fig)
+
+
+def plot_skill_transition_diag(
+    data: dict[str, np.ndarray],
+    metadata: dict[str, Any],
+    save_dir: str,
+    env_ids: list[int],
+) -> None:
+    """Cross-fade diagnostics: alpha + (old, new, blended) y_des overlay.
+
+    For each env, renders:
+
+    * Top row, full width: ``transition.alpha`` over time with shaded
+      bands wherever ``transition.active`` is True so the transition
+      windows are obvious at a glance.
+    * Grid of subplots (one per logged output dimension) overlaying:
+        - actual ``y_des`` (solid, what the policy / rewards see).
+        - ``y_des_new_only`` (dashed, alpha=1 → the new trajectory only).
+        - ``y_des_old_only`` (dotted, alpha=0 → the old fading-out trajectory).
+      Both "_only" curves match ``y_des`` outside transition windows
+      (no blend → only the new traj is evaluated, helper returns y_new
+      for either alpha override).  Inside a transition the three curves
+      diverge and ``y_des`` interpolates between the dotted (old) and
+      dashed (new) according to alpha.
+
+    Skips silently when ``y_des_new_only`` / ``y_des_old_only`` aren't
+    in ``data`` (env wasn't a multiskill-cross-fade env, or the logger
+    couldn't read the transition state).
+    """
+    required = ["y_des", "y_des_new_only", "y_des_old_only", "transition_alpha"]
+    missing = [k for k in required if k not in data]
+    if missing:
+        print(
+            "[WARN plot_skill_transition_diag] Missing data keys "
+            f"{missing}, skipping."
+        )
+        return
+
+    y_des = data["y_des"]                       # [T, N, P]
+    y_des_new = data["y_des_new_only"]          # [T, N, P]
+    y_des_old = data["y_des_old_only"]          # [T, N, P]
+    alpha = data["transition_alpha"]            # [T, N] (-1 when inactive)
+    active = data.get("transition_active")      # [T, N] bool, optional
+
+    dt = metadata.get("dt", 1.0)
+    names = metadata.get(
+        "pos_names", [f"Dim {i}" for i in range(y_des.shape[2])]
+    )
+    n_dims = y_des.shape[2]
+    n_cols = 4
+    n_rows = max(1, (n_dims + n_cols - 1) // n_cols)
+    time_s = np.arange(y_des.shape[0]) * dt
+
+    for env_id in env_ids:
+        a = alpha[:, env_id]
+        a_masked = np.where(a >= 0.0, a, np.nan)
+        is_active = (
+            active[:, env_id].astype(bool)
+            if active is not None else (a >= 0.0)
+        )
+
+        # Contiguous transition windows for axvspan shading.
+        windows: list[tuple[float, float]] = []
+        i = 0
+        T = is_active.shape[0]
+        while i < T:
+            if is_active[i]:
+                j = i
+                while j < T and is_active[j]:
+                    j += 1
+                windows.append((time_s[i], time_s[j - 1]))
+                i = j
+            else:
+                i += 1
+
+        fig = plt.figure(figsize=(5 * n_cols, 3 * (n_rows + 1)))
+        gs = fig.add_gridspec(n_rows + 1, n_cols, hspace=0.45, wspace=0.3)
+        fig.suptitle(
+            f"Skill Transition Diagnostics (Env {env_id})", fontsize=16
+        )
+
+        # --- Top row: alpha + transition windows -------------------------
+        ax0 = fig.add_subplot(gs[0, :])
+        for w_lo, w_hi in windows:
+            ax0.axvspan(w_lo, w_hi, color="orange", alpha=0.15)
+        ax0.plot(
+            time_s, a_masked, color="C3", linewidth=2,
+            label="transition alpha (0=old, 1=new)",
+        )
+        ax0.set_ylim(-0.05, 1.05)
+        ax0.set_xlabel("Time (s)")
+        ax0.set_ylabel("Alpha")
+        ax0.set_title("Cross-fade alpha (shaded = transition active)")
+        ax0.grid(True, alpha=0.3)
+        ax0.legend(loc="upper right", fontsize=9)
+
+        # --- Per-dimension overlay ----------------------------------------
+        for i_dim in range(n_dims):
+            r = (i_dim // n_cols) + 1
+            c = i_dim % n_cols
+            ax = fig.add_subplot(gs[r, c])
+            for w_lo, w_hi in windows:
+                ax.axvspan(w_lo, w_hi, color="orange", alpha=0.10)
+            ax.plot(
+                time_s, y_des_old[:, env_id, i_dim],
+                color="C0", linestyle=":", linewidth=1.5, label="old (α=0)",
+            )
+            ax.plot(
+                time_s, y_des_new[:, env_id, i_dim],
+                color="C2", linestyle="--", linewidth=1.5, label="new (α=1)",
+            )
+            ax.plot(
+                time_s, y_des[:, env_id, i_dim],
+                color="C3", linewidth=2.0, label="blended (y_des)",
+            )
+            name = names[i_dim] if i_dim < len(names) else f"Dim {i_dim}"
+            unit = _unit_for_name(name)
+            ax.set_title(name, fontsize=9)
+            ax.set_xlabel("Time (s)")
+            ax.set_ylabel(unit if unit else "")
+            ax.grid(True, alpha=0.3)
+            if i_dim == 0:
+                ax.legend(loc="upper right", fontsize=7)
+
+        plt.savefig(
+            os.path.join(save_dir, f"skill_transition_diag_env{env_id}.png"),
+            dpi=300, bbox_inches="tight",
+        )
         plt.close(fig)
 
 
@@ -828,6 +1021,7 @@ PLOT_REGISTRY: dict[str, Callable] = {
     "torques": plot_torques,
     "base_velocity": plot_base_velocity,
     "skill_and_terrain": plot_skill_and_terrain,
+    "skill_transition_diag": plot_skill_transition_diag,
     "domain_info": plot_domain_info,
     "reference_frame": plot_reference_frame,
     "clf": plot_clf,

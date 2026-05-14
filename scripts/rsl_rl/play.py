@@ -13,6 +13,7 @@ import sys
 import time
 
 import gymnasium as gym
+import numpy as np
 import torch
 from packaging import version
 from rsl_rl.runners import DistillationRunner, OnPolicyRunner
@@ -50,6 +51,46 @@ with contextlib.suppress(ImportError):
 parser = argparse.ArgumentParser(description="Train an RL agent with RSL-RL.")
 parser.add_argument("--video", action="store_true", default=False, help="Record videos during training.")
 parser.add_argument("--video_length", type=int, default=200, help="Length of the recorded video (in steps).")
+parser.add_argument(
+    "--video_resolution", type=str, default="1920x1080",
+    help='Recording resolution as "WxH" (e.g. "1920x1080", "2560x1440"). '
+         "Overrides env_cfg.viewer.resolution.  Higher = sharper but slower.",
+)
+parser.add_argument(
+    "--video_follow_robot", action="store_true", default=True,
+    help="Lock the recording camera to the robot (origin_type=asset_root). "
+         "Default on; pass --no-video_follow_robot to keep the static world camera.",
+)
+parser.add_argument("--no-video_follow_robot", dest="video_follow_robot", action="store_false")
+parser.add_argument(
+    "--video_eye", type=float, nargs=3, default=(0.0, 5.0, 0.8), metavar=("X", "Y", "Z"),
+    help="Camera eye offset from the robot root when --video_follow_robot is set (m). "
+         "Default is a side view: 5 m off the robot's +y axis at ~hip+0.5 height. "
+         "Interpreted in world frame by default; pass --video_track_yaw to rotate the "
+         "offset into the robot's heading frame (camera stays on the robot's left).",
+)
+parser.add_argument(
+    "--video_lookat", type=float, nargs=3, default=(0.0, 0.0, 0.3), metavar=("X", "Y", "Z"),
+    help="Camera lookat offset from the robot root when --video_follow_robot is set (m). "
+         "Default aims at root_pos + 0.2 m (the robot's centroid for a G1 / humanoid). "
+         "If the robot is missing from frame, this is the first knob to adjust.",
+)
+parser.add_argument(
+    "--video_focal_length", type=float, default=24.0,
+    help="USD camera focal length (mm) — controls zoom / FOV.  Smaller = wider angle. "
+         "Default 24 mm (~74° horizontal FOV with the standard 35 mm aperture); "
+         "drop to ~18 for very wide, raise to 35–50 for telephoto.",
+)
+parser.add_argument(
+    "--video_env_index", type=int, default=0,
+    help="Which env to follow when --video_follow_robot is set (default 0).",
+)
+parser.add_argument(
+    "--video_track_yaw", action="store_true", default=False,
+    help="Rotate the camera eye/lookat offsets into the robot's heading frame "
+         "so the relative view (e.g. side view) stays consistent across turns. "
+         "Default off — offsets are world-aligned.",
+)
 parser.add_argument(
     "--disable_fabric", action="store_true", default=False, help="Disable fabric and use USD I/O operations."
 )
@@ -141,6 +182,64 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
 
         # set the log directory for the environment
         env_cfg.log_dir = log_dir
+
+        # Apply video-recording knobs to the viewer cfg before env construction.
+        # ``env_cfg.viewer.resolution`` is the offscreen-render product size the
+        # ``rgb_array`` render path reads from (see manager_based_rl_env.py:286).
+        # We also create a dedicated USD camera prim and point the render
+        # product at it so the recording is decoupled from the GUI viewport
+        # ``/OmniverseKit_Persp``.  The viewer cfg's built-in tracking
+        # (``origin_type=asset_root``) drives the persp cam via
+        # ``sim.set_camera_view`` → ``visualizer._set_viewport_camera``, which
+        # writes to the visualizer's pinned camera path, *not* whatever
+        # ``cam_prim_path`` we point the render product at.  So we set
+        # ``origin_type="world"`` to disable that tracking and instead drive
+        # the recording camera ourselves from the main loop using
+        # ``isaacsim.core.utils.viewports.set_camera_view`` (which writes the
+        # USD transform on the prim path we give it).  No render products are
+        # ever created during training, so this whole branch is a no-op there.
+        record_cam_state = None  # populated below if --video; consumed in the loop
+        if args_cli.video:
+            try:
+                w_str, h_str = args_cli.video_resolution.lower().split("x")
+                env_cfg.viewer.resolution = (int(w_str), int(h_str))
+            except (ValueError, AttributeError) as exc:
+                raise SystemExit(
+                    f"--video_resolution must be 'WxH', got '{args_cli.video_resolution}': {exc}"
+                )
+
+            from pxr import UsdGeom
+            import omni.usd
+
+            stage = omni.usd.get_context().get_stage()
+            recording_cam_path = "/World/RecordingCam"
+            cam_prim = stage.GetPrimAtPath(recording_cam_path)
+            if not cam_prim.IsValid():
+                cam_prim = UsdGeom.Camera.Define(stage, recording_cam_path).GetPrim()
+            # Dial the focal length on the USD camera so the framing isn't
+            # the default telephoto.  ``horizontalAperture`` stays at the
+            # USD default (20.955 mm, 35 mm-equivalent); focal length is
+            # the per-shot zoom knob.
+            UsdGeom.Camera(cam_prim).GetFocalLengthAttr().Set(args_cli.video_focal_length)
+            env_cfg.viewer.cam_prim_path = recording_cam_path
+            # Disable the built-in asset tracker — it would move /OmniverseKit_Persp,
+            # not our recording cam.  We drive the recording cam ourselves below.
+            env_cfg.viewer.origin_type = "world"
+
+            record_cam_state = {
+                "prim_path": recording_cam_path,
+                "eye_offset": np.asarray(args_cli.video_eye, dtype=float),
+                "lookat_offset": np.asarray(args_cli.video_lookat, dtype=float),
+                "env_index": args_cli.video_env_index,
+                "follow_robot": args_cli.video_follow_robot,
+                "track_yaw": args_cli.video_track_yaw,
+            }
+            print(
+                f"[INFO] Video recording: {env_cfg.viewer.resolution[0]}x{env_cfg.viewer.resolution[1]}"
+                f" via dedicated USD camera '{recording_cam_path}'"
+                + (f", following robot in env {args_cli.video_env_index}"
+                   if args_cli.video_follow_robot else ", static world camera")
+            )
 
         # create isaac environment
         env = gym.make(args_cli.task, cfg=env_cfg, render_mode="rgb_array" if args_cli.video else None)
@@ -266,6 +365,37 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         try:
             while True:
                 start_time = time.time()
+                # Drive the dedicated recording camera before the step so
+                # the next render (triggered inside env.step via
+                # RecordVideo) reads a fresh transform.  Writes directly to
+                # the USD prim via Isaac Sim's viewport util — render
+                # products read the prim transform, no viewport_api needed.
+                if record_cam_state is not None and record_cam_state["follow_robot"]:
+                    robot = env.unwrapped.scene.articulations["robot"]
+                    import warp as wp
+                    env_idx = record_cam_state["env_index"]
+                    root_pos_w = wp.to_torch(robot.data.root_pos_w)[
+                        env_idx, :3
+                    ].detach().cpu().numpy()
+                    eye_off = record_cam_state["eye_offset"]
+                    lookat_off = record_cam_state["lookat_offset"]
+                    if record_cam_state["track_yaw"]:
+                        # Rotate the offsets by the robot's yaw so e.g. a
+                        # side-view (+y) stays on the robot's left even as
+                        # the robot turns.
+                        yaw = float(wp.to_torch(robot.data.heading_w)[env_idx].item())
+                        c, s = np.cos(yaw), np.sin(yaw)
+                        rot = np.array([[c, -s, 0.0], [s, c, 0.0], [0.0, 0.0, 1.0]])
+                        eye_off = rot @ eye_off
+                        lookat_off = rot @ lookat_off
+                    eye_w = (root_pos_w + eye_off).tolist()
+                    target_w = (root_pos_w + lookat_off).tolist()
+                    import isaacsim.core.utils.viewports as _isaacsim_viewports
+                    _isaacsim_viewports.set_camera_view(
+                        eye=eye_w, target=target_w,
+                        camera_prim_path=record_cam_state["prim_path"],
+                    )
+
                 # run everything in inference mode
                 with torch.inference_mode():
                     # agent stepping

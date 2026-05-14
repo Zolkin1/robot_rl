@@ -21,7 +21,7 @@ class MultiskillVelocityTrackingCommand(VelocityTrackingCommand):
     At every resample, each env's current world XY is mapped to its terrain
     cell and the per-skill probability vector ``terrain.skill_probs[:, r, c]``
     is used to draw one skill via :func:`torch.multinomial`. The chosen skill
-    indexes into ``cfg.velocity_buckets`` to give a uniform velocity range.
+    indexes into the trajectory cmd's ``velocity_buckets`` to give a uniform velocity range.
 
     Requires the scene's terrain importer to be a meta importer exposing
     ``skill_probs``, ``skill_list``, and ``world_xy_to_cell``. The bucket dict
@@ -46,15 +46,32 @@ class MultiskillVelocityTrackingCommand(VelocityTrackingCommand):
         self._terrain = terrain
         self._skill_list: list[str] = list(terrain.skill_list)
 
-        bucket_keys = set(cfg.velocity_buckets.keys())
+        # The trajectory command's ``ref_poses`` is used as the terrain
+        # cell-lookup anchor on mid-episode resamples.  The lookup itself
+        # has to be lazy: this ``__init__`` runs from inside
+        # ``CommandManager.__init__``, which only assigns
+        # ``env.command_manager`` *after* all terms are constructed.
+        # ``_resample_command`` resolves and caches the term on first use.
+        self._traj_cmd = None
+
+        # The bucket dict lives on the trajectory cmd cfg (source of truth
+        # for "what skill is the policy actually executing").  The
+        # velocity cmd needs the same ranges to sample from on resample —
+        # pull them from the trajectory cmd's cfg directly.  Cfgs are
+        # populated independently of term-construction order so this is
+        # safe even though the trajectory term itself isn't registered yet.
+        traj_cfg = getattr(env.cfg.commands, cfg.trajectory_command_name)
+        self._velocity_buckets = traj_cfg.velocity_buckets
+
+        bucket_keys = set(self._velocity_buckets.keys())
         skill_set = set(self._skill_list)
         if bucket_keys != skill_set:
             missing = skill_set - bucket_keys
             extra = bucket_keys - skill_set
             raise ValueError(
-                f"velocity_buckets keys must equal terrain.skill_list. "
-                f"missing buckets for skills: {sorted(missing)}; "
-                f"extra buckets not in skill_list: {sorted(extra)}."
+                f"velocity_buckets keys (on '{cfg.trajectory_command_name}') "
+                f"must equal terrain.skill_list. missing buckets for skills: "
+                f"{sorted(missing)}; extra buckets not in skill_list: {sorted(extra)}."
             )
 
         if cfg.skill_transition_prob is not None and not 0.0 <= cfg.skill_transition_prob <= 1.0:
@@ -70,49 +87,33 @@ class MultiskillVelocityTrackingCommand(VelocityTrackingCommand):
         # --- Pre-build per-skill range tensors aligned to terrain.skill_list order ---
         default_heading = torch.tensor(cfg.ranges.heading, device=self.device, dtype=torch.float)
         self._skill_lin_vel_x = torch.tensor(
-            [cfg.velocity_buckets[s].lin_vel_x for s in self._skill_list],
+            [self._velocity_buckets[s].lin_vel_x for s in self._skill_list],
             device=self.device, dtype=torch.float,
         )
         self._skill_lin_vel_y = torch.tensor(
-            [cfg.velocity_buckets[s].lin_vel_y for s in self._skill_list],
+            [self._velocity_buckets[s].lin_vel_y for s in self._skill_list],
             device=self.device, dtype=torch.float,
         )
         self._skill_ang_vel_z = torch.tensor(
-            [cfg.velocity_buckets[s].ang_vel_z for s in self._skill_list],
+            [self._velocity_buckets[s].ang_vel_z for s in self._skill_list],
             device=self.device, dtype=torch.float,
         )
         self._skill_heading = torch.stack([
-            torch.tensor(cfg.velocity_buckets[s].heading, device=self.device, dtype=torch.float)
-            if cfg.velocity_buckets[s].heading is not None
+            torch.tensor(self._velocity_buckets[s].heading, device=self.device, dtype=torch.float)
+            if self._velocity_buckets[s].heading is not None
             else default_heading
             for s in self._skill_list
         ])
 
-        self.skill_id = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
+        # ``sampled_skill_id`` records which bucket the most recent sample
+        # for each env was drawn from.  It's informational only — the
+        # trajectory cmd's active ``skill_id`` is derived per-step from
+        # the *ramped* ``vel_target_b`` via a bucket lookup.  This field
+        # exists for logging / plot diagnostics and for the
+        # ``skill_transition_prob`` "don't resample the same bucket"
+        # logic in :meth:`_sample_skill`.
+        self.sampled_skill_id = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
         self._warned_no_transition = False
-
-        # --- Pending skill-change buffers ---
-        # When ``gate_skill_change_on_contact`` is True, a resample whose new
-        # skill differs from the env's current skill writes here instead of
-        # the committed buffers; the trajectory command commits these into
-        # the live buffers when it fires a contact gate for the env
-        # (``commit_pending_skill_change``).  Same-skill resamples and
-        # reset-time resamples commit immediately and clear ``pending_active``.
-        self.pending_skill_id = torch.zeros_like(self.skill_id)
-        self.pending_vel_target_sampled_b = torch.zeros_like(self.vel_target_sampled_b)
-        self.pending_heading_target = torch.zeros_like(self.heading_target)
-        self.pending_active = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
-
-        # --- Reset-event detection ---
-        # IsaacLab's ``_reset_idx`` zeros ``episode_length_buf`` *after* reset
-        # events run (manager_based_rl_env.py:394).  So during
-        # ``reset_on_reference`` ``ep_len`` still has the pre-termination
-        # value, and our naive ``in_reset = ep_len == 0`` returns False —
-        # the resample wrongly defers and the new episode starts with the
-        # previous episode's stale skill.  ``reset_on_reference`` flips this
-        # mask True for the reset env_ids around its ``_resample`` call so
-        # ``_resample_command`` can detect the reset path reliably.
-        self._reset_env_mask = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
 
         # Per-env max-acc clamp assignment (persists for the episode, re-rolled on reset).
         if cfg.max_acc_frac is None:
@@ -133,7 +134,7 @@ class MultiskillVelocityTrackingCommand(VelocityTrackingCommand):
         msg += f"\tTerrain entity: {self.cfg.terrain_name}\n"
         msg += f"\tNumber of skills: {len(self._skill_list)}\n"
         for i, name in enumerate(self._skill_list):
-            bucket = self.cfg.velocity_buckets[name]
+            bucket = self._velocity_buckets[name]
             msg += (
                 f"\tSkill '{name}': vx={bucket.lin_vel_x}, vy={bucket.lin_vel_y}, "
                 f"wz={bucket.ang_vel_z}\n"
@@ -146,12 +147,63 @@ class MultiskillVelocityTrackingCommand(VelocityTrackingCommand):
             msg += "\tMax-acc disabled for all envs\n"
         return msg
 
-    def _resample_command(self, env_ids: Sequence[int]):
-        """Resample velocity commands by sampling a skill per env from the terrain."""
-        n = len(env_ids)
-        r = torch.empty(n, device=self.device)
+    # ------------------------------------------------------------------
+    # Public read-only views of the bucket tables (the trajectory cmd
+    # reads these to do its per-step bucket-of-vel_target_b lookup).
+    # ------------------------------------------------------------------
 
-        # --- Assign control modes (same as parent) ---
+    @property
+    def skill_lin_vel_x(self) -> torch.Tensor:
+        """``[num_skills, 2]`` per-skill lin-x bucket ``[min, max]``."""
+        return self._skill_lin_vel_x
+
+    @property
+    def skill_lin_vel_y(self) -> torch.Tensor:
+        """``[num_skills, 2]`` per-skill lin-y bucket ``[min, max]``."""
+        return self._skill_lin_vel_y
+
+    @property
+    def skill_ang_vel_z(self) -> torch.Tensor:
+        """``[num_skills, 2]`` per-skill ang-z bucket ``[min, max]``."""
+        return self._skill_ang_vel_z
+
+    # ------------------------------------------------------------------
+    # Sampling / commit helpers
+    # ------------------------------------------------------------------
+
+    def _sample_velocity_for_skill(
+        self, new_skill: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Draw ``(vx, vy, wz, heading)`` for each env from its skill bucket."""
+        rng_vx = self._skill_lin_vel_x[new_skill]
+        rng_vy = self._skill_lin_vel_y[new_skill]
+        rng_wz = self._skill_ang_vel_z[new_skill]
+        rng_h = self._skill_heading[new_skill]
+        u = torch.empty(new_skill.shape[0], device=self.device)
+        new_vx = rng_vx[:, 0] + (rng_vx[:, 1] - rng_vx[:, 0]) * u.uniform_(0.0, 1.0)
+        new_vy = rng_vy[:, 0] + (rng_vy[:, 1] - rng_vy[:, 0]) * u.uniform_(0.0, 1.0)
+        new_wz = rng_wz[:, 0] + (rng_wz[:, 1] - rng_wz[:, 0]) * u.uniform_(0.0, 1.0)
+        new_heading = rng_h[:, 0] + (rng_h[:, 1] - rng_h[:, 0]) * u.uniform_(0.0, 1.0)
+        return new_vx, new_vy, new_wz, new_heading
+
+    def _commit_live(
+        self,
+        env_ids: torch.Tensor,
+        new_skill: torch.Tensor,
+        new_vx: torch.Tensor,
+        new_vy: torch.Tensor,
+        new_wz: torch.Tensor,
+        new_heading: torch.Tensor,
+    ) -> None:
+        """Write a freshly-sampled bucket + velocity into the live buffers."""
+        self.sampled_skill_id[env_ids] = new_skill
+        self.vel_target_sampled_b[env_ids, 0] = new_vx
+        self.vel_target_sampled_b[env_ids, 1] = new_vy
+        self.vel_target_sampled_b[env_ids, 2] = new_wz
+        self.heading_target[env_ids] = new_heading
+
+    def _assign_control_modes(self, env_ids: Sequence[int], r: torch.Tensor) -> None:
+        """Re-roll the per-env open-loop / closed-loop / standing buckets."""
         self.is_closed_loop_env[env_ids] = r.uniform_(0.0, 1.0) <= self.cfg.rel_closed_loop
         self.is_closed_loop_yaw_env[env_ids] = torch.logical_and(
             r <= self.cfg.rel_closed_loop_yaw + self.cfg.rel_open_loop,
@@ -162,78 +214,8 @@ class MultiskillVelocityTrackingCommand(VelocityTrackingCommand):
             r >= self.cfg.rel_closed_loop_yaw + self.cfg.rel_open_loop,
         )
 
-        # --- Sample skill per env from the terrain's per-cell distribution ---
-        # Reset detection: ``episode_length_buf`` is zeroed *after* reset
-        # events fire (manager_based_rl_env.py:394), so during
-        # ``reset_on_reference`` the naive ``ep_len == 0`` check returns
-        # False.  The reset event sets ``_reset_env_mask`` for its env_ids
-        # to disambiguate.
-        env_ids_t = (
-            env_ids if isinstance(env_ids, torch.Tensor)
-            else torch.as_tensor(env_ids, dtype=torch.long, device=self.device)
-        )
-        in_reset = (
-            (self._env.episode_length_buf[env_ids_t] == 0)
-            | self._reset_env_mask[env_ids_t]
-        )
-
-        # For reset envs, ``robot.data.root_pos_w`` still holds the
-        # end-of-last-episode position (no physics step ran between
-        # termination and this resample).  Use the spawn position
-        # (``env.scene.env_origins``) for the cell lookup instead so the
-        # sampled skill matches where the robot is about to land.
-        xy_w_for_sample = wp.to_torch(self.robot.data.root_pos_w)[env_ids_t, :2].clone()
-        if in_reset.any():
-            xy_w_for_sample[in_reset] = self._env.scene.env_origins[env_ids_t[in_reset], :2]
-        new_skill = self._sample_skill(env_ids_t, xy_w=xy_w_for_sample)
-
-        # --- Sample velocity targets per env from the new skill's bucket ---
-        rng_vx = self._skill_lin_vel_x[new_skill]   # (n, 2)
-        rng_vy = self._skill_lin_vel_y[new_skill]
-        rng_wz = self._skill_ang_vel_z[new_skill]
-        rng_h = self._skill_heading[new_skill]
-
-        u = torch.empty(n, device=self.device)
-        new_vx = rng_vx[:, 0] + (rng_vx[:, 1] - rng_vx[:, 0]) * u.uniform_(0.0, 1.0)
-        new_vy = rng_vy[:, 0] + (rng_vy[:, 1] - rng_vy[:, 0]) * u.uniform_(0.0, 1.0)
-        new_wz = rng_wz[:, 0] + (rng_wz[:, 1] - rng_wz[:, 0]) * u.uniform_(0.0, 1.0)
-        new_heading = rng_h[:, 0] + (rng_h[:, 1] - rng_h[:, 0]) * u.uniform_(0.0, 1.0)
-
-        # --- Split into immediate-commit and pending-commit subsets ---
-        # Defer iff: gate-on-contact is enabled AND this resample changes the
-        # skill AND the env is not in reset (reset envs always commit now).
-        prev_skill = self.skill_id[env_ids_t]
-        skill_changed = new_skill != prev_skill
-        if self.cfg.gate_skill_change_on_contact:
-            defer_mask = skill_changed & (~in_reset)
-        else:
-            defer_mask = torch.zeros_like(skill_changed)
-
-        # Immediate-commit envs: write to live buffers; clear any stale pending.
-        if (~defer_mask).any():
-            imm = ~defer_mask
-            imm_ids = env_ids_t[imm]
-            self.skill_id[imm_ids] = new_skill[imm]
-            self.vel_target_sampled_b[imm_ids, 0] = new_vx[imm]
-            self.vel_target_sampled_b[imm_ids, 1] = new_vy[imm]
-            self.vel_target_sampled_b[imm_ids, 2] = new_wz[imm]
-            self.heading_target[imm_ids] = new_heading[imm]
-            self.pending_active[imm_ids] = False
-
-        # Deferred envs: stash in pending buffers; live buffers (and skill_id)
-        # remain as they were so the env keeps tracking the previous skill
-        # until the trajectory command fires a contact gate.
-        if defer_mask.any():
-            dfr = defer_mask
-            dfr_ids = env_ids_t[dfr]
-            self.pending_skill_id[dfr_ids] = new_skill[dfr]
-            self.pending_vel_target_sampled_b[dfr_ids, 0] = new_vx[dfr]
-            self.pending_vel_target_sampled_b[dfr_ids, 1] = new_vy[dfr]
-            self.pending_vel_target_sampled_b[dfr_ids, 2] = new_wz[dfr]
-            self.pending_heading_target[dfr_ids] = new_heading[dfr]
-            self.pending_active[dfr_ids] = True
-
-        # y position target and gains (shared across all skills)
+    def _resample_y_and_gains(self, env_ids: Sequence[int], r: torch.Tensor) -> None:
+        """Re-roll the y target and y PD gains (skill-independent)."""
         self.y_target[env_ids] = (
             r.uniform_(*self.cfg.ranges.y_pos_offset)
             + wp.to_torch(self.robot.data.root_pos_w)[env_ids, 1]
@@ -241,51 +223,105 @@ class MultiskillVelocityTrackingCommand(VelocityTrackingCommand):
         self.y_kp[env_ids] = r.uniform_(*self.cfg.ranges.y_kp)
         self.y_kd[env_ids] = r.uniform_(*self.cfg.ranges.y_kd)
 
-        # Per-env max-acc clamp: re-roll only on episode reset so each env's
-        # clamped/unclamped state persists for the duration of the episode.
-        if self.cfg.max_acc_frac is not None:
-            reset_mask = self._env.episode_length_buf[env_ids] == 0
-            if reset_mask.any():
-                reset_ids = env_ids[reset_mask]
-                rand = torch.empty(len(reset_ids), device=self.device).uniform_(0.0, 1.0)
-                has_max_acc = rand < self.cfg.max_acc_frac
-                self.max_acc_per_env[reset_ids] = torch.where(
-                    has_max_acc,
-                    torch.full_like(rand, float(self.cfg.max_acc)),
-                    torch.full_like(rand, float("inf")),
-                )
+    def _reroll_max_acc_clamp_for_reset(self, env_ids: torch.Tensor) -> None:
+        """Re-roll the per-env max-acc clamp assignment for reset envs."""
+        if self.cfg.max_acc_frac is None:
+            return
+        rand = torch.empty(len(env_ids), device=self.device).uniform_(0.0, 1.0)
+        has_max_acc = rand < self.cfg.max_acc_frac
+        self.max_acc_per_env[env_ids] = torch.where(
+            has_max_acc,
+            torch.full_like(rand, float(self.cfg.max_acc)),
+            torch.full_like(rand, float("inf")),
+        )
 
-    def commit_pending_skill_change(self, env_ids: torch.Tensor) -> torch.Tensor:
-        """Commit pending skill / velocity targets to the live buffers.
+    # ------------------------------------------------------------------
+    # Main resample / reset / commit entry points
+    # ------------------------------------------------------------------
 
-        Called by the trajectory command when a contact gate fires for an
-        env: for any env in ``env_ids`` whose ``pending_active`` is True,
-        copy the pending skill, sampled velocity, and heading into the live
-        buffers and clear the pending flag.  Envs without a pending change
-        pass through untouched.
+    def _resample_command(self, env_ids: Sequence[int]):
+        """Mid-episode resample: sample a fresh velocity target.
 
-        Args:
-            env_ids: ``[K]`` long tensor of global env indices that just
-                fired a contact gate.
-
-        Returns:
-            ``[K]`` boolean mask aligned to ``env_ids`` marking which envs
-            actually had a pending change committed (so the caller can
-            scope its transition-state setup to those envs).
+        Conceptually this is the joystick driver telling the robot to
+        head for a new velocity.  The bucket is sampled from the env's
+        current reference-frame cell only to pick which velocity range
+        to draw from; the bucket itself is informational
+        (``sampled_skill_id``).  The trajectory cmd derives its active
+        skill from where the *ramped* ``vel_target_b`` ends up, not from
+        the bucket sampled here — so there's no defer-to-gate path on
+        this side anymore.
         """
-        if env_ids.numel() == 0:
-            return torch.zeros(0, dtype=torch.bool, device=self.device)
+        env_ids_t = (
+            env_ids if isinstance(env_ids, torch.Tensor)
+            else torch.as_tensor(env_ids, dtype=torch.long, device=self.device)
+        )
+        n = env_ids_t.shape[0]
+        r = torch.empty(n, device=self.device)
+        self._assign_control_modes(env_ids_t, r)
 
-        active = self.pending_active[env_ids]
-        if not active.any():
-            return active
+        # Sample bucket from the env's current reference-frame xy cell.
+        # ``ref_poses`` (the latest in-contact foot landing pose, snapped
+        # to the stair top for terrain-aware skills) is stable across the
+        # pelvis's per-step jitter, which avoids cell-misclassification
+        # when a stride briefly carries the pelvis off-cell.
+        if self._traj_cmd is None:
+            self._traj_cmd = self._env.command_manager.get_term(
+                self.cfg.trajectory_command_name
+            )
+        xy_ref = self._traj_cmd.ref_poses[env_ids_t, :2]
+        new_skill = self._sample_skill(env_ids_t, xy_w=xy_ref)
+        new_vx, new_vy, new_wz, new_heading = self._sample_velocity_for_skill(new_skill)
 
-        commit_ids = env_ids[active]
-        self.skill_id[commit_ids] = self.pending_skill_id[commit_ids]
-        self.vel_target_sampled_b[commit_ids] = self.pending_vel_target_sampled_b[commit_ids]
-        self.heading_target[commit_ids] = self.pending_heading_target[commit_ids]
-        self.pending_active[commit_ids] = False
-        return active
+        self._commit_live(env_ids_t, new_skill, new_vx, new_vy, new_wz, new_heading)
+        self._resample_y_and_gains(env_ids_t, r)
+
+    def reset_for_episode(self, env_ids: torch.Tensor) -> None:
+        """Reset velocity state for freshly spawned envs.
+
+        Samples a bucket from each env's *spawn cell* (``env.scene.env_origins``,
+        not the stale ``robot.data.root_pos_w``), commits the new
+        sampled bucket + velocity + heading immediately to the live
+        buffers, snaps the ramped target ``vel_target_b`` past the
+        max-acc clamp, and re-rolls the per-episode max-acc bucket.
+
+        Replaces the old ``_resample`` + ``_reset_env_mask`` toggle dance
+        from :func:`reset_on_reference`.
+        """
+        env_ids_t = (
+            env_ids if isinstance(env_ids, torch.Tensor)
+            else torch.as_tensor(env_ids, dtype=torch.long, device=self.device)
+        )
+        n = env_ids_t.shape[0]
+        if n == 0:
+            return
+        r = torch.empty(n, device=self.device)
+        self._assign_control_modes(env_ids_t, r)
+
+        # Sample from the *spawn* cell — ``root_pos_w`` is still the
+        # end-of-last-episode position at reset-event time, so we pass
+        # ``env_origins`` through the ``xy_w`` override.
+        xy_spawn = self._env.scene.env_origins[env_ids_t, :2]
+        new_skill = self._sample_skill(env_ids_t, xy_w=xy_spawn)
+        new_vx, new_vy, new_wz, new_heading = self._sample_velocity_for_skill(new_skill)
+
+        # Immediate live commit.
+        self._commit_live(env_ids_t, new_skill, new_vx, new_vy, new_wz, new_heading)
+
+        # Snap the ramped target past the max-acc ramp — the previous
+        # episode's ``vel_target_b`` is meaningless across a reset
+        # discontinuity.
+        self.vel_target_b[env_ids_t, 0] = new_vx
+        self.vel_target_b[env_ids_t, 1] = new_vy
+        self.vel_target_b[env_ids_t, 2] = new_wz
+
+        self._resample_y_and_gains(env_ids_t, r)
+        self._reroll_max_acc_clamp_for_reset(env_ids_t)
+
+        # Refresh the parent's resample timer so the framework's
+        # ``CommandTerm.reset`` doesn't immediately re-fire ``_resample``.
+        self.time_left[env_ids_t] = self.time_left[env_ids_t].uniform_(
+            *self.cfg.resampling_time_range
+        )
 
     def _sample_skill(
         self, env_ids: Sequence[int], xy_w: torch.Tensor | None = None,
@@ -320,7 +356,7 @@ class MultiskillVelocityTrackingCommand(VelocityTrackingCommand):
             return torch.multinomial(per_env_probs, num_samples=1).squeeze(-1)
 
         n = len(env_ids)
-        prev_skill = self.skill_id[env_ids]
+        prev_skill = self.sampled_skill_id[env_ids]
         new_skill = prev_skill.clone()
 
         transition_rand = torch.empty(n, device=self.device).uniform_(0.0, 1.0)

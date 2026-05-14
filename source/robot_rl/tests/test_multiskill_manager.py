@@ -22,6 +22,32 @@ from conftest import MERGED_LIBRARY_DIR, STANDING_YAML, WALKING_YAML, RUNNING_YA
 
 
 # ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+class _StubSkillOwner:
+    """Minimal owner exposing ``skill_id`` and ``_skill_list`` for the
+    manager's owner-based skill filter.  Tests that build a manager
+    directly (without a trajectory cmd) attach one of these so
+    ``_select_trajectories`` can run.
+    """
+
+    def __init__(self, skill_id: torch.Tensor, skill_list: list[str]):
+        self.skill_id = skill_id
+        self._skill_list = skill_list
+
+
+def _attach_stub_owner(msm: MultiSkillManager, skill_id_per_env: torch.Tensor) -> None:
+    """Register a stub skill owner whose ``_skill_list`` matches the
+    manager's loaded skills in declaration order."""
+    skill_list = sorted(
+        msm.skill_name_to_idx.keys(),
+        key=lambda n: msm.skill_name_to_idx[n],
+    )
+    msm.set_skill_owner(_StubSkillOwner(skill_id_per_env, skill_list))
+
+
+# ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
 
@@ -165,6 +191,9 @@ class TestTrajectorySelection:
         msm = multiskill_single_skill
         skill = msm.skills[0]
 
+        # Single-skill manager: every env's skill_id = 0.
+        _attach_stub_owner(msm, torch.zeros(1, dtype=torch.long, device=DEVICE))
+
         # Use the first trajectory's conditioning vector (pad to 6 dims)
         cond_vec = skill.conditioning_tensor[0:1]  # [1, C]
         global_idx = msm._select_trajectories(cond_vec)
@@ -175,6 +204,7 @@ class TestTrajectorySelection:
         msm = multiskill_single_skill
 
         N = 10
+        _attach_stub_owner(msm, torch.zeros(N, dtype=torch.long, device=DEVICE))
         cond = torch.randn(N, 6)
         global_idx = msm._select_trajectories(cond)
         assert global_idx.shape == (N,)
@@ -517,20 +547,32 @@ class TestMultiSkill:
         """Global selection should pick the trajectory closest to the commanded velocity."""
         msm = MultiSkillManager(path=str(multi_skill_dir), device=DEVICE)
 
+        # Pick a skill_id that admits all trajectories: the skill whose
+        # bucket contains the lowest-vel trajectory for the zero case,
+        # and the skill containing the high-vel trajectory for the high
+        # case.  In practice both skills' buckets should be queried in
+        # turn — but the existing test only validates "different command
+        # → different traj", which holds as long as both envs use the
+        # same skill_id for each call.  Use skill 0 throughout (the
+        # cdist filter will mask out skill-1 trajectories) and verify
+        # the test's invariant within that skill.
+        _attach_stub_owner(msm, torch.zeros(5, dtype=torch.long, device=DEVICE))
+
         # Zero velocity should select the trajectory with lowest vel_x
+        # within the env's skill.
         cond_zero = torch.zeros(5, 6)
         idx_zero = msm._select_trajectories(cond_zero)
         assert idx_zero.shape == (5,)
-        # All envs should get the same trajectory (all have same conditioning)
+        # All envs should get the same trajectory (all have same conditioning).
         assert (idx_zero == idx_zero[0]).all()
 
         # High velocity should select a different trajectory than zero
+        # (still within skill 0).
         cond_high = torch.zeros(5, 6)
         cond_high[:, 0] = 100.0  # very high vel_x
         idx_high = msm._select_trajectories(cond_high)
         assert (idx_high == idx_high[0]).all()
-        # The high-velocity trajectory should differ from the zero-velocity one
-        # (assuming skills have different velocity ranges)
+        # Different commanded velocity → different traj within the skill.
         assert idx_high[0].item() != idx_zero[0].item()
 
     def test_single_folder_fallback(self):

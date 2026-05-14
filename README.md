@@ -252,3 +252,16 @@ and
       url={https://arxiv.org/abs/2601.06286}, 
 }
 ```
+
+### Theoretical Results
+```
+@misc{olkin2026stabilitycontrollyapunovfunction,
+      title={Stability of Control Lyapunov Function Guided Reinforcement Learning}, 
+      author={Zachary Olkin and William D. Compton and Aaron D. Ames},
+      year={2026},
+      eprint={2605.01978},
+      archivePrefix={arXiv},
+      primaryClass={eess.SY},
+      url={https://arxiv.org/abs/2605.01978}, 
+}
+```

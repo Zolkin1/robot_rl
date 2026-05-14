@@ -111,11 +111,12 @@ class G1TerrainMultiskillCLFEnvCfg(G1MultiSkillCLFEnvCfg):
         self.commands.base_velocity.max_acc = 1.0
 
         # Per-skill velocity ranges.  Keys MUST equal the terrain importer's
-        # ``skill_list`` exactly (validated at construction); the per-env skill
-        # is sampled from ``terrain.skill_probs`` and indexes into this dict.
+        # ``skill_list`` exactly (validated at construction).  The
+        # trajectory cmd owns this dict; the velocity cmd reads it via
+        # the trajectory cmd's cfg at init.
         # lin_vel_y / ang_vel_z default to (0, 0) — bump them later when the
         # tasks need lateral / turning motion.
-        self.commands.base_velocity.velocity_buckets = {
+        self.commands.traj_ref.velocity_buckets = {
             "standing":     VelocityBucketCfg(lin_vel_x=(0.0, 0.1)),
             "walk_forward": VelocityBucketCfg(lin_vel_x=(0.1, 1.5)),
             "running":      VelocityBucketCfg(lin_vel_x=(1.5, 3.7)),
@@ -184,7 +185,7 @@ class G1TerrainMultiskillCLFEnvCfg(G1MultiSkillCLFEnvCfg):
               "frame_names": ["pelvis_link", "left_ankle_roll_link", "right_ankle_roll_link"],
               "max_frac": 0.3, #0.25,
               "min_dist": 0.1,
-              "grace_period_s": 2.0, #2.0,    # TODO: This probably makes critic learning hard as sometimes these states terminate and sometimes they don't.
+              "grace_period_s": 0.0, #2.0,    # TODO: This probably makes critic learning hard as sometimes these states terminate and sometimes they don't.
                                         #   Depends on when traj was switched, which isn't an observation currently.
           },
         )
@@ -200,12 +201,10 @@ class G1TerrainMultiskillCLFDistillationEnvCfg(G1TerrainMultiskillCLFEnvCfg):
 
         self.commands.base_velocity.resampling_time_range = (2.0, 6.0)
         # Per-skill velocity ranges are inherited from the parent
-        # ``G1TerrainMultiskillCLFEnvCfg``.  The old percentage-based bucket
-        # list no longer applies — under the terrain-driven sampler, the
-        # per-env skill distribution comes from ``terrain.skill_probs``
-        # rather than from cfg percentages.  Override individual buckets
-        # here (e.g. ``self.commands.base_velocity.velocity_buckets["running"]
-        # .lin_vel_x = (2.0, 3.5)``) if distillation needs tighter ranges.
+        # ``G1TerrainMultiskillCLFEnvCfg`` on ``self.commands.traj_ref``.
+        # Override individual buckets here (e.g.
+        # ``self.commands.traj_ref.velocity_buckets["running"].lin_vel_x = (2.0, 3.5)``)
+        # if distillation needs tighter ranges.
         self.commands.base_velocity.max_acc = 1.0
         self.commands.base_velocity.max_acc_frac = 1.0
 

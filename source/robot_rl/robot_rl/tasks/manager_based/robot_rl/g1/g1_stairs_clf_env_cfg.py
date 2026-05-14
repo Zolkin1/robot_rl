@@ -109,7 +109,7 @@ class G1StairsCLFEnvCfg(G1MultiSkillCLFEnvCfg):
         # Skill keys must equal the terrain importer's ``skill_list`` (set
         # below) — only ``stair_up`` is declared by ``LONG_STAIRS_CFG``'s
         # sub-terrains, so that's the only bucket needed here.
-        self.commands.base_velocity.velocity_buckets = {
+        self.commands.traj_ref.velocity_buckets = {
             "stair_up": VelocityBucketCfg(lin_vel_x=(0.4, 0.4)),
         }
 

@@ -185,14 +185,90 @@ class DataLogger:
         except Exception as exc:
             self._warn("robot_data", f"Could not read robot articulation data: {exc}")
 
-        # 5. Skill + terrain row/col (only for envs that use
-        # ``MultiskillVelocityTrackingCommand`` + ``MetaTerrainImporter``).
+        # 5. Skill + terrain row/col (only for envs that use the
+        # multiskill stack: ``MultiskillVelocityTrackingCommand`` for the
+        # informational sampled bucket, ``BatchedMultiSkillCommand`` for
+        # the active skill + pending state, ``MetaTerrainImporter`` for
+        # cell coordinates).
         try:
             vel_cmd = unwrapped.command_manager.get_term("base_velocity")
-            if hasattr(vel_cmd, "skill_id"):
-                step["skill_id"] = vel_cmd.skill_id.clone()
+            if hasattr(vel_cmd, "sampled_skill_id"):
+                step["sampled_skill_id"] = vel_cmd.sampled_skill_id.clone()
         except Exception as exc:
-            self._warn("skill_id", f"Could not read vel_cmd.skill_id: {exc}")
+            self._warn(
+                "sampled_skill_id",
+                f"Could not read vel_cmd.sampled_skill_id: {exc}",
+            )
+
+        try:
+            traj_cmd = unwrapped.command_manager.get_term(self._traj_term_name)
+            if hasattr(traj_cmd, "skill_id"):
+                step["active_skill_id"] = traj_cmd.skill_id.clone()
+            pending = getattr(traj_cmd, "pending", None)
+            if pending is not None:
+                # -1 when no pending entry is queued, else the queued skill idx.
+                pid = torch.where(
+                    pending.active,
+                    pending.skill_id,
+                    torch.full_like(pending.skill_id, -1),
+                )
+                step["pending_skill_id"] = pid.clone()
+
+            # Cross-fade diagnostics: log alpha, the active mask, and the
+            # pure-new / pure-old evaluations of y_des at the current
+            # phase.  These let the plotter overlay (old, new, blended)
+            # so the operator can visually verify the cross-fade math.
+            transition = getattr(traj_cmd, "transition", None)
+            if transition is not None:
+                step["transition_active"] = transition.active.clone()
+                step["transition_old_phase"] = transition.old_phase.clone()
+                step["transition_old_traj_idx"] = transition.old_traj_idx.clone()
+                blend_end = traj_cmd.cfg.transition_blend_end_phi
+                if blend_end > 0.0:
+                    all_envs = torch.arange(
+                        unwrapped.num_envs, device=transition.active.device
+                    )
+                    full_alpha = transition.alpha(all_envs, blend_end)
+                    # Mask out non-active envs with -1 so the plotter
+                    # can hide them.
+                    full_alpha = torch.where(
+                        transition.active, full_alpha,
+                        torch.full_like(full_alpha, -1.0),
+                    )
+                    step["transition_alpha"] = full_alpha.clone()
+
+                    # Pure-new y_des = the cross-fade-aware helper called
+                    # with alpha forced to 1 (the new traj only).  Same
+                    # as ``manager.get_output`` for the current traj, but
+                    # we route through the helper for a single shared
+                    # eval pathway.
+                    phase = traj_cmd.manager.phase
+                    ones = torch.ones(
+                        unwrapped.num_envs, device=phase.device
+                    )
+                    zeros = torch.zeros(
+                        unwrapped.num_envs, device=phase.device
+                    )
+                    y_pos_new_only, _ = traj_cmd.compute_blended_outputs_at(
+                        phase, all_envs, alpha_override=ones,
+                    )
+                    step["y_des_new_only"] = y_pos_new_only.clone()
+
+                    # Pure-old y_des = blend with alpha=0.  For non-
+                    # transitioning envs the helper returns the new
+                    # eval (no transition active → no old to evaluate),
+                    # so for those envs y_des_old_only == y_des_new_only
+                    # by construction.  Operator should filter on
+                    # ``transition_active`` when interpreting.
+                    y_pos_old_only, _ = traj_cmd.compute_blended_outputs_at(
+                        phase, all_envs, alpha_override=zeros,
+                    )
+                    step["y_des_old_only"] = y_pos_old_only.clone()
+        except Exception as exc:
+            self._warn(
+                "active_pending_skill",
+                f"Could not read traj_cmd skill_id / pending / transition: {exc}",
+            )
 
         try:
             terrain = unwrapped.scene["terrain"]

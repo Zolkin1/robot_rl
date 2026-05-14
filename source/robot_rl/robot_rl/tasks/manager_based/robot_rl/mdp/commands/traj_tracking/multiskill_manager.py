@@ -115,7 +115,9 @@ class MultiSkillManager(ManagerBase):
             └── ...
 
         Each immediate subdirectory of ``path`` becomes a skill, named after
-        the subdirectory.
+        the subdirectory.  The velocity command's ``_skill_list`` may be a
+        strict subset of the loaded skills — extras are loaded into the
+        pool but never sampled (see :meth:`_lazy_init_skill_filter`).
 
         Args:
             path: Top-level folder containing one subfolder per skill.
@@ -217,6 +219,15 @@ class MultiSkillManager(ManagerBase):
         self._traj_skill_idx: Tensor = self.data["skill_idx"].to(self.device)
         self._vel_skill_to_traj_skill: Tensor | None = None
         self._skill_filter_ready: bool = False
+
+        # Owner that exposes the per-env active ``skill_id`` tensor and the
+        # ordered ``_skill_list`` for the skill-filter validation.  Set by
+        # :meth:`set_skill_owner`, typically called from the owning
+        # trajectory cmd's ``_post_init``.  Lazy-init runs against this
+        # owner instead of the velocity (conditioner) term — the velocity
+        # term is still used as the ``command`` source via
+        # ``conditioner_generator_name``.
+        self._skill_owner: Any = None
 
         # --- Pre-compute binomial coefficients for Bezier evaluation -------
         self._binomial_coeffs: dict[int, Tensor] = {}
@@ -653,9 +664,12 @@ class MultiSkillManager(ManagerBase):
         Resolves the conditioner term, requires it to be a
         :class:`MultiskillVelocityTrackingCommand`-shaped object exposing a
         per-env ``skill_id`` and an ordered ``_skill_list``. Validates that
-        the velocity command's skills equal the trajectory manager's skills
-        exactly, then caches a gather tensor that maps vel-cmd skill indices
-        to trajectory-manager skill indices.
+        the velocity command's skills are a subset of the trajectory
+        manager's skills, then caches a gather tensor that maps vel-cmd
+        skill indices to trajectory-manager skill indices.  Extra skills
+        in the manager (loaded subfolders that the env's terrain doesn't
+        advertise) are allowed and remain unused — they live in the
+        trajectory pool but never get sampled.
 
         Deferred to first selection because the conditioner term may not be
         registered on ``env.command_manager`` at manager construction time.
@@ -663,32 +677,50 @@ class MultiSkillManager(ManagerBase):
         if self._skill_filter_ready:
             return
 
-        cond_term = self.env.command_manager.get_term(self.conditioner_generator_name)
+        if self._skill_owner is None:
+            raise RuntimeError(
+                "MultiSkillManager has no skill owner registered. Call "
+                "set_skill_owner(...) from the trajectory command's "
+                "_post_init before any trajectory selection runs."
+            )
+        owner = self._skill_owner
         for required in ("skill_id", "_skill_list"):
-            if not hasattr(cond_term, required):
+            if not hasattr(owner, required):
                 raise TypeError(
-                    f"MultiSkillManager requires its conditioner term "
-                    f"'{self.conditioner_generator_name}' to expose '{required}'. "
-                    f"Got {type(cond_term).__name__}; this manager needs a "
-                    f"MultiskillVelocityTrackingCommand."
+                    f"MultiSkillManager's skill owner "
+                    f"({type(owner).__name__}) must expose '{required}'."
                 )
 
-        vel_skills: list[str] = list(cond_term._skill_list)
+        owner_skills: list[str] = list(owner._skill_list)
         traj_skills = set(self.skill_name_to_idx.keys())
-        if set(vel_skills) != traj_skills:
-            missing_in_traj = sorted(set(vel_skills) - traj_skills)
-            missing_in_vel = sorted(traj_skills - set(vel_skills))
+        missing_in_traj = sorted(set(owner_skills) - traj_skills)
+        if missing_in_traj:
             raise KeyError(
-                "Skill name mismatch between velocity command and trajectory "
-                f"folders. In vel_cmd but no trajectories: {missing_in_traj}. "
-                f"In trajectories but not in vel_cmd: {missing_in_vel}."
+                "Skill-owner declares skills the trajectory pool does not "
+                f"contain: {missing_in_traj}. "
+                f"Available trajectory skills: {sorted(traj_skills)}."
             )
 
         self._vel_skill_to_traj_skill = torch.tensor(
-            [self.skill_name_to_idx[name] for name in vel_skills],
+            [self.skill_name_to_idx[name] for name in owner_skills],
             dtype=torch.long, device=self.device,
         )
         self._skill_filter_ready = True
+
+    def set_skill_owner(self, owner: Any) -> None:
+        """Register the term that owns the per-env active ``skill_id``.
+
+        The owner must expose:
+
+        - ``skill_id`` — ``[num_envs]`` long tensor of the active skill
+          per env, indexing into the owner's ``_skill_list``.
+        - ``_skill_list`` — ordered list of skill names (= the active
+          skill index space).
+
+        Validation is deferred to :meth:`_lazy_init_skill_filter`; calling
+        ``set_skill_owner`` only stashes the reference.
+        """
+        self._skill_owner = owner
 
     def _select_trajectories(
         self,
@@ -697,17 +729,18 @@ class MultiSkillManager(ManagerBase):
     ) -> Tensor:
         """Select the nearest trajectory per env, restricted to the env's skill.
 
-        Each env's velocity command term holds a per-env ``skill_id`` (sampled
-        from the terrain importer's ``skill_probs``). We translate that into
-        the trajectory manager's skill space and mask the cdist matrix so
-        only same-skill trajectories are considered before ``argmin``.
+        The active per-env ``skill_id`` comes from the registered skill
+        owner (the trajectory cmd) — not the velocity cmd.  The velocity
+        cmd's sampled bucket may be in a different skill while
+        ``vel_target_b`` is mid-ramp; the owner's active skill follows
+        wherever ``vel_target_b`` actually sits.
 
         Args:
             conditioner: ``(N, C)`` conditioning vectors. Only the first three
                 dims (vel_x, vel_y, vel_yaw) participate in matching now —
                 skill replaces the legacy terrain-dim filter.
             env_ids: Optional env subset matching ``conditioner``'s rows. When
-                provided, ``cond_term.skill_id`` is sliced the same way so
+                provided, the owner's ``skill_id`` is sliced the same way so
                 row counts stay aligned (callers like ``reset_on_reference``
                 pass an env subset).
 
@@ -716,20 +749,19 @@ class MultiSkillManager(ManagerBase):
         """
         self._lazy_init_skill_filter()
 
-        cond_term = self.env.command_manager.get_term(self.conditioner_generator_name)
-        vel_skill_ids: Tensor = cond_term.skill_id  # (num_envs,)
+        owner_skill_ids: Tensor = self._skill_owner.skill_id  # (num_envs,)
         if env_ids is not None:
-            vel_skill_ids = vel_skill_ids[env_ids]
+            owner_skill_ids = owner_skill_ids[env_ids]
 
         # Sanity guard: catches any future caller that slices the conditioner
         # without also passing the matching ``env_ids`` (or vice versa).
-        if conditioner.shape[0] != vel_skill_ids.shape[0]:
+        if conditioner.shape[0] != owner_skill_ids.shape[0]:
             raise RuntimeError(
-                f"conditioner ({conditioner.shape[0]}) and vel_cmd.skill_id "
-                f"({vel_skill_ids.shape[0]}) must have matching env count."
+                f"conditioner ({conditioner.shape[0]}) and owner.skill_id "
+                f"({owner_skill_ids.shape[0]}) must have matching env count."
             )
 
-        env_traj_skill_ids = self._vel_skill_to_traj_skill[vel_skill_ids]  # (N,)
+        env_traj_skill_ids = self._vel_skill_to_traj_skill[owner_skill_ids]  # (N,)
 
         vel_cmd = conditioner[:, :3]                           # (N, 3)
         vel_global = self._global_conditioning[:, :3]          # (T, 3)
@@ -1307,6 +1339,11 @@ class MultiSkillManager(ManagerBase):
         self.next_gate_idx = -torch.ones(num_envs, dtype=torch.long, device=self.device)
         self.gate_rel_phi = torch.zeros(num_envs, device=self.device)
         self.gate_rel_phi_pre_snap = torch.zeros(num_envs, device=self.device)
+        # Per-env wrap-aware phi delta written by :meth:`update_phase` for
+        # the envs that actually advanced this tick; consumers (cross-fade
+        # state, future analytics) read this instead of diffing
+        # ``phase`` themselves.  Envs that didn't advance get 0.
+        self.last_phase_delta = torch.zeros(num_envs, device=self.device)
 
     def _refresh_gate_rel_phi(self, env_ids: Tensor) -> None:
         """Recompute ``gate_rel_phi`` from current phase + armed gate.
@@ -1390,6 +1427,62 @@ class MultiSkillManager(ManagerBase):
         self.next_gate_idx[env_ids] = new_idx
         self._refresh_gate_rel_phi(env_ids)
 
+    def advance_phase_for_traj(
+        self,
+        phase: Tensor,
+        traj_idx: Tensor,
+        step_dt: float,
+    ) -> tuple[Tensor, Tensor]:
+        """Advance per-row phase by ``step_dt`` using each row's trajectory rule.
+
+        Pure (side-effect-free) version of the per-trajectory-type
+        advancement logic in :meth:`update_phase`.  Called by
+        ``update_phase`` for ``self.phase`` and by the cross-fade
+        machinery for ``CrossfadeState.old_phase`` so the old
+        trajectory keeps its own clock running during a transition
+        whose target is perpetual (otherwise the blend can't progress).
+
+        Half/full periodic wrap mod 1.0.  Episodic clamps to ``[0, 1]``.
+        Perpetual snaps to 0 (unchanged).
+
+        Args:
+            phase: ``(K,)`` current phase per row.
+            traj_idx: ``(K,)`` trajectory index per row.
+            step_dt: sim step duration (seconds).
+
+        Returns:
+            ``(new_phase, phi_movement)`` — both ``(K,)``.  ``phi_movement``
+            is the wrap-aware signed advancement (positive for periodic
+            including across a wrap, can be negative for the single
+            perpetual-snap step where ``new_phase=0`` from a non-zero
+            ``prev_phase``).  Caller decides how to interpret negatives.
+        """
+        total = self.data["total_time"][traj_idx]
+        tt = self.data["traj_type"][traj_idx]
+
+        delta = step_dt / total
+        new_phase = phase + delta
+
+        is_periodic = (tt == _HALF_PERIODIC_INT) | (tt == _FULL_PERIODIC_INT)
+        is_episodic = tt == _EPISODIC_INT
+        is_perpetual = tt == _PERPETUAL_INT
+
+        new_phase = torch.where(is_periodic, new_phase % 1.0, new_phase)
+        new_phase = torch.where(
+            is_episodic, torch.clamp(new_phase, 0.0, 1.0), new_phase
+        )
+        new_phase = torch.where(
+            is_perpetual, torch.zeros_like(new_phase), new_phase
+        )
+
+        phi_movement = new_phase - phase
+        phi_movement = torch.where(
+            is_periodic & (new_phase < phase),
+            phi_movement + 1.0,
+            phi_movement,
+        )
+        return new_phase, phi_movement
+
     def update_phase(
         self, step_dt: float, env_ids: Tensor | None = None
     ) -> None:
@@ -1422,39 +1515,18 @@ class MultiSkillManager(ManagerBase):
             return
 
         traj_idx = traj_idx_full[sel]
-        total = self.data["total_time"][traj_idx]
-        tt = self.data["traj_type"][traj_idx]
-
-        delta = step_dt / total
         prev_phase = self.phase[sel].clone()
-        new_phase = prev_phase + delta
-
-        is_periodic = (tt == _HALF_PERIODIC_INT) | (tt == _FULL_PERIODIC_INT)
-        is_episodic = tt == _EPISODIC_INT
-        is_perpetual = tt == _PERPETUAL_INT
-
-        new_phase = torch.where(is_periodic, new_phase % 1.0, new_phase)
-        new_phase = torch.where(
-            is_episodic, torch.clamp(new_phase, 0.0, 1.0), new_phase
-        )
-        new_phase = torch.where(
-            is_perpetual, torch.zeros_like(new_phase), new_phase
+        new_phase, phi_movement = self.advance_phase_for_traj(
+            prev_phase, traj_idx, step_dt
         )
 
         self.phase[sel] = new_phase
 
-        # Advance gate_rel_phi monotonically: undo the periodic wrap so
-        # the value tracks signed distance from the armed gate without
-        # ambiguity.  Perpetual envs don't move; episodic envs use actual
-        # (post-clamp) movement.  Envs with no armed gate
-        # (``next_gate_idx == -1``) get zero movement so gate_rel_phi
-        # doesn't drift while the gate is disarmed.
-        phi_movement = new_phase - prev_phase
-        phi_movement = torch.where(
-            is_periodic & (new_phase < prev_phase),
-            phi_movement + 1.0,
-            phi_movement,
-        )
+        # Surface the wrap-aware per-env delta for downstream consumers
+        # (e.g. ``CrossfadeState.step``).  Envs not in ``sel`` keep their
+        # previous value zeroed out below to avoid drift.
+        self.last_phase_delta[:] = 0.0
+        self.last_phase_delta[sel] = phi_movement
         gate_armed = self.next_gate_idx[sel] >= 0
         phi_movement = torch.where(gate_armed, phi_movement, torch.zeros_like(phi_movement))
         self.gate_rel_phi[sel] = self.gate_rel_phi[sel] + phi_movement

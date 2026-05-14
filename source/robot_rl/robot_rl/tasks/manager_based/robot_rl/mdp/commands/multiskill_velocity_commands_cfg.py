@@ -1,5 +1,3 @@
-from dataclasses import field
-
 from isaaclab.utils import configclass
 
 from .velocity_commands_cfg import VelocityTrackingCommandCfg
@@ -44,12 +42,21 @@ class MultiskillVelocityTrackingCommandCfg(VelocityTrackingCommandCfg):
 
     class_type: type | str = "{DIR}.multiskill_velocity_commands:MultiskillVelocityTrackingCommand"
 
-    velocity_buckets: dict[str, VelocityBucketCfg] = field(default_factory=dict)
-    """Mapping skill name → velocity range. Keys must equal
-    ``terrain.skill_list`` exactly (validated at construction)."""
-
     terrain_name: str = "terrain"
     """Scene field name under which the meta terrain importer is registered."""
+
+    trajectory_command_name: str = "traj_ref"
+    """Name of the trajectory command term whose ``ref_poses[:, :2]`` is used
+    as the world-frame ``(x, y)`` for the terrain cell lookup on mid-episode
+    resamples.  Reference frames are stable across the per-step jitter of
+    the robot's pelvis and reflect where the policy is conceptually
+    anchored, so using them avoids cell-misclassification when the pelvis
+    drifts off-cell mid-stride.  The reset path still uses
+    ``env.scene.env_origins`` since ``ref_poses`` is stale at reset-event
+    time.  The velocity command also reads the trajectory cmd's
+    ``velocity_buckets`` cfg from this term at construction time —
+    the bucket ranges live on the trajectory cmd because they're the
+    source-of-truth for which skill the policy is actually executing."""
 
     skill_transition_prob: float | None = None
     """If set, the fraction of resamples that force a skill transition (new
@@ -57,15 +64,6 @@ class MultiskillVelocityTrackingCommandCfg(VelocityTrackingCommandCfg):
     skill_transition_prob) keeps the env's previous skill and only resamples
     the velocity within that skill's bucket. If None, skills are sampled
     independently from the per-env probability vector each resample."""
-
-    gate_skill_change_on_contact: bool = True
-    """If True (default), a freshly sampled skill that differs from the env's
-    current skill is buffered in a pending slot and only committed to
-    ``skill_id`` when the trajectory command fires a contact gate for that
-    env (a new foot landing).  Resamples that keep the same skill, or any
-    resample issued on the reset path (``episode_length_buf == 0``), commit
-    immediately.  Set to False to fall back to the legacy instant-skill-flip
-    behaviour."""
 
     max_acc_frac: float | None = None
     """Fraction of envs that have the ``max_acc`` clamp applied. If None, no

@@ -90,7 +90,19 @@ class BaseTrajectoryCommand(CommandTerm):
         self._verify_contact_frames()
 
         # --- Domain tracking ----------------------------------------------
+        # ``current_domain`` is the domain index from the previous step
+        # (relative to the previous trajectory).  ``prev_traj_idx`` is
+        # the previous step's global trajectory index.  Both are needed
+        # to detect "needs a ref_poses refresh" in get_measured_outputs:
+        # the domain index alone is misleading after a trajectory swap
+        # because domain indices live in per-trajectory index spaces and
+        # can numerically coincide across two unrelated trajectories
+        # (e.g. run domain 1 == walk domain 1 at phi≈0.5 after a
+        # run→walk cross-fade gate fire).  Tracking the trajectory index
+        # too forces a refresh on any swap.  Initialised to -1 so the
+        # first step always triggers an update.
         self.current_domain = -1 * torch.ones(self.num_envs, dtype=torch.long, device=self.device)
+        self.prev_traj_idx = -1 * torch.ones(self.num_envs, dtype=torch.long, device=self.device)
 
         # --- Output parsing -----------------------------------------------
         result = self._parse_outputs(self.manager.get_pos_output_names)
@@ -211,15 +223,25 @@ class BaseTrajectoryCommand(CommandTerm):
         ref_poses[:, :, :3] = wp.to_torch(self.robot.data.body_pos_w)[:, self.ref_frame_indices]
         ref_poses[:, :, 3:] = wp.to_torch(self.robot.data.body_quat_w)[:, self.ref_frame_indices]
 
-        # Detect domain changes
+        # Detect domain transitions OR trajectory swaps.  Either one
+        # invalidates the cached ref_poses anchor (the active ref body
+        # may have changed even when the domain index numerically agrees
+        # across two different trajectories — see ``prev_traj_idx``'s
+        # docstring above for the run→walk gate-fire pathology).
         new_domains = self.manager.get_current_domains(phase, env_ids)
+        new_traj = self.manager.get_current_trajectory_indices(env_ids)
 
         if env_ids is None:
-            changed = new_domains != self.current_domain
+            changed = (new_domains != self.current_domain) | (new_traj != self.prev_traj_idx)
             self.current_domain = new_domains
+            self.prev_traj_idx = new_traj.clone()
         else:
-            changed = new_domains != self.current_domain[env_ids]
+            changed = (
+                (new_domains != self.current_domain[env_ids])
+                | (new_traj != self.prev_traj_idx[env_ids])
+            )
             self.current_domain[env_ids] = new_domains
+            self.prev_traj_idx[env_ids] = new_traj
 
         # Which reference frame each env should use
         if env_ids is None:

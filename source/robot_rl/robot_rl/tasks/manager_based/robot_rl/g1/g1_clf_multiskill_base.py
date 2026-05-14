@@ -79,6 +79,18 @@ class G1MultiSkillCommandsCfg(G1ClfTrackingCommandCfg):
         # updated to be the current point's position, but this is in the air, and on the snap
         # back things are not adjusted. Maybe this is why I don't get late triggers with this or
         # maybe this is hurting? Needs investigation. Distillation may be able to handle this.
+
+        # Bucket dict lives here (trajectory cmd is the source of truth
+        # for the active skill the policy is executing).  Keys must
+        # match the terrain importer's ``skill_list`` at construction
+        # time.  The base scene's plain ``TerrainImporterCfg`` doesn't
+        # expose ``skill_probs`` so this term will refuse to construct
+        # here — subclasses must swap in a meta importer.
+        velocity_buckets={
+            "standing": VelocityBucketCfg(lin_vel_x=(0.0, 0.1)),
+            "walk_forward": VelocityBucketCfg(lin_vel_x=(0.1, 1.5)),
+            "running": VelocityBucketCfg(lin_vel_x=(1.5, 3.7)),
+        },
     )
 
     base_velocity = MultiskillVelocityTrackingCommandCfg(
@@ -97,16 +109,6 @@ class G1MultiSkillCommandsCfg(G1ClfTrackingCommandCfg):
             y_kp=(1.2, 1.8),
             y_kd=(0.2, 0.4),
         ),
-        # Skill keys must match the terrain importer's ``skill_list`` at
-        # construction time. The base scene's plain ``TerrainImporterCfg``
-        # doesn't expose ``skill_probs``, so this command will refuse to
-        # construct here — subclasses must swap in a meta importer (see
-        # ``g1_stairs_clf_env_cfg.py`` for an example).
-        velocity_buckets={
-            "standing": VelocityBucketCfg(lin_vel_x=(0.0, 0.1)),
-            "walk_forward": VelocityBucketCfg(lin_vel_x=(0.1, 1.5)),
-            "running": VelocityBucketCfg(lin_vel_x=(1.5, 3.7)),
-        },
     )
 
 @configclass

@@ -1,7 +1,10 @@
 """Configuration for the batched multi-skill trajectory command."""
 
+from dataclasses import field
+
 from isaaclab.utils import configclass
 
+from ..multiskill_velocity_commands_cfg import VelocityBucketCfg
 from .base_trajectory_cmd_cfg import BaseTrajectoryCommandCfg
 
 
@@ -73,3 +76,33 @@ class BatchedMultiSkillCommandCfg(BaseTrajectoryCommandCfg):
     backward snap to the start of the new domain (no domain change).
     The gate stays armed indefinitely until contact lands.  Only used
     when ``contact_gate_window_frac`` is not ``None``."""
+
+    velocity_buckets: dict[str, VelocityBucketCfg] = field(default_factory=dict)
+    """Per-skill velocity ranges.  Keys must equal ``terrain.skill_list``
+    exactly.  The trajectory cmd uses these tables to derive its active
+    skill each step from the live ``vel_target_b`` (bucket lookup), and
+    the velocity cmd reads them via public properties to sample within
+    a bucket on resample.  Source of truth lives here because the
+    skill in use by the policy is determined by which bucket the ramped
+    velocity is in — not by what the velocity cmd most recently sampled."""
+
+    gate_skill_change_on_contact: bool = True
+    """If True (default), bucket-crossings detected on the live
+    ``vel_target_b`` are buffered in a pending slot and only committed
+    to ``skill_id`` when the contact gate fires.  Set to False to flip
+    the active skill instantly when the bucket changes (legacy
+    behaviour; no cross-fade window).  Requires
+    ``contact_gate_window_frac`` to be non-None when True (otherwise
+    pending changes would never drain)."""
+
+    velocity_command_name: str = "base_velocity"
+    """Name of the velocity command term whose ``vel_target_b`` this
+    trajectory cmd reads each step to derive its active skill via the
+    bucket lookup."""
+
+    terrain_name: str = "terrain"
+    """Scene entity name of the (meta) terrain importer.  Used to read
+    the per-cell ``skill_probs`` mask that constrains which buckets are
+    eligible candidates when ``vel_target_b`` would otherwise match
+    multiple buckets (e.g. ``stair_up (0.4, 0.4)`` overlapping
+    ``walk_forward (0.1, 1.5)``)."""

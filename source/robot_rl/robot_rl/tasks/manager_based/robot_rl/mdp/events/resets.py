@@ -52,27 +52,18 @@ def reset_on_reference(
     asset: Articulation = env.scene[asset_cfg.name]
     cmd = env.command_manager.get_term(command_name)
     cond_term = env.command_manager.get_term(conditioner_command_name)
-    # Flip the reset-event mask True around the conditioner resample so the
-    # velocity command's ``_resample_command`` can detect that we're on the
-    # reset path.  IsaacLab zeros ``episode_length_buf`` *after* reset
-    # events run, so ``ep_len == 0`` alone is unreliable here.  The flag is
-    # cleared right after so subsequent regular resamples see it False.
-    if hasattr(cond_term, "_reset_env_mask"):
-        cond_term._reset_env_mask[env_ids] = True
-    cond_term._resample(env_ids)
-    # Snap the ramped target ``vel_target_b`` to the freshly sampled value
-    # before ``_update_command`` runs.  The parent ``CommandTerm`` snap
-    # (``cmd.reset``) is gated on ``time_left <= 0``, but ``_resample`` above
-    # has already reset ``time_left`` to ``resampling_time_range``, so that
-    # path would silently skip the snap on reset.  Without this, the
-    # max-acc clamp inside ``_update_command`` ramps the new episode's
-    # commanded velocity from the previous episode's final value, which is
-    # meaningless across a reset discontinuity.
-    if hasattr(cond_term, "vel_target_b") and hasattr(cond_term, "vel_target_sampled_b"):
-        cond_term.vel_target_b[env_ids] = cond_term.vel_target_sampled_b[env_ids]
+    # Reset the velocity command for the new episode: samples a bucket
+    # from the spawn cell (not the stale ``root_pos_w``), commits live
+    # immediately, snaps ``vel_target_b`` past the max-acc ramp, and
+    # refreshes ``time_left``.
+    cond_term.reset_for_episode(env_ids)
     cond_term._update_command()
-    if hasattr(cond_term, "_reset_env_mask"):
-        cond_term._reset_env_mask[env_ids] = False
+    # Snap the trajectory cmd's active ``skill_id`` to whichever bucket
+    # the freshly-set ``vel_target_b`` lands in for these envs, and
+    # clear any stale pending / cross-fade state.  Must run AFTER the
+    # velocity cmd's reset so ``vel_target_b`` is current.
+    if hasattr(cmd, "reset_for_episode"):
+        cmd.reset_for_episode(env_ids)
     num_env = len(env_ids)
 
     if num_env == 0:
@@ -150,9 +141,6 @@ def reset_on_reference(
     base_pos_rel = y_sampled[:, pos_indices]  # Shape: [num_env, 3]
     base_ori_quat_w = y_sampled[:, ori_indices]  # Shape: [num_env, 4] - quaternion (x, y, z, w)
 
-    # Add the ground->ankle_roll_link offset
-    # base_pos_rel[:, 2] += base_z_offset   # TODO: Delete
-
     # Per-env spawn offset = stair-origin offset (per-trajectory, top-level YAML)
     # + ref-frame offset (per-domain). Spline outputs are ref-frame-relative, so
     # both the spawn pose and the stored ref pose must shift by the same amount —
@@ -213,66 +201,15 @@ def reset_on_reference(
 
     # Write states to simulation
     asset.write_root_pose_to_sim_index(root_pose=base_pose, env_ids=ref_ids)
-    asset.write_root_link_velocity_to_sim_index(root_velocity=base_vel, env_ids=ref_ids)    # TODO: Investigate - I've got a play result where the x velocity doesn't match the reference (y and z look good)
+    # NOTE: known discrepancy — the x component of the reset base velocity
+    # has been observed in play to not match the trajectory reference (y
+    # and z line up).  Root cause unknown; left as-is until investigated.
+    asset.write_root_link_velocity_to_sim_index(root_velocity=base_vel, env_ids=ref_ids)
     asset.write_joint_position_to_sim_index(position=joint_pos, env_ids=ref_ids)
     asset.write_joint_velocity_to_sim_index(velocity=joint_vel, env_ids=ref_ids)
 
     # Restore command
     env.command_manager.get_term(conditioner_command_name).command[:] = command_clone
-
-    # if num_ref_envs > 0:
-    #     # Compute the measured outputs and print
-    #     cmd.get_measured_outputs(random_times, env_ids=ref_ids)
-    #
-    #     # Get the desired outputs and print
-    #     cmd.get_desired_outputs(random_times, env_ids=ref_ids)
-    #
-    #     # Compute V
-    #     vdot, v = cmd.clf.compute_vdot(cmd.y_act, cmd.y_des, cmd.dy_act, cmd.dy_des)
-    #
-    #     cmd_vel = command_clone #command
-    #
-    #     # Pretty print the output names, desired values, and measured values
-    #     if len(ref_ids) > 1 or ref_ids[0] == 1:
-    #         env_idx = 1
-    #     else:
-    #         env_idx = 0
-    #
-    #     # Phase per env (only available for phase-based managers; for legacy
-    #     # time-based commands compute on the fly from random_times / total).
-    #     if _phase_based:
-    #         phase_per_env = cmd.manager.phase
-    #     else:
-    #         phase_per_env = random_times / cmd.manager.get_total_time()
-    #
-    #     # Domain index of the env at the sampled state.  ``get_measured_outputs``
-    #     # has already updated ``cmd.current_domain`` for ref_ids.
-    #     current_domain = cmd.current_domain
-    #     cur_ref_frame_idx = cmd.cur_ref_frame_idx
-    #     ref_frame_names = cmd.ref_frames
-    #     ref_pose = cmd.ref_poses
-    #
-    #     _pretty_print_reset_state(
-    #         cmd.ordered_pos_output_names,
-    #         cmd.ordered_vel_output_names,
-    #         cmd.y_des,
-    #         cmd.y_act,
-    #         cmd.dy_des,
-    #         cmd.dy_act,
-    #         random_times,
-    #         v,
-    #         vdot,
-    #         cmd.clf.v_subgroups,
-    #         cmd_vel,
-    #         cmd.clf,
-    #         phase_per_env,
-    #         current_domain,
-    #         cur_ref_frame_idx,
-    #         ref_frame_names,
-    #         ref_pose,
-    #         env_idx=env_idx, #ref_ids[0].item(),
-    #     )
-
 
     if num_nonref_envs != 0:
         # Non reference resets
