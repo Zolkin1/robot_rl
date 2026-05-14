@@ -221,6 +221,17 @@ if not _registered:
         }
     )
 
+    # Shared-trunk transformer: single encoder feeds both actor and critic MLPs.
+    gym.register(
+        id="G1-walk-run-clf-sym-shared-transformer",
+        entry_point="isaaclab.envs:ManagerBasedRLEnv",
+        disable_env_checker=True,
+        kwargs={
+            "env_cfg_entry_point": f"{__name__}.g1_walk_run_env_cfg:G1WalkRunCLFSharedTransformerRLEnvCfg",
+            "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_rl_ppo_cfg:WalkRunSharedTrunkTransformerPPORunnerCfg",
+        }
+    )
+
     ##################
     ## Distillation ##
     ##################

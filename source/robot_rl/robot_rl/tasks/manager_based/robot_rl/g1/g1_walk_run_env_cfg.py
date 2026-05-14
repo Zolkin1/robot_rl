@@ -2,10 +2,11 @@ import math
 
 from isaaclab.utils import configclass
 
+from isaaclab.managers import ObservationTermCfg as ObsTerm
 from isaaclab.managers import TerminationTermCfg as DoneTerm
 
 from robot_rl.tasks.manager_based.robot_rl import mdp
-from .g1_clf_multiskill_base import G1MultiSkillCLFEnvCfg
+from .g1_clf_multiskill_base import G1MultiSkillCLFEnvCfg, G1MultiSkillObservationCfg
 from ..mdp.commands.multiskill_velocity_commands_cfg import VelocityBucketCfg
 from ..terrains.meta_terrain_generator_cfg import MetaTerrainGeneratorCfg
 from ..terrains.meta_terrain_importer_cfg import MetaTerrainImporterCfg
@@ -164,6 +165,58 @@ class G1WalkRunCLFTransformerRLEnvCfg(G1WalkRunCLFEnvCfg):
         self.observations.critic.act_traj_vel.history_length = history_length
         self.observations.critic.base_lin_vel.history_length = history_length
         self.observations.critic.root_quat.history_length = history_length
+
+
+@configclass
+class _SharedTrunkPolicyCfg(G1MultiSkillObservationCfg.PolicyCfg):
+    """Policy obs augmented with privileged base_lin_vel + root_quat.
+
+    Used by :class:`G1WalkRunCLFSharedTransformerRLEnvCfg`. The env is a
+    teacher policy that will be distilled, so leaking privileged info to
+    the actor is intentional — it lets the shared transformer trunk feed a
+    single latent into both heads.
+    """
+    base_lin_vel = ObsTerm(func=mdp.base_lin_vel, scale=1.0)
+    root_quat = ObsTerm(func=mdp.root_quat_w, scale=1.0)
+
+
+@configclass
+class G1WalkRunCLFSharedTransformerRLEnvCfg(G1WalkRunCLFEnvCfg):
+    """Walk-run env for the shared-trunk causal-transformer teacher.
+
+    Differences from :class:`G1WalkRunCLFTransformerRLEnvCfg`:
+    - Policy obs group includes the privileged terms ``base_lin_vel`` and
+      ``root_quat`` so actor and critic see identical obs (293 dims/step
+      with history_length=25). This is intentional — the env trains a
+      teacher policy that gets distilled to a non-privileged student.
+    - history_length=25 on every term across both policy and critic groups
+      (so the transformer can reshape every term to (history, single_dim)).
+    """
+    def __post_init__(self):
+        super().__post_init__()
+        # Replace policy with the privileged-augmented variant before
+        # setting histories, so the new terms get the same history_length.
+        self.observations.policy = _SharedTrunkPolicyCfg()
+
+        history_length = 25
+        policy_terms = (
+            "base_ang_vel", "projected_gravity", "velocity_commands",
+            "joint_pos", "joint_vel", "actions",
+            "ref_traj", "act_traj", "ref_traj_vel", "act_traj_vel",
+            "base_lin_vel", "root_quat",
+        )
+        for name in policy_terms:
+            getattr(self.observations.policy, name).history_length = history_length
+
+        critic_terms = (
+            "base_lin_vel", "base_ang_vel", "root_quat",
+            "projected_gravity", "velocity_commands",
+            "joint_pos", "joint_vel", "actions",
+            "ref_traj", "act_traj", "ref_traj_vel", "act_traj_vel",
+        )
+        for name in critic_terms:
+            getattr(self.observations.critic, name).history_length = history_length
+
 
 @configclass
 class G1WalkRunCLFDistillationEnvCfg(G1WalkRunCLFEnvCfg):

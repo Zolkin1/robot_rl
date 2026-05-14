@@ -294,3 +294,88 @@ class WalkRunCausalTransformerPPORunnerCfg(MultiSkillSymmetricHalfPeriodicPPORun
         activation="elu",
         obs_normalization=False,
     )
+
+
+##
+# Shared-trunk Causal Transformer (single encoder for actor + critic)
+##
+@configclass
+class RslRlSharedTrunkTransformerModelCfg(RslRlMLPModelCfg):
+    """Model cfg for :class:`SharedTrunkCausalTransformerModel`.
+
+    The ``encoder`` and ``owns_encoder`` kwargs that the model class consumes
+    are NOT in this cfg — :class:`SharedTrunkPPO` constructs the encoder once
+    and injects them into the actor and critic cfg dicts at runtime.
+    """
+    class_name: str = (
+        "robot_rl.network.shared_trunk_transformer:SharedTrunkCausalTransformerModel"
+    )
+    single_obs_dim: int = MISSING
+    history_length: int = MISSING
+    d_model: int = 128
+    nhead: int = 4
+    num_layers: int = 4
+    dim_feedforward: int = 256
+    dropout: float = 0.0
+
+
+@configclass
+class WalkRunSharedTrunkTransformerPPORunnerCfg(MultiSkillSymmetricHalfPeriodicPPORunnerCfg):
+    """PPO runner for the walk-run env with a single shared 25-step transformer.
+
+    Pairs with :class:`G1WalkRunCLFSharedTransformerRLEnvCfg`, which augments
+    the policy obs group with privileged terms so actor and critic see
+    identical 293-dim/step obs. The algorithm class :class:`SharedTrunkPPO`
+    constructs one encoder, registers it as an ``nn.Module`` child of the
+    actor only, and injects a Python reference into the critic — so the
+    encoder is forwarded once per minibatch (cached) and its parameters
+    appear exactly once in the optimizer.
+    """
+    experiment_name = "g1_walk_run_shared_trunk_transformer"
+    obs_groups = {
+        "actor": ["policy"],
+        "critic": ["policy"],
+    }
+    actor = RslRlSharedTrunkTransformerModelCfg(
+        history_length=25,
+        single_obs_dim=293,  # 12 policy terms × per-term dim (286 + base_lin_vel(3) + root_quat(4))
+        hidden_dims=[256, 128],
+        d_model=128,
+        nhead=4,
+        num_layers=4,
+        dim_feedforward=256,
+        dropout=0.0,
+        activation="elu",
+        distribution_cfg=RslRlMLPModelCfg.GaussianDistributionCfg(init_std=1.0, std_type="log"),
+        obs_normalization=False,
+    )
+    critic = RslRlSharedTrunkTransformerModelCfg(
+        history_length=25,
+        single_obs_dim=293,
+        hidden_dims=[256, 128],
+        d_model=128,
+        nhead=4,
+        num_layers=4,
+        dim_feedforward=256,
+        dropout=0.0,
+        activation="elu",
+        obs_normalization=False,
+    )
+    algorithm = RslRlPpoAlgorithmCfg(
+        class_name="robot_rl.network.shared_trunk_transformer:SharedTrunkPPO",
+        value_loss_coef=1.0,
+        use_clipped_value_loss=True,
+        clip_param=0.2,
+        entropy_coef=0.008,
+        num_learning_epochs=5,
+        num_mini_batches=4,
+        learning_rate=1.0e-3,
+        schedule="adaptive",
+        gamma=0.99,
+        lam=0.95,
+        desired_kl=0.01,
+        max_grad_norm=1.0,
+        symmetry_cfg=RslRlSymmetryCfg(
+            use_data_augmentation=True, data_augmentation_func=symmetric_data_augmentation_half_periodic
+        ),
+    )
