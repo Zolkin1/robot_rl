@@ -121,31 +121,49 @@ class G1WalkRunCLFEnvCfg(G1MultiSkillCLFEnvCfg):
         self.terminations.frame_drift = DoneTerm(
           func=mdp.frame_deviation_from_reference,
           params={
+              "debug": False,
               "cmd_name": "traj_ref",
               "frame_names": ["pelvis_link", "left_ankle_roll_link", "right_ankle_roll_link"],
               "max_frac": 0.3, #0.25,
               "min_dist": 0.1,
-              "grace_period_s": 0.0, #2.0,    # TODO: This probably makes critic learning hard as sometimes these states terminate and sometimes they don't.
+              "grace_period_s": 0.5, #2.0,    # TODO: This probably makes critic learning hard as sometimes these states terminate and sometimes they don't.
                                         #   Depends on when traj was switched, which isn't an observation currently.
           },
         )
 
 
-# @configclass
-# class G1WalkRunCLFTransformerRLEnvCfg(G1WalkRunCLFEnvCfg):
-#     """Env cfg to run RL with the transformer."""
-#     def __post_init__(self):
-#         # Post init of parent
-#         super().__post_init__()
-#
-#         # Set uniform history for all policy obs terms (each timestep = 1 token)
-#         history_length = 50
-#         self.observations.unpriv_policy.base_ang_vel.history_length = history_length
-#         self.observations.unpriv_policy.projected_gravity.history_length = history_length
-#         self.observations.unpriv_policy.velocity_commands.history_length = history_length
-#         self.observations.unpriv_policy.joint_pos.history_length = history_length
-#         self.observations.unpriv_policy.joint_vel.history_length = history_length
-#         self.observations.unpriv_policy.actions.history_length = history_length
+@configclass
+class G1WalkRunCLFTransformerRLEnvCfg(G1WalkRunCLFEnvCfg):
+    """Env cfg to run RL with the transformer."""
+    def __post_init__(self):
+        # Post init of parent
+        super().__post_init__()
+
+        # Set uniform history for all policy obs terms (each timestep = 1 token)
+        history_length = 25
+        self.observations.policy.base_ang_vel.history_length = history_length
+        self.observations.policy.projected_gravity.history_length = history_length
+        self.observations.policy.velocity_commands.history_length = history_length
+        self.observations.policy.joint_pos.history_length = history_length
+        self.observations.policy.joint_vel.history_length = history_length
+        self.observations.policy.actions.history_length = history_length
+        self.observations.policy.ref_traj.history_length = history_length
+        self.observations.policy.act_traj.history_length = history_length
+        self.observations.policy.ref_traj_vel.history_length = history_length
+        self.observations.policy.act_traj_vel.history_length = history_length
+
+        self.observations.critic.base_ang_vel.history_length = history_length
+        self.observations.critic.projected_gravity.history_length = history_length
+        self.observations.critic.velocity_commands.history_length = history_length
+        self.observations.critic.joint_pos.history_length = history_length
+        self.observations.critic.joint_vel.history_length = history_length
+        self.observations.critic.actions.history_length = history_length
+        self.observations.critic.ref_traj.history_length = history_length
+        self.observations.critic.act_traj.history_length = history_length
+        self.observations.critic.ref_traj_vel.history_length = history_length
+        self.observations.critic.act_traj_vel.history_length = history_length
+        self.observations.critic.base_lin_vel.history_length = history_length
+        self.observations.critic.root_quat.history_length = history_length
 
 @configclass
 class G1WalkRunCLFDistillationEnvCfg(G1WalkRunCLFEnvCfg):

@@ -40,6 +40,45 @@ def _unit_for_name(name: str) -> str:
     return ""
 
 
+def _slice_to_time_range(
+    data: dict[str, np.ndarray],
+    metadata: dict[str, Any],
+    time_range: tuple[float | None, float | None],
+) -> tuple[dict[str, np.ndarray], dict[str, Any]]:
+    """Slice every time-leading array in ``data`` to the requested window.
+
+    Step indices are computed from ``metadata["dt"]``. ``metadata`` is copied
+    (not mutated) and gets a ``"t_offset"`` key equal to the window start so
+    time-axis plots show absolute seconds within the window.
+    """
+    dt = metadata.get("dt")
+    if dt is None or dt <= 0:
+        print("[WARN run_plots] time_range requested but metadata['dt'] is missing; skipping slice.")
+        return data, metadata
+
+    start_s, end_s = time_range
+    n_steps_total = max((arr.shape[0] for arr in data.values() if isinstance(arr, np.ndarray)), default=0)
+    if n_steps_total == 0:
+        return data, metadata
+
+    start_step = 0 if start_s is None else max(0, int(np.floor(start_s / dt)))
+    end_step = n_steps_total if end_s is None else min(n_steps_total, int(np.ceil(end_s / dt)))
+    if end_step <= start_step:
+        print(
+            f"[WARN run_plots] time_range {time_range} maps to empty step "
+            f"range [{start_step}, {end_step}); skipping slice."
+        )
+        return data, metadata
+
+    sliced = {
+        k: (v[start_step:end_step] if isinstance(v, np.ndarray) and v.shape[0] == n_steps_total else v)
+        for k, v in data.items()
+    }
+    new_metadata = dict(metadata)
+    new_metadata["t_offset"] = start_step * dt
+    return sliced, new_metadata
+
+
 def _grid_plot(
     data: dict[str, np.ndarray],
     key_a: str,
@@ -54,6 +93,8 @@ def _grid_plot(
     label_b: str = "Actual",
     n_cols: int = 4,
     dt: float | None = None,
+    legend_loc: str = "best",
+    t_offset: float = 0.0,
 ) -> None:
     """Shared helper for grid-of-subplots plots (positions, velocities, joints, torques).
 
@@ -64,7 +105,7 @@ def _grid_plot(
     n_dims = arr_a.shape[2] if arr_a.ndim >= 3 else arr_a.shape[1]
     n_rows = max(1, (n_dims + n_cols - 1) // n_cols)
     if dt is not None:
-        x_axis = np.arange(arr_a.shape[0]) * dt
+        x_axis = np.arange(arr_a.shape[0]) * dt + t_offset
         x_label = "Time (s)"
     else:
         x_axis = np.arange(arr_a.shape[0])
@@ -90,7 +131,7 @@ def _grid_plot(
             ax.set_ylabel(y_label_fmt.format(unit=unit) if unit else y_label_fmt.format(unit=""))
             ax.grid(True, alpha=0.3)
             if i == 0 and key_b is not None:
-                ax.legend()
+                ax.legend(loc=legend_loc)
 
         # Hide unused subplots
         for i in range(n_dims, len(axs_flat)):
@@ -124,6 +165,8 @@ def plot_positions(
         filename_fmt="positions_env{env_id}.png",
         save_dir=save_dir, env_ids=env_ids,
         dt=metadata.get("dt"),
+        legend_loc="lower left",
+        t_offset=metadata.get("t_offset", 0.0),
     )
 
 
@@ -145,6 +188,7 @@ def plot_velocities(
         filename_fmt="velocities_env{env_id}.png",
         save_dir=save_dir, env_ids=env_ids,
         dt=metadata.get("dt"),
+        t_offset=metadata.get("t_offset", 0.0),
     )
 
 
@@ -227,7 +271,8 @@ def plot_base_velocity(
 
     bv = data["base_velocity"]
     dt = metadata.get("dt", 1.0)
-    time_s = np.arange(bv.shape[0]) * dt
+    t_offset = metadata.get("t_offset", 0.0)
+    time_s = np.arange(bv.shape[0]) * dt + t_offset
     labels = ["Linear X", "Linear Y", "Angular Z"]
     units = ["m/s", "m/s", "rad/s"]
     n_dims = min(bv.shape[2], 3)
@@ -320,7 +365,7 @@ def plot_skill_and_terrain(
         if has_terrain else data.get("traj_idx")
     )
     n_steps = n_steps_source.shape[0]
-    time_s = np.arange(n_steps) * dt
+    time_s = np.arange(n_steps) * dt + metadata.get("t_offset", 0.0)
 
     for env_id in env_ids:
         nplots = int(has_skill) + int(has_terrain) + int(has_traj)
@@ -457,7 +502,7 @@ def plot_skill_transition_diag(
     n_dims = y_des.shape[2]
     n_cols = 4
     n_rows = max(1, (n_dims + n_cols - 1) // n_cols)
-    time_s = np.arange(y_des.shape[0]) * dt
+    time_s = np.arange(y_des.shape[0]) * dt + metadata.get("t_offset", 0.0)
 
     for env_id in env_ids:
         a = alpha[:, env_id]
@@ -628,7 +673,7 @@ def plot_domain_info(
     import matplotlib.gridspec as gridspec
 
     dt = metadata.get("dt", 1.0)
-    time_s = np.arange(data["phasing_var"].shape[0]) * dt
+    time_s = np.arange(data["phasing_var"].shape[0]) * dt + metadata.get("t_offset", 0.0)
 
     has_phase_obs = "phase_obs" in data
     has_gate_data = "gate_rel_phi" in data
@@ -728,7 +773,7 @@ def plot_reference_frame(
     ref_poses = data["ref_poses"]            # [T, N_envs, 7]
     ref_idx = data["cur_ref_frame_idx"]      # [T, N_envs]
     dt = metadata.get("dt", 1.0)
-    time_s = np.arange(ref_poses.shape[0]) * dt
+    time_s = np.arange(ref_poses.shape[0]) * dt + metadata.get("t_offset", 0.0)
     frame_names = metadata.get("ref_frames", [])
     n_frames = max(int(ref_idx.max()) + 1, len(frame_names), 1)
     axis_labels = ("X", "Y", "Z")
@@ -1209,6 +1254,7 @@ def run_plots(
     save_dir: str,
     plot_names: list[str],
     env_ids: list[int],
+    time_range: tuple[float | None, float | None] | None = None,
 ) -> None:
     """Execute the requested plot functions and save stats.
 
@@ -1218,8 +1264,16 @@ def run_plots(
         save_dir: Directory to write PNGs and stats into.
         plot_names: List of plot names from PLOT_REGISTRY, ``"default"``, or ``"all"``.
         env_ids: Which env indices to generate per-env plots for.
+        time_range: Optional ``(start_s, end_s)`` time window to restrict the
+            plots and stats to. Either end can be ``None`` to leave it
+            open. Requires ``metadata["dt"]``; ignored otherwise. Time-axis
+            plots show absolute seconds (offset preserved); step-indexed
+            plots show steps starting at the window start.
     """
     os.makedirs(save_dir, exist_ok=True)
+
+    if time_range is not None:
+        data, metadata = _slice_to_time_range(data, metadata, time_range)
 
     # Resolve special names
     resolved: list[str] = []

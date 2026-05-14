@@ -73,6 +73,7 @@ def frame_deviation_from_reference(
     max_frac: float,
     min_dist: float = 0.0,
     grace_period_s: float = 0.0,
+    debug: bool = False,
 ) -> torch.Tensor:
     """Terminate when any listed frame deviates from its reference by more
     than ``max(max_frac * chord, min_dist)``.
@@ -105,6 +106,9 @@ def frame_deviation_from_reference(
             disables the grace.  Silently no-ops if the command term does
             not expose ``time_since_traj_change_s`` (e.g. single-skill
             commands).
+        debug: If True, print per-frame ``(err_x, err_y, err_z, ||err||,
+            threshold)`` for every env that terminates this step.  Off by
+            default — enable from the cfg via ``params={"debug": True}``.
 
     Returns:
         Boolean tensor of shape ``[num_envs]`` — ``True`` for envs that
@@ -169,6 +173,21 @@ def frame_deviation_from_reference(
         time_since = getattr(cmd, "time_since_traj_change_s", None)
         if time_since is not None:
             terminate = terminate & (time_since >= grace_period_s)
+
+    if debug and terminate.any():
+        bad_envs = terminate.nonzero(as_tuple=False).flatten().tolist()
+        for env_id in bad_envs:
+            parts = []
+            for f, name in enumerate(frame_names):
+                ex, ey, ez = err[env_id, f].tolist()
+                n = err_norm[env_id, f].item()
+                t = threshold[env_id, f].item()
+                marker = "!!" if n > t else "  "
+                parts.append(
+                    f"{marker} {name}: err=({ex:+.3f}, {ey:+.3f}, {ez:+.3f}) "
+                    f"||err||={n:.3f} thresh={t:.3f}"
+                )
+            print(f"[frame_dev term] env {env_id}: " + " | ".join(parts))
 
     return terminate
 

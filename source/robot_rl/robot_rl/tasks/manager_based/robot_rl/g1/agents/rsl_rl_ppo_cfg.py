@@ -247,3 +247,50 @@ class CausalTransformerPPORunnerCfg(PPORunnerCfg):
         )
     )
 
+
+
+##
+# Walk-Run Causal Transformer Runner (actor + critic both transformer)
+##
+@configclass
+class WalkRunCausalTransformerPPORunnerCfg(MultiSkillSymmetricHalfPeriodicPPORunnerCfg):
+    """PPO runner for the walk-run env with a 25-step causal transformer for
+    both actor and critic.
+
+    Pairs with :class:`G1WalkRunCLFTransformerRLEnvCfg`, which sets
+    ``history_length=25`` on every term in the ``policy`` and ``critic``
+    observation groups.  ``single_obs_dim`` for each model must equal the
+    per-step flattened dim of its group (group total dim / 25).  Start with
+    the placeholders below, run once, read the per-group obs dim from the
+    obs-manager log, divide by 25, and fill in the real values.
+    """
+    experiment_name = "g1_walk_run_causal_transformer"
+    obs_groups = {
+        "actor": ["policy"],
+        "critic": ["critic"],
+    }
+    actor = RslRlCausalTransformerModelCfg(
+        history_length=25,
+        single_obs_dim=286,  # policy group: 7150 / 25
+        hidden_dims=[256, 128],
+        d_model=128,
+        nhead=4,
+        num_layers=4,
+        dim_feedforward=256,
+        dropout=0.0,
+        activation="elu",
+        distribution_cfg=RslRlMLPModelCfg.GaussianDistributionCfg(init_std=1.0, std_type="log"),
+        obs_normalization=False,
+    )
+    critic = RslRlCausalTransformerModelCfg(
+        history_length=25,
+        single_obs_dim=293,  # critic group: 7325 / 25 (extra 7 dims from base_lin_vel + root_quat)
+        hidden_dims=[256, 128],
+        d_model=128,
+        nhead=4,
+        num_layers=4,
+        dim_feedforward=256,
+        dropout=0.0,
+        activation="elu",
+        obs_normalization=False,
+    )

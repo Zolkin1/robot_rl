@@ -112,6 +112,11 @@ parser.add_argument(
          f"Available: {', '.join(['default', 'all', 'none', *PLOT_REGISTRY.keys()])}",
 )
 parser.add_argument("--plot_envs", type=int, default=1, help="Number of envs to generate plots for.")
+parser.add_argument(
+    "--plot_time_range", type=str, default=None,
+    help='Restrict plots to a time window in seconds. Format: "start,end" — '
+         'either end may be empty (e.g. "5,", ",10"). Requires logging.',
+)
 parser.add_argument("--max_steps", type=int, default=None, help="Exit after this many steps (None = run forever).")
 parser.add_argument(
     "--train_mode",
@@ -441,7 +446,17 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
                     data["gate_weights"] = torch.stack(gate_weights_log).cpu().numpy()
                     metadata["num_experts"] = _moe_net.num_experts
                 plots_dir = os.path.join(log_dir, "plots")
-                run_plots(data, metadata, plots_dir, plot_names, env_ids)
+                time_range = None
+                if args_cli.plot_time_range:
+                    parts = args_cli.plot_time_range.split(",")
+                    if len(parts) != 2:
+                        raise ValueError(
+                            f"--plot_time_range expects 'start,end'; got {args_cli.plot_time_range!r}"
+                        )
+                    start = float(parts[0]) if parts[0].strip() else None
+                    end = float(parts[1]) if parts[1].strip() else None
+                    time_range = (start, end)
+                run_plots(data, metadata, plots_dir, plot_names, env_ids, time_range=time_range)
 
             # close the simulator
             env.close()
