@@ -270,7 +270,7 @@ class WalkRunCausalTransformerPPORunnerCfg(MultiSkillSymmetricHalfPeriodicPPORun
         "critic": ["critic"],
     }
     actor = RslRlCausalTransformerModelCfg(
-        history_length=25,
+        history_length=20,
         single_obs_dim=286,  # policy group: 7150 / 25
         hidden_dims=[256, 128],
         d_model=128,
@@ -283,7 +283,7 @@ class WalkRunCausalTransformerPPORunnerCfg(MultiSkillSymmetricHalfPeriodicPPORun
         obs_normalization=False,
     )
     critic = RslRlCausalTransformerModelCfg(
-        history_length=25,
+        history_length=20,
         single_obs_dim=293,  # critic group: 7325 / 25 (extra 7 dims from base_lin_vel + root_quat)
         hidden_dims=[256, 128],
         d_model=128,
@@ -378,4 +378,41 @@ class WalkRunSharedTrunkTransformerPPORunnerCfg(MultiSkillSymmetricHalfPeriodicP
         symmetry_cfg=RslRlSymmetryCfg(
             use_data_augmentation=True, data_augmentation_func=symmetric_data_augmentation_half_periodic
         ),
+    )
+
+
+##
+# Causal-Transformer actor + MLP critic (asymmetric architecture)
+##
+@configclass
+class WalkRunCausalTransformerActorMLPCriticPPORunnerCfg(MultiSkillSymmetricHalfPeriodicPPORunnerCfg):
+    """PPO runner with a 20-step causal-transformer actor and an MLP critic.
+
+    Pairs with :class:`G1WalkRunCLFTransformerActorRLEnvCfg`, which sets
+    ``history_length=20`` on the policy group only and leaves the critic
+    group single-step. That keeps the MLP critic lean (input dim = 293, not
+    5860) while the transformer actor gets the temporal context it needs.
+    """
+    experiment_name = "g1_walk_run_transformer_actor_mlp_critic"
+    obs_groups = {
+        "actor": ["policy"],
+        "critic": ["critic"],
+    }
+    actor = RslRlCausalTransformerModelCfg(
+        history_length=20,
+        single_obs_dim=286,  # policy group: 5720 / 20
+        hidden_dims=[256, 128],
+        d_model=128,
+        nhead=4,
+        num_layers=4,
+        dim_feedforward=256,
+        dropout=0.0,
+        activation="elu",
+        distribution_cfg=RslRlMLPModelCfg.GaussianDistributionCfg(init_std=1.0, std_type="log"),
+        obs_normalization=False,
+    )
+    critic = RslRlMLPModelCfg(
+        hidden_dims=[512, 256, 128],
+        activation="elu",
+        obs_normalization=False,
     )

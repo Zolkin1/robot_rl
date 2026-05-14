@@ -134,6 +134,31 @@ class G1WalkRunCLFEnvCfg(G1MultiSkillCLFEnvCfg):
 
 
 @configclass
+class G1WalkRunCLFTransformerActorRLEnvCfg(G1WalkRunCLFEnvCfg):
+    """Env cfg for the asymmetric transformer-actor + MLP-critic setup.
+
+    The policy obs group is history-stacked (history_length=20) so the
+    transformer actor can reshape it into a token sequence; the critic obs
+    group is left single-step so the MLP critic gets a lean 293-dim input
+    instead of a 5860-dim history-stacked one (no benefit for an MLP).
+    """
+    def __post_init__(self):
+        super().__post_init__()
+        history_length = 20
+        self.observations.policy.base_ang_vel.history_length = history_length
+        self.observations.policy.projected_gravity.history_length = history_length
+        self.observations.policy.velocity_commands.history_length = history_length
+        self.observations.policy.joint_pos.history_length = history_length
+        self.observations.policy.joint_vel.history_length = history_length
+        self.observations.policy.actions.history_length = history_length
+        self.observations.policy.ref_traj.history_length = history_length
+        self.observations.policy.act_traj.history_length = history_length
+        self.observations.policy.ref_traj_vel.history_length = history_length
+        self.observations.policy.act_traj_vel.history_length = history_length
+        # Critic stays single-step.
+
+
+@configclass
 class G1WalkRunCLFTransformerRLEnvCfg(G1WalkRunCLFEnvCfg):
     """Env cfg to run RL with the transformer."""
     def __post_init__(self):
@@ -141,7 +166,7 @@ class G1WalkRunCLFTransformerRLEnvCfg(G1WalkRunCLFEnvCfg):
         super().__post_init__()
 
         # Set uniform history for all policy obs terms (each timestep = 1 token)
-        history_length = 25
+        history_length = 20
         self.observations.policy.base_ang_vel.history_length = history_length
         self.observations.policy.projected_gravity.history_length = history_length
         self.observations.policy.velocity_commands.history_length = history_length
@@ -198,7 +223,7 @@ class G1WalkRunCLFSharedTransformerRLEnvCfg(G1WalkRunCLFEnvCfg):
         # setting histories, so the new terms get the same history_length.
         self.observations.policy = _SharedTrunkPolicyCfg()
 
-        history_length = 25
+        history_length = 20
         policy_terms = (
             "base_ang_vel", "projected_gravity", "velocity_commands",
             "joint_pos", "joint_vel", "actions",
