@@ -73,6 +73,49 @@ def ref_cos_phase(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
         cphase = cphase.unsqueeze(-1)
     return cphase
 
+def grace_period_active(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    grace_period_s: float,
+    one_hot: bool = True,
+) -> torch.Tensor:
+    """Indicator for whether the post-trajectory-change grace period is active.
+
+    Reads ``time_since_traj_change_s`` from the named command term (populated
+    by :class:`BatchedMultiSkillCommand._pre_update_phase`) and compares it
+    against the configured grace window. The flag is True while
+    ``time_since_traj_change_s < grace_period_s``.
+
+    Args:
+        env: The Isaac Lab RL environment.
+        command_name: Trajectory command term exposing
+            ``time_since_traj_change_s``.
+        grace_period_s: Grace-window length in seconds. Pair with the value
+            on the matching ``frame_deviation_from_reference`` termination
+            to keep them in sync.
+        one_hot: When True, return a ``[num_envs, 2]`` one-hot
+            ``[not_in_grace, in_grace]``. When False, return a
+            ``[num_envs, 1]`` 0/1 flag.
+
+    Returns:
+        Float tensor of shape ``[num_envs, 2]`` (one-hot) or
+        ``[num_envs, 1]`` (single flag). If the command term doesn't expose
+        ``time_since_traj_change_s`` (e.g. single-skill commands), reports
+        "not in grace" for all envs.
+    """
+    cmd = env.command_manager.get_term(command_name)
+    time_since = getattr(cmd, "time_since_traj_change_s", None)
+    if time_since is None:
+        return torch.zeros(
+            (env.num_envs, 2 if one_hot else 1),
+            device=env.device,
+        )
+    in_grace = time_since < grace_period_s
+    if one_hot:
+        return torch.nn.functional.one_hot(in_grace.long(), num_classes=2).float()
+    return in_grace.float().unsqueeze(-1)
+
+
 def skill_one_hot(env: ManagerBasedRLEnv, command_name: str = "traj_ref") -> torch.Tensor:
     """One-hot encoding of the trajectory cmd's active skill for each env.
 

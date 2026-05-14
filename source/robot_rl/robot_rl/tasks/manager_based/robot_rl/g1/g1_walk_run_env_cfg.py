@@ -132,6 +132,26 @@ class G1WalkRunCLFEnvCfg(G1MultiSkillCLFEnvCfg):
           },
         )
 
+        ##
+        # Grace-period observation
+        ##
+        # One-hot flag exposed to both actor and critic so the policy can
+        # learn that the deviation termination is suspended right now.
+        # ``grace_period_s`` is sourced from the termination's params so the
+        # observation tracks the termination automatically.
+        grace_period_s = self.terminations.frame_drift.params["grace_period_s"]
+        grace_obs_params = {
+            "command_name": "traj_ref",
+            "grace_period_s": grace_period_s,
+            "one_hot": True,
+        }
+        self.observations.policy.grace_active = ObsTerm(
+            func=mdp.grace_period_active, params=grace_obs_params,
+        )
+        self.observations.critic.grace_active = ObsTerm(
+            func=mdp.grace_period_active, params=grace_obs_params,
+        )
+
 
 @configclass
 class G1WalkRunCLFTransformerActorRLEnvCfg(G1WalkRunCLFEnvCfg):
