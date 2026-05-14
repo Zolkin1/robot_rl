@@ -208,43 +208,6 @@ if not _registered:
         }
     )
 
-    #################
-    ## Transformer ##
-    #################
-    gym.register(
-        id="G1-walk-run-clf-sym-transformer",
-        entry_point="isaaclab.envs:ManagerBasedRLEnv",
-        disable_env_checker=True,
-        kwargs={
-            "env_cfg_entry_point": f"{__name__}.g1_walk_run_env_cfg:G1WalkRunCLFTransformerRLEnvCfg",
-            "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_rl_ppo_cfg:WalkRunCausalTransformerPPORunnerCfg",
-        }
-    )
-
-    # Shared-trunk transformer: single encoder feeds both actor and critic MLPs.
-    gym.register(
-        id="G1-walk-run-clf-sym-shared-transformer",
-        entry_point="isaaclab.envs:ManagerBasedRLEnv",
-        disable_env_checker=True,
-        kwargs={
-            "env_cfg_entry_point": f"{__name__}.g1_walk_run_env_cfg:G1WalkRunCLFSharedTransformerRLEnvCfg",
-            "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_rl_ppo_cfg:WalkRunSharedTrunkTransformerPPORunnerCfg",
-        }
-    )
-
-    # Asymmetric: transformer actor (history on policy obs only) + MLP critic
-    # reading single-step privileged obs. Leaner than the dual-transformer
-    # variant since the critic stays small.
-    gym.register(
-        id="G1-walk-run-clf-sym-transformer-actor",
-        entry_point="isaaclab.envs:ManagerBasedRLEnv",
-        disable_env_checker=True,
-        kwargs={
-            "env_cfg_entry_point": f"{__name__}.g1_walk_run_env_cfg:G1WalkRunCLFTransformerActorRLEnvCfg",
-            "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_rl_ppo_cfg:WalkRunCausalTransformerActorMLPCriticPPORunnerCfg",
-        }
-    )
-
     ##################
     ## Distillation ##
     ##################

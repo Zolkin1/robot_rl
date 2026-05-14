@@ -6,7 +6,7 @@ from isaaclab.managers import ObservationTermCfg as ObsTerm
 from isaaclab.managers import TerminationTermCfg as DoneTerm
 
 from robot_rl.tasks.manager_based.robot_rl import mdp
-from .g1_clf_multiskill_base import G1MultiSkillCLFEnvCfg, G1MultiSkillObservationCfg
+from .g1_clf_multiskill_base import G1MultiSkillCLFEnvCfg
 from ..mdp.commands.multiskill_velocity_commands_cfg import VelocityBucketCfg
 from ..terrains.meta_terrain_generator_cfg import MetaTerrainGeneratorCfg
 from ..terrains.meta_terrain_importer_cfg import MetaTerrainImporterCfg
@@ -127,7 +127,7 @@ class G1WalkRunCLFEnvCfg(G1MultiSkillCLFEnvCfg):
               "frame_names": ["pelvis_link", "left_ankle_roll_link", "right_ankle_roll_link"],
               "max_frac": 0.3, #0.25,
               "min_dist": 0.1,
-              "grace_period_s": 0.5, #2.0,    # TODO: This probably makes critic learning hard as sometimes these states terminate and sometimes they don't.
+              "grace_period_s": 1.0, #0.5, #2.0,    # TODO: This probably makes critic learning hard as sometimes these states terminate and sometimes they don't.
                                         #   Depends on when traj was switched, which isn't an observation currently.
           },
         )
@@ -151,116 +151,6 @@ class G1WalkRunCLFEnvCfg(G1MultiSkillCLFEnvCfg):
         self.observations.critic.grace_active = ObsTerm(
             func=mdp.grace_period_active, params=grace_obs_params,
         )
-
-
-@configclass
-class G1WalkRunCLFTransformerActorRLEnvCfg(G1WalkRunCLFEnvCfg):
-    """Env cfg for the asymmetric transformer-actor + MLP-critic setup.
-
-    The policy obs group is history-stacked (history_length=20) so the
-    transformer actor can reshape it into a token sequence; the critic obs
-    group is left single-step so the MLP critic gets a lean 293-dim input
-    instead of a 5860-dim history-stacked one (no benefit for an MLP).
-    """
-    def __post_init__(self):
-        super().__post_init__()
-        history_length = 20
-        self.observations.policy.base_ang_vel.history_length = history_length
-        self.observations.policy.projected_gravity.history_length = history_length
-        self.observations.policy.velocity_commands.history_length = history_length
-        self.observations.policy.joint_pos.history_length = history_length
-        self.observations.policy.joint_vel.history_length = history_length
-        self.observations.policy.actions.history_length = history_length
-        self.observations.policy.ref_traj.history_length = history_length
-        self.observations.policy.act_traj.history_length = history_length
-        self.observations.policy.ref_traj_vel.history_length = history_length
-        self.observations.policy.act_traj_vel.history_length = history_length
-        # Critic stays single-step.
-
-
-@configclass
-class G1WalkRunCLFTransformerRLEnvCfg(G1WalkRunCLFEnvCfg):
-    """Env cfg to run RL with the transformer."""
-    def __post_init__(self):
-        # Post init of parent
-        super().__post_init__()
-
-        # Set uniform history for all policy obs terms (each timestep = 1 token)
-        history_length = 20
-        self.observations.policy.base_ang_vel.history_length = history_length
-        self.observations.policy.projected_gravity.history_length = history_length
-        self.observations.policy.velocity_commands.history_length = history_length
-        self.observations.policy.joint_pos.history_length = history_length
-        self.observations.policy.joint_vel.history_length = history_length
-        self.observations.policy.actions.history_length = history_length
-        self.observations.policy.ref_traj.history_length = history_length
-        self.observations.policy.act_traj.history_length = history_length
-        self.observations.policy.ref_traj_vel.history_length = history_length
-        self.observations.policy.act_traj_vel.history_length = history_length
-
-        self.observations.critic.base_ang_vel.history_length = history_length
-        self.observations.critic.projected_gravity.history_length = history_length
-        self.observations.critic.velocity_commands.history_length = history_length
-        self.observations.critic.joint_pos.history_length = history_length
-        self.observations.critic.joint_vel.history_length = history_length
-        self.observations.critic.actions.history_length = history_length
-        self.observations.critic.ref_traj.history_length = history_length
-        self.observations.critic.act_traj.history_length = history_length
-        self.observations.critic.ref_traj_vel.history_length = history_length
-        self.observations.critic.act_traj_vel.history_length = history_length
-        self.observations.critic.base_lin_vel.history_length = history_length
-        self.observations.critic.root_quat.history_length = history_length
-
-
-@configclass
-class _SharedTrunkPolicyCfg(G1MultiSkillObservationCfg.PolicyCfg):
-    """Policy obs augmented with privileged base_lin_vel + root_quat.
-
-    Used by :class:`G1WalkRunCLFSharedTransformerRLEnvCfg`. The env is a
-    teacher policy that will be distilled, so leaking privileged info to
-    the actor is intentional — it lets the shared transformer trunk feed a
-    single latent into both heads.
-    """
-    base_lin_vel = ObsTerm(func=mdp.base_lin_vel, scale=1.0)
-    root_quat = ObsTerm(func=mdp.root_quat_w, scale=1.0)
-
-
-@configclass
-class G1WalkRunCLFSharedTransformerRLEnvCfg(G1WalkRunCLFEnvCfg):
-    """Walk-run env for the shared-trunk causal-transformer teacher.
-
-    Differences from :class:`G1WalkRunCLFTransformerRLEnvCfg`:
-    - Policy obs group includes the privileged terms ``base_lin_vel`` and
-      ``root_quat`` so actor and critic see identical obs (293 dims/step
-      with history_length=25). This is intentional — the env trains a
-      teacher policy that gets distilled to a non-privileged student.
-    - history_length=25 on every term across both policy and critic groups
-      (so the transformer can reshape every term to (history, single_dim)).
-    """
-    def __post_init__(self):
-        super().__post_init__()
-        # Replace policy with the privileged-augmented variant before
-        # setting histories, so the new terms get the same history_length.
-        self.observations.policy = _SharedTrunkPolicyCfg()
-
-        history_length = 20
-        policy_terms = (
-            "base_ang_vel", "projected_gravity", "velocity_commands",
-            "joint_pos", "joint_vel", "actions",
-            "ref_traj", "act_traj", "ref_traj_vel", "act_traj_vel",
-            "base_lin_vel", "root_quat",
-        )
-        for name in policy_terms:
-            getattr(self.observations.policy, name).history_length = history_length
-
-        critic_terms = (
-            "base_lin_vel", "base_ang_vel", "root_quat",
-            "projected_gravity", "velocity_commands",
-            "joint_pos", "joint_vel", "actions",
-            "ref_traj", "act_traj", "ref_traj_vel", "act_traj_vel",
-        )
-        for name in critic_terms:
-            getattr(self.observations.critic, name).history_length = history_length
 
 
 @configclass
