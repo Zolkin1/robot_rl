@@ -91,18 +91,24 @@ class BaseTrajectoryCommand(CommandTerm):
 
         # --- Domain tracking ----------------------------------------------
         # ``current_domain`` is the domain index from the previous step
-        # (relative to the previous trajectory).  ``prev_traj_idx`` is
-        # the previous step's global trajectory index.  Both are needed
-        # to detect "needs a ref_poses refresh" in get_measured_outputs:
-        # the domain index alone is misleading after a trajectory swap
-        # because domain indices live in per-trajectory index spaces and
-        # can numerically coincide across two unrelated trajectories
-        # (e.g. run domain 1 == walk domain 1 at phi≈0.5 after a
-        # run→walk cross-fade gate fire).  Tracking the trajectory index
-        # too forces a refresh on any swap.  Initialised to -1 so the
-        # first step always triggers an update.
+        # (relative to the previous trajectory).  ``prev_ref_frame_idx``
+        # is the index (into ``self.ref_frames``) of the body we last
+        # anchored ``ref_poses`` to.  Together they drive the
+        # "needs a ref_poses refresh" gate in get_measured_outputs:
+        #
+        #  * domain-level change (gate fire, snap) → anchor swap
+        #  * ref-frame-identity change across trajectories at the same
+        #    domain (e.g. cross-skill swap whose new domain 0 puts the
+        #    opposite foot in stance) → anchor swap
+        #
+        # Using ref-frame identity instead of trajectory index avoids
+        # spurious refreshes on intra-skill bucket swaps that keep the
+        # stance foot the same — those would otherwise re-anchor the
+        # marker to the foot's *current* world pose mid-stance, which
+        # lands above ground if the foot has already started pushoff.
+        # Initialised to -1 so the first step always triggers an update.
         self.current_domain = -1 * torch.ones(self.num_envs, dtype=torch.long, device=self.device)
-        self.prev_traj_idx = -1 * torch.ones(self.num_envs, dtype=torch.long, device=self.device)
+        self.prev_ref_frame_idx = -1 * torch.ones(self.num_envs, dtype=torch.long, device=self.device)
 
         # --- Output parsing -----------------------------------------------
         result = self._parse_outputs(self.manager.get_pos_output_names)
@@ -223,32 +229,31 @@ class BaseTrajectoryCommand(CommandTerm):
         ref_poses[:, :, :3] = wp.to_torch(self.robot.data.body_pos_w)[:, self.ref_frame_indices]
         ref_poses[:, :, 3:] = wp.to_torch(self.robot.data.body_quat_w)[:, self.ref_frame_indices]
 
-        # Detect domain transitions OR trajectory swaps.  Either one
-        # invalidates the cached ref_poses anchor (the active ref body
-        # may have changed even when the domain index numerically agrees
-        # across two different trajectories — see ``prev_traj_idx``'s
-        # docstring above for the run→walk gate-fire pathology).
+        # Look up the new domain and active ref-frame identity *before*
+        # computing the refresh gate — the gate triggers on a change in
+        # either the domain index or the active ref frame (see
+        # ``prev_ref_frame_idx`` docstring in ``__init__``).
+        # ``prev_ref_frame_idx`` is the LAST anchored ref frame and is
+        # only updated when the anchor itself is refreshed below — that
+        # way a deferred refresh (gate fired but the new frame isn't yet
+        # in-contact per the trajectory table) keeps the trigger live
+        # across steps.
         new_domains = self.manager.get_current_domains(phase, env_ids)
-        new_traj = self.manager.get_current_trajectory_indices(env_ids)
-
-        if env_ids is None:
-            changed = (new_domains != self.current_domain) | (new_traj != self.prev_traj_idx)
-            self.current_domain = new_domains
-            self.prev_traj_idx = new_traj.clone()
-        else:
-            changed = (
-                (new_domains != self.current_domain[env_ids])
-                | (new_traj != self.prev_traj_idx[env_ids])
-            )
-            self.current_domain[env_ids] = new_domains
-            self.prev_traj_idx[env_ids] = new_traj
-
-        # Which reference frame each env should use
         if env_ids is None:
             ref_frame_indices = self.manager.get_ref_frames_in_use(phase, self.ref_frames)
+            changed = (
+                (new_domains != self.current_domain)
+                | (ref_frame_indices != self.prev_ref_frame_idx)
+            )
+            self.current_domain = new_domains
             self.cur_ref_frame_idx = ref_frame_indices
         else:
             ref_frame_indices = self.manager.get_ref_frames_in_use(phase, self.ref_frames, env_ids)
+            changed = (
+                (new_domains != self.current_domain[env_ids])
+                | (ref_frame_indices != self.prev_ref_frame_idx[env_ids])
+            )
+            self.current_domain[env_ids] = new_domains
             self.cur_ref_frame_idx[env_ids] = ref_frame_indices
 
         contact_state = self.get_contact_state(phase, env_ids)
@@ -268,6 +273,7 @@ class BaseTrajectoryCommand(CommandTerm):
                     default_new_ref=default_new,
                     new_domain=new_domains[env_indices],
                 )
+                self.prev_ref_frame_idx[env_indices] = ref_frame_indices[env_indices]
         else:
             if torch.any(changed_and_contact):
                 subset_indices = torch.where(changed_and_contact)[0]
@@ -281,6 +287,7 @@ class BaseTrajectoryCommand(CommandTerm):
                     default_new_ref=default_new,
                     new_domain=new_domains[subset_indices],
                 )
+                self.prev_ref_frame_idx[global_env_indices] = ref_frame_indices[subset_indices]
 
         # Compute measured outputs using current ref_poses
         self.compute_measured_output(self.ref_poses[:, :3], self.ref_poses[:, 3:])

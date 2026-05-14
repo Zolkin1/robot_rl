@@ -53,6 +53,12 @@ _DEBUG_VIZ_END_SPHERE_MIN_RADIUS: float = 0.1
 # Master toggle for the end-of-trajectory spheres.  Set to False to hide
 # them entirely (no prototype, no per-step viz emission).
 _DEBUG_VIZ_SHOW_END_SPHERES: bool = False
+# Flat disk drawn at each env's reference-pose anchor position so the
+# anchor frame the trajectory is rendered around is visible at a glance.
+_DEBUG_VIZ_SHOW_REF_POSE: bool = True
+_DEBUG_VIZ_REF_POSE_RADIUS: float = 0.15
+_DEBUG_VIZ_REF_POSE_HEIGHT: float = 0.005
+_DEBUG_VIZ_REF_POSE_COLOR: tuple[float, float, float] = (1.0, 1.0, 1.0)
 
 
 class BatchedMultiSkillCommand(BaseTrajectoryCommand):
@@ -481,10 +487,28 @@ class BatchedMultiSkillCommand(BaseTrajectoryCommand):
         ):
             return new_chord
 
-        # Old (fading-out) chord for transitioning envs only.
+        # Old (fading-out) chord for transitioning envs only.  Must use
+        # the SAME phase source for the old domain lookup that
+        # ``compute_blended_outputs_at`` uses for the old eval — else
+        # the chord (termination scale) and the error (numerator
+        # against y_des) live in different old-trajectory domains and
+        # ``frame_deviation_from_reference`` mis-scales.  Concretely:
+        # for periodic→perpetual the blended y_des uses old at
+        # ``transition.old_phase`` (cycling walking), but a naïve chord
+        # lookup using ``manager.phase`` (== 0 for perpetual new) would
+        # land in walking's domain 0 (support foot, chord ≈ 0) regardless
+        # of where the env actually is.  The decision matches the helper:
+        # sync to manager.phase when new has gates, decouple to
+        # transition.old_phase when new is perpetual.
         tx_ids = torch.where(self.transition.active)[0]                 # (M,)
         old_traj = self.transition.old_traj_idx[tx_ids]
-        phase_m = mgr.phase[tx_ids]
+        new_traj_tx = traj_idx[tx_ids]
+        new_has_gates_tx = mgr._num_gates_per_traj[new_traj_tx] > 0
+        phase_m = torch.where(
+            new_has_gates_tx,
+            mgr.phase[tx_ids],
+            self.transition.old_phase[tx_ids],
+        )
         old_dom = mgr._get_domain_indices(phase_m, old_traj)
         old_coeffs = mgr.data["coeffs_pos"][old_traj, old_dom]          # (M, P, K+1)
         old_frame_coeffs = old_coeffs[:, frame_pos_indices, :]          # (M, F, 3, K+1)
@@ -1142,6 +1166,19 @@ class BatchedMultiSkillCommand(BaseTrajectoryCommand):
                     radius=1.0,
                     visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=tuple(color)),
                 )
+        # Ref-pose disk prototype.  Native radius/height are baked in here
+        # (no per-instance scaling needed at ``visualize`` time).  Index is
+        # captured for the per-step emission below.
+        self._debug_ref_pose_marker_idx: int | None = None
+        if _DEBUG_VIZ_SHOW_REF_POSE:
+            self._debug_ref_pose_marker_idx = len(prototypes)
+            prototypes["_ref_pose_disk"] = sim_utils.CylinderCfg(
+                radius=_DEBUG_VIZ_REF_POSE_RADIUS,
+                height=_DEBUG_VIZ_REF_POSE_HEIGHT,
+                visual_material=sim_utils.PreviewSurfaceCfg(
+                    diffuse_color=_DEBUG_VIZ_REF_POSE_COLOR
+                ),
+            )
         cfg = VisualizationMarkersCfg(prim_path=_DEBUG_VIZ_PRIM_PATH, markers=prototypes)
         try:
             return VisualizationMarkers(cfg)
@@ -1339,6 +1376,29 @@ class BatchedMultiSkillCommand(BaseTrajectoryCommand):
             quats = torch.cat([quats, sphere_quats], dim=0)
             scales_flat = torch.cat([scales_flat, sphere_scales], dim=0)
             marker_indices = torch.cat([marker_indices, sphere_indices], dim=0)
+
+        # One flat disk per env at the reference-pose anchor.  Native radius
+        # and height live on the prototype, so scale is identity.  Orient by
+        # the ref-pose yaw so the disk's local +z stays world-up (the
+        # prototype is a thin upright cylinder; yaw-only rotation keeps it
+        # flat).
+        if (
+            _DEBUG_VIZ_SHOW_REF_POSE
+            and getattr(self, "_debug_ref_pose_marker_idx", None) is not None
+        ):
+            ref_pose_translations = anchor                                # (N, 3)
+            ref_pose_quats = yaw_q                                        # (N, 4) xyzw
+            ref_pose_scales = torch.ones(N, 3, device=self.device)
+            ref_pose_indices = torch.full(
+                (N,),
+                self._debug_ref_pose_marker_idx,
+                device=self.device,
+                dtype=torch.long,
+            )
+            translations = torch.cat([translations, ref_pose_translations], dim=0)
+            quats = torch.cat([quats, ref_pose_quats], dim=0)
+            scales_flat = torch.cat([scales_flat, ref_pose_scales], dim=0)
+            marker_indices = torch.cat([marker_indices, ref_pose_indices], dim=0)
 
         self._debug_markers.visualize(
             translations=translations,

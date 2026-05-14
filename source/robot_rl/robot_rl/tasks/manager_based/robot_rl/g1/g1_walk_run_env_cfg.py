@@ -118,17 +118,17 @@ class G1WalkRunCLFEnvCfg(G1MultiSkillCLFEnvCfg):
         ##
         # Terminations
         ##
-        # self.terminations.frame_drift = DoneTerm(
-        #   func=mdp.frame_deviation_from_reference,
-        #   params={
-        #       "cmd_name": "traj_ref",
-        #       "frame_names": ["pelvis_link", "left_ankle_roll_link", "right_ankle_roll_link"],
-        #       "max_frac": 0.3, #0.25,
-        #       "min_dist": 0.1,
-        #       "grace_period_s": 0.0, #2.0,    # TODO: This probably makes critic learning hard as sometimes these states terminate and sometimes they don't.
-        #                                 #   Depends on when traj was switched, which isn't an observation currently.
-        #   },
-        # )
+        self.terminations.frame_drift = DoneTerm(
+          func=mdp.frame_deviation_from_reference,
+          params={
+              "cmd_name": "traj_ref",
+              "frame_names": ["pelvis_link", "left_ankle_roll_link", "right_ankle_roll_link"],
+              "max_frac": 0.3, #0.25,
+              "min_dist": 0.1,
+              "grace_period_s": 0.0, #2.0,    # TODO: This probably makes critic learning hard as sometimes these states terminate and sometimes they don't.
+                                        #   Depends on when traj was switched, which isn't an observation currently.
+          },
+        )
 
 
 # @configclass
