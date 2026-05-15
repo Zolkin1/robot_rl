@@ -93,8 +93,8 @@ def apply_terrain_aware_ref(
     stair_off = manager.data["origin_relative_to_stair_center"][sub_traj_idx]        # [K, 3]
     spawn_off = ref_off + stair_off
 
-    foot_xy = default_new_ref[is_terrain, :2].unsqueeze(1)                           # [K, 1, 2]
-    stair_center = project(foot_xy)                                                   # [K, 3]
+    ref_xy = default_new_ref[is_terrain, :2]                                          # [K, 2]
+    stair_center = project(ref_xy)                                                    # [K, 3]
 
     new_pose = default_new_ref.clone()
     new_pose[is_terrain, 0] = stair_center[:, 0] + spawn_off[:, 0]

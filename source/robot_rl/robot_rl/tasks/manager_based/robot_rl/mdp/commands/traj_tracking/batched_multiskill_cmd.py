@@ -158,7 +158,7 @@ class BatchedMultiSkillCommand(BaseTrajectoryCommand):
         # are queued in ``self.pending`` and committed when the contact
         # gate fires.
         self._terrain = self.env.scene[self.cfg.terrain_name]
-        for required in ("skill_probs", "skill_list", "world_xy_to_cell"):
+        for required in ("skill_probs_at", "skill_list", "world_xy_to_cell"):
             if not hasattr(self._terrain, required):
                 raise TypeError(
                     f"BatchedMultiSkillCommand requires the scene's "
@@ -616,9 +616,10 @@ class BatchedMultiSkillCommand(BaseTrajectoryCommand):
 
         Each env's bucket is the (eligible) configured skill whose
         ``[lin_vel_x, lin_vel_y, ang_vel_z]`` ranges all contain ``vel``.
-        Eligibility comes from the env's current cell —
-        ``terrain.skill_probs[:, r, c] > 0`` — so overlapping buckets
-        resolve unambiguously to the only available skill on that cell.
+        Eligibility comes from the env's current cell (or per-block region,
+        for composite importers) via ``terrain.skill_probs_at(xy) > 0``, so
+        overlapping buckets resolve unambiguously to the only available skill
+        at the query point.
 
         Args:
             vel: ``[K, 3]`` ``(vx, vy, wz)`` per env.
@@ -634,8 +635,7 @@ class BatchedMultiSkillCommand(BaseTrajectoryCommand):
         """
         if xy_w is None:
             xy_w = self.ref_poses[env_ids, :2]
-        rows, cols = self._terrain.world_xy_to_cell(xy_w)
-        eligible = self._terrain.skill_probs[:, rows, cols] > 0.0  # [S, K]
+        eligible = self._terrain.skill_probs_at(xy_w).T > 0.0  # [S, K]
         fallback = self.skill_id[env_ids]
         return bucket_for_velocity(
             vel,

@@ -51,6 +51,8 @@ parser.add_argument("--no_balls", action="store_true", default=False,
 parser.add_argument("--sub_terrain_size", type=float, nargs=2, default=(8.0, 8.0),
                     metavar=("X", "Y"),
                     help="Tile size used when auto-wrapping a single SubTerrainBaseCfg.")
+parser.add_argument("--debug_vis", action="store_true", default=False,
+                    help="Enable per-block outline debug viz (composite terrains only).")
 AppLauncher.add_app_launcher_args(parser)
 args_cli = parser.parse_args()
 
@@ -77,6 +79,39 @@ from robot_rl.tasks.manager_based.robot_rl.terrains.meta_terrain_generator_cfg i
 from robot_rl.tasks.manager_based.robot_rl.terrains.meta_terrain_importer_cfg import (
     MetaTerrainImporterCfg,
 )
+from robot_rl.tasks.manager_based.robot_rl.terrains.meta_composite_importer_cfg import (
+    MetaCompositeTerrainImporterCfg,
+)
+from robot_rl.tasks.manager_based.robot_rl.terrains.blocks import (
+    CompositeSubTerrainCfg,
+    RandomizedCompositeSubTerrainCfg,
+)
+
+
+def collect_skill_list(generator_cfg: TerrainGeneratorCfg) -> list[str]:
+    """Return the union of skill names across all sub-terrains and their blocks.
+
+    The meta importer validates that every block's ``skill_probs`` declares
+    only names from ``skill_list``; the script can't know which skills the
+    user's terrain uses, so we walk the cfg and collect them.
+    """
+    skills: set[str] = set()
+    for sub in generator_cfg.sub_terrains.values():
+        sub_sp = getattr(sub, "skill_probs", None)
+        if isinstance(sub_sp, dict):
+            skills.update(sub_sp.keys())
+        if isinstance(sub, RandomizedCompositeSubTerrainCfg):
+            for choice in sub.choices:
+                choice_sp = getattr(choice.cfg, "skill_probs", None)
+                if isinstance(choice_sp, dict):
+                    skills.update(choice_sp.keys())
+        elif isinstance(sub, CompositeSubTerrainCfg):
+            for block in sub.blocks:
+                block_sp = getattr(block, "skill_probs", None)
+                if isinstance(block_sp, dict):
+                    skills.update(block_sp.keys())
+    # Importer requires at least one skill; "standing" matches the cfg default.
+    return sorted(skills) if skills else ["standing"]
 
 
 def load_terrain(import_path: str) -> Any:
@@ -179,15 +214,17 @@ def main() -> None:
     sim = SimulationContext(SimulationCfg())
     fit_camera(sim, generator_cfg)
 
-    importer_cls = (
-        MetaTerrainImporterCfg if isinstance(generator_cfg, MetaTerrainGeneratorCfg)
-        else terrain_gen.TerrainImporterCfg
-    )
-    importer_cfg = importer_cls(
+    # Composite importer is a strict superset of the base meta importer
+    # (legacy single-block cells are auto-wrapped), so use it whenever the
+    # generator is meta-aware. Falls back to the stock importer otherwise.
+    is_meta = isinstance(generator_cfg, MetaTerrainGeneratorCfg)
+    importer_cls = MetaCompositeTerrainImporterCfg if is_meta else terrain_gen.TerrainImporterCfg
+    importer_kwargs = dict(
         num_envs=max(args_cli.num_envs, 1), env_spacing=3.0,
         prim_path="/World/ground", max_init_terrain_level=None,
         terrain_type="generator", terrain_generator=generator_cfg,
         collision_group=-1,
+        debug_vis=args_cli.debug_vis,
         physics_material=sim_utils.RigidBodyMaterialCfg(
             friction_combine_mode="multiply",
             restitution_combine_mode="multiply",
@@ -200,6 +237,9 @@ def main() -> None:
             texture_scale=(0.25, 0.25),
         ),
     )
+    if is_meta:
+        importer_kwargs["skill_list"] = collect_skill_list(generator_cfg)
+    importer_cfg = importer_cls(**importer_kwargs)
     # Use ``class_type`` so the meta importer is resolved through the same
     # string-based path the env uses (no stale runtime import).
     importer = importer_cfg.class_type(importer_cfg)

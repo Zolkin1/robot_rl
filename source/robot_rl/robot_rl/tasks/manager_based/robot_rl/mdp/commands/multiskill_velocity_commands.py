@@ -18,14 +18,14 @@ logger = logging.getLogger(__name__)
 class MultiskillVelocityTrackingCommand(VelocityTrackingCommand):
     """Velocity tracking command that samples per-env skills from terrain metadata.
 
-    At every resample, each env's current world XY is mapped to its terrain
-    cell and the per-skill probability vector ``terrain.skill_probs[:, r, c]``
-    is used to draw one skill via :func:`torch.multinomial`. The chosen skill
-    indexes into the trajectory cmd's ``velocity_buckets`` to give a uniform velocity range.
+    At every resample, each env's current world XY is queried via
+    ``terrain.skill_probs_at(xy)`` for its per-skill probability vector, and
+    one skill is drawn via :func:`torch.multinomial`. The chosen skill indexes
+    into the trajectory cmd's ``velocity_buckets`` to give a uniform velocity range.
 
     Requires the scene's terrain importer to be a meta importer exposing
-    ``skill_probs``, ``skill_list``, and ``world_xy_to_cell``. The bucket dict
-    keys must match the importer's ``skill_list`` exactly.
+    ``skill_probs_at``, ``skill_list``, and ``world_xy_to_cell``. The bucket
+    dict keys must match the importer's ``skill_list`` exactly.
     """
 
     cfg: MultiskillVelocityTrackingCommandCfg
@@ -35,7 +35,7 @@ class MultiskillVelocityTrackingCommand(VelocityTrackingCommand):
 
         # --- Resolve and validate the terrain importer ---
         terrain = env.scene[cfg.terrain_name]
-        for required in ("skill_probs", "skill_list", "world_xy_to_cell"):
+        for required in ("skill_probs_at", "skill_list", "world_xy_to_cell"):
             if not hasattr(terrain, required):
                 raise TypeError(
                     f"MultiskillVelocityTrackingCommand requires the scene's "
@@ -346,11 +346,12 @@ class MultiskillVelocityTrackingCommand(VelocityTrackingCommand):
                 otherwise ``root_pos_w`` is stale and resolves to the
                 end-of-last-episode cell.
         """
-        # Per-env world XY → cell (r, c) → per-env skill probability vector.
+        # Per-env world XY → per-env skill probability vector. The importer
+        # encapsulates the cell (and per-block, for composite importers)
+        # lookup behind ``skill_probs_at``.
         if xy_w is None:
             xy_w = wp.to_torch(self.robot.data.root_pos_w)[env_ids, :2]
-        rows, cols = self._terrain.world_xy_to_cell(xy_w)
-        per_env_probs = self._terrain.skill_probs[:, rows, cols].T  # (n, num_skills)
+        per_env_probs = self._terrain.skill_probs_at(xy_w)  # (n, num_skills)
 
         if self.cfg.skill_transition_prob is None:
             return torch.multinomial(per_env_probs, num_samples=1).squeeze(-1)

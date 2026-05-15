@@ -8,6 +8,14 @@
 import isaaclab.terrains as terrain_gen
 from isaaclab.terrains.terrain_generator_cfg import TerrainGeneratorCfg
 
+from robot_rl.tasks.manager_based.robot_rl.terrains.blocks import (
+    BlockChoice,
+    CompositeSubTerrainCfg,
+    FlatBlockCfg,
+    RandomizedCompositeSubTerrainCfg,
+    SlopeBlockCfg,
+    StairBlockCfg,
+)
 from robot_rl.tasks.manager_based.robot_rl.terrains.meta_terrain_generator_cfg import (
     MetaTerrainGeneratorCfg,
 )
@@ -129,6 +137,174 @@ STAIR_WALK_CFG = MetaTerrainGeneratorCfg(
         "flat": MeshFlatTerrainCfg(proportion=0.5),
     },
 )
+
+
+# Demo composite sub-terrain: short stair-up → flat platform → short stair-up,
+# all in one sub-terrain cell. Demonstrates per-block skill metadata flow —
+# `MetaCompositeTerrainImporter.skill_probs_at` switches between
+# ``stair_up`` and ``walk_forward`` as the robot crosses block boundaries, and
+# `_project_world` resolves the right stair span. The composer threads
+# elevation across blocks: the flat platform sits flush with whichever
+# neighbor came before it.
+_COMPOSITE_STEP_HEIGHT = 0.135
+_COMPOSITE_STEP_DEPTH = 0.233
+_COMPOSITE_STAIR_NUM_STEPS = 6
+_COMPOSITE_STAIR_SIZE_X = _COMPOSITE_STAIR_NUM_STEPS * _COMPOSITE_STEP_DEPTH
+_COMPOSITE_FLAT_SIZE_X = 3.0
+START_PLATFORM_LENGTH = 0.4
+END_PLATFORM_LENGTH = 0.0
+
+# Per-block sizes. ``StairBlockCfg.size_x`` is the FULL block extent
+# (platforms + stair treads); the stairs themselves occupy
+# ``size_x - start_platform_length - end_platform_length`` in the middle.
+_BLOCK0_SIZE_X = _COMPOSITE_STAIR_SIZE_X + START_PLATFORM_LENGTH + END_PLATFORM_LENGTH
+_BLOCK1_SIZE_X = _COMPOSITE_FLAT_SIZE_X
+_BLOCK2_SIZE_X = _COMPOSITE_STAIR_SIZE_X
+_TOTAL_SIZE_X = _BLOCK0_SIZE_X + 2*_BLOCK1_SIZE_X + 2*_BLOCK2_SIZE_X
+
+STAIR_FLAT_STAIR_CFG = MetaTerrainGeneratorCfg(
+    curriculum=False,
+    size=(_TOTAL_SIZE_X, 2.0),
+    border_width=0.0,
+    num_rows=4,
+    num_cols=8,
+    horizontal_scale=0.1,
+    vertical_scale=0.005,
+    slope_threshold=0.75,
+    use_cache=False,
+    sub_terrains={
+        "stair_flat_stair": CompositeSubTerrainCfg(
+            proportion=1.0,
+            size=(_TOTAL_SIZE_X, 2.0),
+            origin_block_index=0,
+            blocks=[
+                FlatBlockCfg(
+                    size_x=_BLOCK1_SIZE_X,
+                    skill_probs={"walk_forward": 0.5, "standing": 0.5},
+                ),
+                StairBlockCfg(
+                    size_x=_BLOCK0_SIZE_X,
+                    direction="up",
+                    skill_probs={"stair_up": 1.0},
+                    step_dim_options=[(_COMPOSITE_STEP_HEIGHT, _COMPOSITE_STEP_DEPTH)],
+                    stair_width_range=(1.5, 1.5),
+                    start_platform_length=START_PLATFORM_LENGTH,
+                    end_platform_length=END_PLATFORM_LENGTH,
+                ),
+                FlatBlockCfg(
+                    size_x=_BLOCK1_SIZE_X,
+                    skill_probs={"walk_forward": 0.5, "standing": 0.5},
+                ),
+                StairBlockCfg(
+                    size_x=_BLOCK2_SIZE_X,
+                    direction="up",
+                    skill_probs={"stair_up": 1.0},
+                    step_dim_options=[(_COMPOSITE_STEP_HEIGHT, _COMPOSITE_STEP_DEPTH)],
+                    stair_width_range=(1.5, 1.5),
+                ),
+                StairBlockCfg(
+                    size_x=_BLOCK2_SIZE_X,
+                    direction="down",
+                    skill_probs={"stair_down": 1.0},
+                    step_dim_options=[(_COMPOSITE_STEP_HEIGHT, _COMPOSITE_STEP_DEPTH)],
+                    stair_width_range=(1.5, 1.5),
+                ),
+            ],
+        ),
+    },
+)
+
+
+# Randomized multiskill terrain: each sub-terrain cell is a fresh random walk
+# along x mixing flat, stair-up (with partial trailing tread), stair-down, and
+# slopes. Lateral void gaps are inserted between every adjacent pair of content
+# columns so a robot drifting sideways falls into the void instead of stepping
+# onto a neighbour's terrain.
+_RANDOM_SIZE_X = 12.0
+_RANDOM_SIZE_Y = 6.0
+_RANDOM_STAIR_STEP_DIM_OPTIONS = [(0.10, 0.30), (0.14, 0.28), (0.16, 0.32)]
+_RANDOM_CONTENT_NUM_COLS = 4   # content columns per row
+_RANDOM_NUM_COLS = 2 * _RANDOM_CONTENT_NUM_COLS - 1  # + gap columns between them
+
+RANDOMIZED_MULTISKILL_TERRAIN_CFG = MetaTerrainGeneratorCfg(
+    curriculum=False,
+    size=(_RANDOM_SIZE_X, _RANDOM_SIZE_Y),
+    border_width=0.0,
+    num_rows=4,
+    num_cols=_RANDOM_NUM_COLS,
+    horizontal_scale=0.1,
+    vertical_scale=0.005,
+    slope_threshold=0.75,
+    use_cache=False,
+    inter_column_borders=[],
+    inter_column_gaps=True,
+    sub_terrains={
+        "randomized": RandomizedCompositeSubTerrainCfg(
+            proportion=1.0,
+            size=(_RANDOM_SIZE_X, _RANDOM_SIZE_Y),
+            origin_block_index=0,
+            force_flat_origin=True,
+            length_range=(1.0, 3.0),
+            choices=[
+                BlockChoice(
+                    cfg=FlatBlockCfg(
+                        skill_probs={"walk_forward": 0.5, "running": 0.4, "standing": 0.1},
+                    ),
+                    weight=2.0,
+                ),
+                BlockChoice(
+                    cfg=StairBlockCfg(
+                        direction="up",
+                        skill_probs={"stair_up": 1.0},
+                        step_dim_options=_RANDOM_STAIR_STEP_DIM_OPTIONS,
+                        stair_width_range=(1.5, 2.5),
+                        allow_partial_last_step=True,
+                        float_prob=0.0,
+                        wall_prob=0.0,
+                        pole_prob=0.0,
+                    ),
+                    weight=1.0,
+                    length_range=(1.5, 4.0),
+                ),
+                BlockChoice(
+                    cfg=StairBlockCfg(
+                        direction="down",
+                        skill_probs={"stair_down": 1.0},
+                        step_dim_options=_RANDOM_STAIR_STEP_DIM_OPTIONS,
+                        stair_width_range=(1.5, 2.5),
+                        allow_partial_last_step=True,
+                        float_prob=0.0,
+                        wall_prob=0.0,
+                        pole_prob=0.0,
+                    ),
+                    weight=1.0,
+                    length_range=(1.5, 4.0),
+                ),
+                BlockChoice(
+                    cfg=SlopeBlockCfg(
+                        direction="up",
+                        skill_probs={"walk_forward": 1.0},
+                        rise_range=(0.2, 0.8),
+                        slope_width_range=(1.5, 2.5),
+                    ),
+                    weight=0.5,
+                    length_range=(1.5, 3.5),
+                ),
+                BlockChoice(
+                    cfg=SlopeBlockCfg(
+                        direction="down",
+                        skill_probs={"walk_forward": 1.0},
+                        rise_range=(0.2, 0.8),
+                        slope_width_range=(1.5, 2.5),
+                    ),
+                    weight=0.5,
+                    length_range=(1.5, 3.5),
+                ),
+            ],
+        ),
+    },
+)
+"""Randomized multiskill terrain with lateral void gaps."""
 
 
 ROUGH_TERRAINS_CFG = TerrainGeneratorCfg(

@@ -207,6 +207,26 @@ class MetaTerrainImporter(TerrainImporter):
         env_origins[:] = origins[self.terrain_levels, self._actual_terrain_cols]
         return env_origins
 
+    def skill_probs_at(self, xy_w: torch.Tensor) -> torch.Tensor:
+        """Return the per-cell skill distribution at each world ``(x, y)``.
+
+        Thin wrapper around :attr:`skill_probs` so callers (commands) can use
+        one API regardless of whether the runtime importer is the base
+        :class:`MetaTerrainImporter` (cell-level distributions) or
+        :class:`MetaCompositeTerrainImporter` (per-block distributions).
+
+        Args:
+            xy_w: World ``(x, y)`` positions with last dimension 2 and
+                arbitrary leading shape.
+
+        Returns:
+            Tensor of shape ``xy_w.shape[:-1] + (num_skills,)``.
+        """
+        rows, cols = self.world_xy_to_cell(xy_w)
+        # ``self.skill_probs`` is (num_skills, num_rows, num_cols); transpose
+        # to put num_skills on the trailing axis to match the per-block API.
+        return self.skill_probs[:, rows, cols].movedim(0, -1)
+
     def world_xy_to_cell(self, xy_w: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         """Map world ``(x, y)`` points to their terrain ``(row, col)`` indices.
 

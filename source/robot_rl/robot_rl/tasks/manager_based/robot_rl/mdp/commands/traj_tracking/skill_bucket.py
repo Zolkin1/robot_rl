@@ -12,7 +12,8 @@ Naming convention used below:
 - ``lin_x``, ``lin_y``, ``ang_z``: ``[S, 2]`` bucket tables of
   ``[min, max]`` ranges per skill in ``skill_list`` order.
 - ``eligible``: ``[S, K]`` bool mask of which skills the env's current
-  cell is allowed to sample (from ``terrain.skill_probs > 0``).  This
+  cell (or per-block region) is allowed to sample (from
+  ``terrain.skill_probs_at(xy) > 0``).  This
   disambiguates buckets that overlap across skills (e.g.  stair_up vs
   walk_forward both containing 0.4 m/s).
 - ``fallback``: ``[K]`` long skill_id to fall back to when no bucket

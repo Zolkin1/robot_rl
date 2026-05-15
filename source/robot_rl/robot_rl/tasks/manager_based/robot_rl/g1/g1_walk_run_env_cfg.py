@@ -96,10 +96,11 @@ class G1WalkRunCLFEnvCfg(G1MultiSkillCLFEnvCfg):
         # Terrain
         ##
         # The multiskill velocity command requires a ``MetaTerrainImporter``
-        # so it can read ``terrain.skill_probs`` for cell-based skill
-        # sampling.  Use a flat-only multiskill terrain — semantically the
-        # same "flat ground everywhere" as the old ``terrain_type="plane"``
-        # but exposes the skill machinery the cmd expects.
+        # so it can call ``terrain.skill_probs_at(xy)`` for cell- (and
+        # per-block-, on composite importers) based skill sampling.  Use a
+        # flat-only multiskill terrain — semantically the same "flat ground
+        # everywhere" as the old ``terrain_type="plane"`` but exposes the
+        # skill machinery the cmd expects.
         base_terrain = self.scene.terrain
         self.scene.terrain = MetaTerrainImporterCfg(
             prim_path=base_terrain.prim_path,

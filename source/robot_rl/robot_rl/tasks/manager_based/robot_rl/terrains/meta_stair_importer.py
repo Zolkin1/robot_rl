@@ -28,11 +28,11 @@ class MetaStairTerrainImporter(MetaTerrainImporter):
     Replaces ``self.terrain_meta_data`` with ``{"project": <callable>}`` after
     construction. The callable signature is::
 
-        project(points: Tensor[N, k, 2]) -> Tensor[N, 3]
+        project(points: Tensor[N, 2]) -> Tensor[N, 3]
 
-    where ``points`` are world-frame ``(x, y)`` and the output is the world
-    ``(x, y, z)`` of the top-surface center of the most-forward stair (largest
-    stair index in ``+x``) covered by the ``k`` query points.
+    where ``points`` are world-frame ``(x, y)`` (typically the trajectory
+    reference pose / stance-foot pose) and the output is the world
+    ``(x, y, z)`` of the top-surface center of the stair the point sits over.
 
     Cells that did not produce stair metadata (e.g. border or non-stair
     sub-terrains) are treated as flat at ``z = 0`` and just pass through
@@ -108,57 +108,44 @@ class MetaStairTerrainImporter(MetaTerrainImporter):
         return r, c, local_x, local_y
 
     def _project_world(self, points: torch.Tensor) -> torch.Tensor:
-        """Project a batch of ``(N, k, 2)`` world points to leading-stair centers.
+        """Project a batch of ``(N, 2)`` world points to per-stair tread centers.
 
-        For each row ``n``, picks the ``k``-index whose stair index is largest
-        in ``+x`` (the "most-forward foot"), then returns the world ``(x, y, z)``
-        center of that stair's top surface.
+        For each query point, computes its sub-terrain cell ``(row, col)``,
+        finds the tread index within that cell's staircase via integer
+        division of the local x coordinate by the cell's step depth, and
+        returns the world ``(x, y, z)`` of the tread top center. Points in
+        non-stair cells pass through as ``(x, y, 0)``.
         """
-        if points.dim() != 3 or points.shape[-1] != 2:
-            raise ValueError(f"Expected points of shape (N, k, 2); got {tuple(points.shape)}")
+        if points.dim() != 2 or points.shape[-1] != 2:
+            raise ValueError(f"Expected points of shape (N, 2); got {tuple(points.shape)}")
 
         size_x, size_y = self._stair_size[0], self._stair_size[1]
         nrows, ncols = int(self._stair_grid[0]), int(self._stair_grid[1])
 
-        r, c, local_x, _ = self._world_to_subterrain(points)
+        r, c, local_x, local_y = self._world_to_subterrain(points)
 
-        step_depth_pk = self._stair_step_depths[r, c].clamp_min(1e-6)
-        num_steps_pk = self._stair_num_steps[r, c]
-        is_stair_pk = self._stair_is_stair[r, c]
+        step_depth = self._stair_step_depths[r, c].clamp_min(1e-6)
+        num_steps = self._stair_num_steps[r, c]
+        is_stair = self._stair_is_stair[r, c]
 
-        # Per-point stair index (clamped to the cell's range).
-        stair_idx = torch.div(local_x, step_depth_pk, rounding_mode="floor").long()
-        stair_idx = torch.minimum(stair_idx, num_steps_pk - 1).clamp_min(0)
+        stair_idx = torch.div(local_x, step_depth, rounding_mode="floor").long()
+        stair_idx = torch.minimum(stair_idx, num_steps - 1).clamp_min(0)
         # Non-stair cells: pretend index 0 (centers default to zeros there).
-        stair_idx = torch.where(is_stair_pk, stair_idx, torch.zeros_like(stair_idx))
+        stair_idx = torch.where(is_stair, stair_idx, torch.zeros_like(stair_idx))
 
-        # Pick the most-forward k per N. Use stair_idx as the criterion; for
-        # non-stair cells fall back to local_x so we don't bias toward index 0.
-        criterion = torch.where(is_stair_pk, stair_idx.to(local_x.dtype), local_x)
-        leading_k = criterion.argmax(dim=-1)
-
-        n_idx = torch.arange(points.shape[0], device=points.device)
-        r_lead = r[n_idx, leading_k]
-        c_lead = c[n_idx, leading_k]
-        idx_lead = stair_idx[n_idx, leading_k]
-        is_stair_lead = is_stair_pk[n_idx, leading_k]
-        local_x_lead = local_x[n_idx, leading_k]
-        local_y_lead = points[n_idx, leading_k, 1] + ncols * size_y / 2.0
-        local_y_lead = local_y_lead - c_lead.to(local_y_lead.dtype) * size_y
-
-        local_center = self._stair_centers[r_lead, c_lead, idx_lead]
-        # For non-stair cells, fall back to the input point at z = 0.
+        local_center = self._stair_centers[r, c, stair_idx]
         non_stair_center = torch.stack(
-            [local_x_lead, local_y_lead, torch.zeros_like(local_x_lead)], dim=-1
+            [local_x, local_y, torch.zeros_like(local_x)], dim=-1
         )
-        local_out = torch.where(is_stair_lead.unsqueeze(-1), local_center, non_stair_center)
+        local_out = torch.where(is_stair.unsqueeze(-1), local_center, non_stair_center)
 
         # Local (corner-coords) → world by re-adding the cell corner offset.
-        offset_x = r_lead.to(local_out.dtype) * size_x - nrows * size_x / 2.0
-        offset_y = c_lead.to(local_out.dtype) * size_y - ncols * size_y / 2.0
-        world_x = local_out[..., 0] + offset_x
-        world_y = local_out[..., 1] + offset_y
-        world_z = local_out[..., 2]
-        return torch.stack([world_x, world_y, world_z], dim=-1)
+        offset_x = r.to(local_out.dtype) * size_x - nrows * size_x / 2.0
+        offset_y = c.to(local_out.dtype) * size_y - ncols * size_y / 2.0
+        return torch.stack([
+            local_out[..., 0] + offset_x,
+            local_out[..., 1] + offset_y,
+            local_out[..., 2],
+        ], dim=-1)
 
 
