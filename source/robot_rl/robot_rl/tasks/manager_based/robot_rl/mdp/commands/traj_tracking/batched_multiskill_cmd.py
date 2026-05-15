@@ -1077,24 +1077,30 @@ class BatchedMultiSkillCommand(BaseTrajectoryCommand):
         # for envs that actually stepped this tick (``advance_mask``);
         # idempotent-skip envs, fresh-reset envs, and done-this-step envs
         # didn't accumulate sim time so their timer must not move.  Then
-        # reset to 0 for fresh resets and for envs the manager just
-        # swapped a trajectory on — covers both within-skill bucket swaps
+        # reset to 0 for envs the manager just swapped a trajectory on in
+        # the middle of an episode — covers both within-skill bucket swaps
         # and full skill changes since the commit step inside
         # ``_apply_contact_gate`` invalidates + rebuilds the cache, which
         # re-populates ``_traj_changed`` against the still-unchanged
-        # ``_prev_global_indices``.  Placed AFTER the gate so we see
-        # post-commit changes; placed BEFORE ``commit_traj_state`` so
-        # ``_traj_changed`` is still meaningful.  Read by
+        # ``_prev_global_indices``.  Fresh episode resets are excluded:
+        # the reset path spawns the robot at the reference, so there is no
+        # transition transient and the deviation termination should arm
+        # immediately.  Placed AFTER the gate so we see post-commit
+        # changes; placed BEFORE ``commit_traj_state`` so ``_traj_changed``
+        # is still meaningful.  Read by
         # ``mdp.frame_deviation_from_reference`` to suppress termination
-        # during the grace window after a transition.
+        # during the grace window after an in-episode transition.
         self.time_since_traj_change_s[advance_mask] = (
             self.time_since_traj_change_s[advance_mask] + self.env.step_dt
         )
-        if (ep_len == 0).any():
-            self.time_since_traj_change_s[ep_len == 0] = 0.0
+        fresh_reset = ep_len == 0
+        if fresh_reset.any():
+            self.time_since_traj_change_s[fresh_reset] = 1.0e6
         traj_changed = self.manager._traj_changed
         if traj_changed is not None and traj_changed.any():
-            self.time_since_traj_change_s[traj_changed] = 0.0
+            in_episode_change = traj_changed & ~fresh_reset
+            if in_episode_change.any():
+                self.time_since_traj_change_s[in_episode_change] = 0.0
 
         # Commit the trajectory snapshot only after gate re-arm has read
         # ``_traj_changed``.  Subsequent intra-step ``_ensure_cache`` calls
