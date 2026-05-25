@@ -129,19 +129,20 @@ class G1TerrainMultiskillCLFEnvCfg(G1MultiSkillCLFEnvCfg):
         ##
 
         ## CLF Based
-        self.rewards.clf_reward.params["max_eta_err"] = 4.0
-        self.rewards.clf_decreasing_condition.params["eta_max"] = 4.0
-        self.rewards.clf_decreasing_condition.params["eta_dot_max"] = 9.0
+        self.rewards.clf_reward.params["max_eta_err"] = 5.0
+        self.rewards.clf_decreasing_condition.params["eta_max"] = 5.0
+        self.rewards.clf_decreasing_condition.params["eta_dot_max"] = 10.0
 
         # Velocity Tracking
-        self.rewards.xy_vel.params["std"] = 0.4
-        self.rewards.yaw_vel.params["std"] = 0.4
+        self.rewards.xy_vel.params["std"] = 0.5
+        self.rewards.yaw_vel.params["std"] = 0.5
 
         ##
         # Events
         ##
         # Update push forces
         # TODO: Should probably make it so i only get pushes on flat ground
+        # TODO: Need to be careful about pushes with the frame drift termination
         self.events.push_robot = None
 
 
@@ -181,12 +182,12 @@ class G1TerrainMultiskillCLFEnvCfg(G1MultiSkillCLFEnvCfg):
         self.terminations.frame_drift = DoneTerm(
           func=mdp.frame_deviation_from_reference,
           params={
+              "debug": False,
               "cmd_name": "traj_ref",
               "frame_names": ["pelvis_link", "left_ankle_roll_link", "right_ankle_roll_link"],
               "max_frac": 0.3, #0.25,
               "min_dist": 0.1,
-              "grace_period_s": 0.0, #2.0,    # TODO: This probably makes critic learning hard as sometimes these states terminate and sometimes they don't.
-                                        #   Depends on when traj was switched, which isn't an observation currently.
+              "grace_period_s": 1.0,
           },
         )
 

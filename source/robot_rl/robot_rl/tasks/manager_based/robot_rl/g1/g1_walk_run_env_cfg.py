@@ -123,7 +123,7 @@ class G1WalkRunCLFEnvCfg(G1MultiSkillCLFEnvCfg):
         self.terminations.frame_drift = DoneTerm(
           func=mdp.frame_deviation_from_reference,
           params={
-              "debug": True,
+              "debug": False,
               "cmd_name": "traj_ref",
               "frame_names": ["pelvis_link", "left_ankle_roll_link", "right_ankle_roll_link"],
               "max_frac": 0.3, #0.25,
