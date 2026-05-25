@@ -71,6 +71,12 @@ class SagittalReflectionConfig:
     # negated in half-periodic).
     phase_obs_terms: tuple[str, ...] = ("sin_phase", "cos_phase")
 
+    # Obs terms that are 2D heightmap grids over a sensor's GridPatternCfg.
+    # The (n_y, n_x) shape and axis ordering are looked up at runtime from
+    # the referenced RayCaster's pattern cfg so this stays in sync with the
+    # sensor.
+    height_scan_obs_terms: tuple[str, ...] = ("height_scan",)
+
 
 # ---------------------------------------------------------------------------
 # Helpers
