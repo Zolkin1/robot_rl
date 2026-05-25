@@ -19,7 +19,7 @@ from ..terrains.trimesh.flat_cfg import MeshFlatTerrainCfg
 # :class:`G1WalkRunCLFEnvCfg` below.
 FLAT_MULTISKILL_CFG = MetaTerrainGeneratorCfg(
     size=(8.0, 8.0),
-    border_width=0.0,
+    border_width=72.0,
     num_rows=10,
     num_cols=20,
     horizontal_scale=0.1,
@@ -90,6 +90,7 @@ class G1WalkRunCLFEnvCfg(G1MultiSkillCLFEnvCfg):
         ##
         # Update push forces
         self.events.push_robot.params['velocity_range'] = {"x": (-0.75, 0.75), "y": (-0.75, 0.75)}
+        self.events.push_robot = None   # I think i need this otherwise the push will push me out of the
 
 
         ##
@@ -225,7 +226,7 @@ class G1WalkRunCLFEnvCfgPlay(G1WalkRunCLFEnvCfg):
         )
         self.scene.terrain.terrain_generator.num_rows = 2
         self.scene.terrain.terrain_generator.num_cols = 2
-        self.scene.terrain.terrain_generator.border_width = 20.0
+        self.scene.terrain.terrain_generator.border_width = 72.0
 
         self.events.randomize_ground_contact_friction = None
         self.events.add_base_mass = None
