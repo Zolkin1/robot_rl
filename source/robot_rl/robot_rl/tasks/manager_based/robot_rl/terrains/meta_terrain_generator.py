@@ -30,41 +30,41 @@ class MetaTerrainGenerator(TerrainGenerator):
     def _compute_border_column_info(
         self, cfg: TerrainGeneratorCfg
     ) -> tuple[set[int], int, dict[int, str]]:
-        """Compute which actual column indices are border / gap / content.
+        """Compute which actual column indices are border / content.
 
-        Two kinds of non-content columns are tracked:
-
-        * ``fixed_border`` — inserted from ``inter_column_borders``; a fixed
-          number of flat is-border columns at specific type boundaries.
-        * ``random_gap`` — inserted from ``inter_column_gap_range``; exactly
-          one column at every adjacent-content boundary that doesn't already
-          have a fixed border.
+        The only non-content column kind is ``fixed_border``, inserted from
+        ``inter_column_borders``: a fixed number of flat is-border columns
+        at specific sub-terrain type boundaries.
 
         Args:
             cfg: The terrain generator configuration.
 
         Returns:
             ``(border_columns, content_num_cols, column_kinds)``.
-            ``border_columns`` is the union of fixed-border and random-gap
-            columns (all non-content). ``column_kinds`` maps every column
-            index in ``[0, num_cols)`` to ``"content"``, ``"fixed_border"``,
-            or ``"random_gap"``.
+            ``border_columns`` is the set of non-content column indices.
+            ``column_kinds`` maps every column index in ``[0, num_cols)`` to
+            either ``"content"`` or ``"fixed_border"``.
         """
         has_fixed = bool(getattr(cfg, "inter_column_borders", None))
-        gap_enabled = bool(getattr(cfg, "inter_column_gaps", False))
 
-        if not has_fixed and not gap_enabled:
+        if not has_fixed:
             column_kinds = {c: "content" for c in range(cfg.num_cols)}
             return set(), cfg.num_cols, column_kinds
 
         # Fixed borders: per-entry column counts and total.
         border_col_counts: list[int] = []
         total_fixed_border_cols = 0
-        if has_fixed:
-            for _, width in cfg.inter_column_borders:
-                num_cols = int(np.ceil(width / cfg.size[1]))
-                border_col_counts.append(num_cols)
-                total_fixed_border_cols += num_cols
+        for _, width in cfg.inter_column_borders:
+            num_cols = int(np.ceil(width / cfg.size[1]))
+            border_col_counts.append(num_cols)
+            total_fixed_border_cols += num_cols
+
+        content_num_cols = cfg.num_cols - total_fixed_border_cols
+        if content_num_cols <= 0:
+            raise ValueError(
+                f"Border columns ({total_fixed_border_cols}) exceed or equal total columns ({cfg.num_cols}). "
+                "Increase num_cols to accommodate borders."
+            )
 
         # Resolve which content-slot boundary each fixed-border entry sits
         # on. The slot index B means "between content slot B-1 and B"
@@ -74,59 +74,23 @@ class MetaTerrainGenerator(TerrainGenerator):
         proportions /= np.sum(proportions)
         sub_terrain_names = list(cfg.sub_terrains.keys())
 
-        def _solve_content_num_cols() -> int:
-            if not gap_enabled:
-                return cfg.num_cols - total_fixed_border_cols
-            # We don't know the number of distinct fixed-border boundaries
-            # until we know content_num_cols (because the boundary is
-            # int(cum_prop * N)). Solve iteratively: try each plausible N
-            # and pick the one whose layout matches num_cols. The valid N
-            # is in [1, num_cols]. Only inter-slot boundaries (strictly
-            # between 0 and n) consume a random-gap slot.
-            for n in range(1, cfg.num_cols + 1):
-                inter_slot_boundaries: set[int] = set()
-                for after_name, _ in cfg.inter_column_borders:
-                    if after_name not in sub_terrain_names:
-                        raise ValueError(
-                            f"Sub-terrain '{after_name}' not found in sub_terrains. "
-                            f"Available: {sub_terrain_names}"
-                        )
-                    name_idx = sub_terrain_names.index(after_name)
-                    cum_prop = np.cumsum(proportions)[name_idx]
-                    b = int(cum_prop * n)
-                    if 0 < b < n:
-                        inter_slot_boundaries.add(b)
-                num_random_gaps = max(0, n - 1 - len(inter_slot_boundaries))
-                total = n + total_fixed_border_cols + num_random_gaps
-                if total == cfg.num_cols:
-                    return n
-            raise ValueError(
-                f"num_cols ({cfg.num_cols}) is inconsistent with "
-                f"inter_column_borders + inter_column_gaps. Adjust "
-                f"num_cols so content + fixed-borders + (content-1 - "
-                f"num_inter_slot_fixed_boundaries) == num_cols."
-            )
-
-        content_num_cols = _solve_content_num_cols()
-        if content_num_cols <= 0:
-            raise ValueError(
-                f"Border columns ({total_fixed_border_cols}) exceed or equal total columns ({cfg.num_cols}). "
-                "Increase num_cols to accommodate borders."
-            )
-
-        # Now compute fixed-border boundaries (slot indices in [1, N]).
         fixed_border_at_boundary: dict[int, int] = {}
-        if has_fixed:
-            for i, (after_name, _) in enumerate(cfg.inter_column_borders):
-                name_idx = sub_terrain_names.index(after_name)
-                cum_prop = np.cumsum(proportions)[name_idx]
-                boundary = int(cum_prop * content_num_cols)
-                fixed_border_at_boundary.setdefault(boundary, 0)
-                fixed_border_at_boundary[boundary] += border_col_counts[i]
+        for i, (after_name, _) in enumerate(cfg.inter_column_borders):
+            if after_name not in sub_terrain_names:
+                raise ValueError(
+                    f"Sub-terrain '{after_name}' not found in sub_terrains. "
+                    f"Available: {sub_terrain_names}"
+                )
+            name_idx = sub_terrain_names.index(after_name)
+            cum_prop = np.cumsum(proportions)[name_idx]
+            boundary = int(cum_prop * content_num_cols)
+            fixed_border_at_boundary.setdefault(boundary, 0)
+            fixed_border_at_boundary[boundary] += border_col_counts[i]
 
         # Walk content slots left-to-right. Emit any leading fixed borders
         # (boundary 0, before first content slot), then content followed by
-        # the appropriate inter-slot columns, then trailing fixed borders.
+        # any fixed borders at each inter-slot boundary, then trailing
+        # fixed borders.
         column_kinds: dict[int, str] = {}
         col_idx = 0
         leading_fixed = fixed_border_at_boundary.get(0, 0)
@@ -140,12 +104,8 @@ class MetaTerrainGenerator(TerrainGenerator):
             after_boundary = slot + 1
             if after_boundary < content_num_cols:  # not the last slot
                 fixed_n = fixed_border_at_boundary.get(after_boundary, 0)
-                if fixed_n > 0:
-                    for _ in range(fixed_n):
-                        column_kinds[col_idx] = "fixed_border"
-                        col_idx += 1
-                elif gap_enabled:
-                    column_kinds[col_idx] = "random_gap"
+                for _ in range(fixed_n):
+                    column_kinds[col_idx] = "fixed_border"
                     col_idx += 1
 
         trailing_fixed = fixed_border_at_boundary.get(content_num_cols, 0)
@@ -156,8 +116,8 @@ class MetaTerrainGenerator(TerrainGenerator):
         if col_idx != cfg.num_cols:
             raise ValueError(
                 f"Internal layout mismatch: emitted {col_idx} columns but "
-                f"cfg.num_cols={cfg.num_cols}. Check inter_column_borders / "
-                f"inter_column_gap_range vs num_cols."
+                f"cfg.num_cols={cfg.num_cols}. Check inter_column_borders "
+                f"vs num_cols."
             )
 
         border_columns = {c for c, k in column_kinds.items() if k != "content"}
@@ -196,29 +156,6 @@ class MetaTerrainGenerator(TerrainGenerator):
 
         return mesh, origin, meta_data
 
-    def _generate_gap_terrain(self) -> tuple[trimesh.Trimesh, np.ndarray, dict]:
-        """Generate an empty void column (no mesh).
-
-        The column has no geometry at all, so a robot drifting laterally
-        from a neighbouring content column falls through the void. The
-        column is flagged ``is_border: True`` so spawning logic excludes
-        it.
-
-        Returns:
-            ``(mesh, origin, meta_data)`` matching the shape returned by
-            :meth:`_generate_flat_border_terrain`. ``mesh`` is an empty
-            :class:`trimesh.Trimesh`.
-        """
-        mesh = trimesh.Trimesh()
-        origin = np.array([0.0, 0.0, 0.0])
-        meta_data = {
-            "needs_projection": False,
-            "needs_directional_cmd": False,
-            "is_border": True,
-            "skill_probs": {"standing": 1.0},
-        }
-        return mesh, origin, meta_data
-
     @override
     def _generate_random_terrains(self):
         """Add terrains based on randomly sampled difficulty parameter, with support for border columns."""
@@ -236,9 +173,6 @@ class MetaTerrainGenerator(TerrainGenerator):
             kind = self._column_kinds.get(int(sub_col), "content")
             if kind == "fixed_border":
                 mesh, origin, meta_data = self._generate_flat_border_terrain()
-                self._add_sub_terrain(mesh, origin, meta_data, sub_row, sub_col, None)
-            elif kind == "random_gap":
-                mesh, origin, meta_data = self._generate_gap_terrain()
                 self._add_sub_terrain(mesh, origin, meta_data, sub_row, sub_col, None)
             else:
                 # randomly sample terrain index
@@ -274,9 +208,6 @@ class MetaTerrainGenerator(TerrainGenerator):
             for sub_row in range(self.cfg.num_rows):
                 if kind == "fixed_border":
                     mesh, origin, meta_data = self._generate_flat_border_terrain()
-                    self._add_sub_terrain(mesh, origin, meta_data, sub_row, sub_col, None)
-                elif kind == "random_gap":
-                    mesh, origin, meta_data = self._generate_gap_terrain()
                     self._add_sub_terrain(mesh, origin, meta_data, sub_row, sub_col, None)
                 else:
                     # Regular terrain generation

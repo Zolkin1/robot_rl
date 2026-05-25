@@ -24,12 +24,6 @@ from robot_rl.tasks.manager_based.robot_rl.terrains.blocks import (
 from robot_rl.tasks.manager_based.robot_rl.terrains.meta_composite_importer import (
     MetaCompositeTerrainImporter,
 )
-from robot_rl.tasks.manager_based.robot_rl.terrains.meta_terrain_generator import (
-    MetaTerrainGenerator,
-)
-from robot_rl.tasks.manager_based.robot_rl.terrains.meta_terrain_generator_cfg import (
-    MetaTerrainGeneratorCfg,
-)
 
 
 # ---------------------------------------------------------------------------
@@ -93,7 +87,8 @@ def test_flat_block_aabb_and_origin():
     assert out.aabb == (1.0, 3.5, 0.0, 3.0)
     assert out.needs_projection is False
     assert out.needs_directional_cmd is False
-    assert out.extras == {}
+    # Default flat block (no flat_width_range) spans full subterrain y.
+    assert out.extras == {"flat_width": 3.0}
     np.testing.assert_allclose(out.origin, [2.25, 1.5, 0.0])
     assert len(out.meshes) == 1
 
@@ -848,92 +843,3 @@ def test_slope_block_inside_randomized_composite():
         assert pytest.approx(curr["entry_z"], abs=1e-6) == prev["exit_z"]
 
 
-# ---------------------------------------------------------------------------
-# Lateral void gaps (MetaTerrainGenerator)
-# ---------------------------------------------------------------------------
-
-
-class _MockSubCfg:
-    """Stand-in for a SubTerrainBaseCfg holding just ``proportion``."""
-
-    def __init__(self, proportion: float):
-        self.proportion = proportion
-
-
-def _make_generator_cfg(
-    *,
-    num_cols: int,
-    proportions: dict[str, float],
-    inter_column_borders: list | None = None,
-    inter_column_gaps: bool = False,
-    size: tuple[float, float] = (8.0, 4.0),
-):
-    """Build a stand-in cfg for ``_compute_border_column_info``."""
-    class _Cfg:
-        pass
-    cfg = _Cfg()
-    cfg.num_cols = num_cols
-    cfg.num_rows = 1
-    cfg.size = size
-    cfg.sub_terrains = {name: _MockSubCfg(p) for name, p in proportions.items()}
-    cfg.inter_column_borders = list(inter_column_borders or [])
-    cfg.inter_column_gaps = inter_column_gaps
-    return cfg
-
-
-def _compute_layout(cfg):
-    gen = object.__new__(MetaTerrainGenerator)
-    gen.terrain_metadata = {}
-    return gen._compute_border_column_info(cfg)
-
-
-def test_inter_column_gap_inserts_one_column_per_boundary():
-    cfg = _make_generator_cfg(
-        num_cols=7,  # 4 content + 3 gaps
-        proportions={"a": 1.0},
-        inter_column_gaps=True,
-    )
-    border_columns, content_num_cols, column_kinds = _compute_layout(cfg)
-    assert content_num_cols == 4
-    assert sorted(column_kinds.items()) == [
-        (0, "content"),
-        (1, "random_gap"),
-        (2, "content"),
-        (3, "random_gap"),
-        (4, "content"),
-        (5, "random_gap"),
-        (6, "content"),
-    ]
-    assert border_columns == {1, 3, 5}
-
-
-def test_inter_column_gap_coexists_with_fixed_borders():
-    # Two sub-terrains with equal proportions; one fixed border (1 col wide)
-    # at the type boundary (after content slot 1 of 4). One gap column is
-    # then inserted at the other two inter-slot boundaries.
-    cfg = _make_generator_cfg(
-        num_cols=7,  # 4 content + 1 fixed border + 2 gap cols
-        proportions={"a": 0.5, "b": 0.5},
-        inter_column_borders=[("a", 4.0)],  # ceil(4.0 / 4.0) = 1 col
-        inter_column_gaps=True,
-        size=(8.0, 4.0),
-    )
-    _, content_num_cols, column_kinds = _compute_layout(cfg)
-    assert content_num_cols == 4
-    kinds = [column_kinds[c] for c in range(cfg.num_cols)]
-    assert kinds.count("content") == 4
-    assert kinds.count("fixed_border") == 1
-    assert kinds.count("random_gap") == 2
-
-
-def test_inter_column_gap_mesh_is_empty():
-    gen = object.__new__(MetaTerrainGenerator)
-    gen.terrain_metadata = {}
-    gen.cfg = _make_generator_cfg(
-        num_cols=3, proportions={"a": 1.0}, inter_column_gaps=True
-    )
-    mesh, origin, md = gen._generate_gap_terrain()
-    assert md["is_border"] is True
-    # Empty trimesh — no vertices, no faces.
-    assert len(mesh.vertices) == 0
-    assert len(mesh.faces) == 0

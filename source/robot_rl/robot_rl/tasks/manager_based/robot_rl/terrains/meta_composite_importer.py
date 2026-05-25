@@ -39,11 +39,13 @@ if TYPE_CHECKING:
 
 _SKILL_PROBS_TOL = 1e-5
 
+_FLAT_OUTLINE_COLOR: tuple[float, float, float] = (0.20, 0.80, 0.30)
+_STAIR_OUTLINE_COLOR: tuple[float, float, float] = (0.95, 0.55, 0.15)
 _DEFAULT_BLOCK_OUTLINE_COLORS: dict[str, tuple[float, float, float]] = {
-    "FlatBlock": (0.20, 0.80, 0.30),
-    "StairBlock": (0.95, 0.55, 0.15),
-    "LegacyFlat": (0.30, 0.60, 0.90),
-    "LegacyStair": (0.80, 0.50, 0.20),
+    "FlatBlock": _FLAT_OUTLINE_COLOR,
+    "StairBlock": _STAIR_OUTLINE_COLOR,
+    "LegacyFlat": _FLAT_OUTLINE_COLOR,
+    "LegacyStair": _STAIR_OUTLINE_COLOR,
 }
 _FALLBACK_BLOCK_OUTLINE_COLOR: tuple[float, float, float] = (0.55, 0.55, 0.55)
 

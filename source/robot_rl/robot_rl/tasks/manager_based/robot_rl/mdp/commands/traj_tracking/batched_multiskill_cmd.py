@@ -606,24 +606,28 @@ class BatchedMultiSkillCommand(BaseTrajectoryCommand):
     # Bucket-driven active-skill state machine
     # ------------------------------------------------------------------
 
-    def bucket_for_velocity(
+    def _skill_for_velocity(
         self,
         vel: torch.Tensor,
         env_ids: torch.Tensor,
         xy_w: torch.Tensor | None = None,
     ) -> torch.Tensor:
-        """Return the per-env active skill_id derived from ``vel``.
+        """Return the per-env desired skill_id given ``vel`` and the cell.
 
-        Each env's bucket is the (eligible) configured skill whose
-        ``[lin_vel_x, lin_vel_y, ang_vel_z]`` ranges all contain ``vel``.
-        Eligibility comes from the env's current cell (or per-block region,
-        for composite importers) via ``terrain.skill_probs_at(xy) > 0``, so
-        overlapping buckets resolve unambiguously to the only available skill
-        at the query point.
+        Each env's skill is picked by ``argmin`` of per-bucket box-distance
+        to ``vel`` over the env's *eligible* skills (eligibility from the
+        composite importer's per-block ``skill_probs_at(xy)``). When ``vel``
+        sits inside an eligible bucket that bucket wins (dist 0); when ``vel``
+        is outside every eligible bucket the eligible bucket with the
+        nearest edge wins. The latter is what flips the skill the instant
+        the stance foot enters a block where the previous skill is no
+        longer eligible — independent of where the velocity ramp currently
+        sits.
 
         Args:
             vel: ``[K, 3]`` ``(vx, vy, wz)`` per env.
-            env_ids: ``[K]`` global env indices (used for fallback).
+            env_ids: ``[K]`` global env indices (used for the cell lookup
+                anchor when ``xy_w`` is not supplied).
             xy_w: Optional ``[K, 2]`` world-frame ``(x, y)`` override
                 for the cell lookup.  Default uses ``self.ref_poses`` —
                 stable across pelvis jitter mid-episode.  The reset
@@ -636,14 +640,12 @@ class BatchedMultiSkillCommand(BaseTrajectoryCommand):
         if xy_w is None:
             xy_w = self.ref_poses[env_ids, :2]
         eligible = self._terrain.skill_probs_at(xy_w).T > 0.0  # [S, K]
-        fallback = self.skill_id[env_ids]
         return bucket_for_velocity(
             vel,
             eligible,
             self._skill_lin_vel_x,
             self._skill_lin_vel_y,
             self._skill_ang_vel_z,
-            fallback,
         )
 
     def _resolve_vel_cmd(self) -> None:
@@ -669,7 +671,7 @@ class BatchedMultiSkillCommand(BaseTrajectoryCommand):
             return
         self._resolve_vel_cmd()
         vel = self._vel_cmd.vel_target_b[env_ids]
-        desired = self.bucket_for_velocity(vel, env_ids)
+        desired = self._skill_for_velocity(vel, env_ids)
 
         active_subset = self.skill_id[env_ids]
         pa_subset = self.pending.active[env_ids]
@@ -734,7 +736,7 @@ class BatchedMultiSkillCommand(BaseTrajectoryCommand):
         self._resolve_vel_cmd()
         vel = self._vel_cmd.vel_target_b[env_ids_t]
         xy_spawn = self.env.scene.env_origins[env_ids_t, :2]
-        new_active = self.bucket_for_velocity(vel, env_ids_t, xy_w=xy_spawn)
+        new_active = self._skill_for_velocity(vel, env_ids_t, xy_w=xy_spawn)
         self.skill_id[env_ids_t] = new_active
         self.pending.clear(env_ids_t)
         self.transition.clear(env_ids_t)

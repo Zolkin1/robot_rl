@@ -217,14 +217,13 @@ STAIR_FLAT_STAIR_CFG = MetaTerrainGeneratorCfg(
 
 # Randomized multiskill terrain: each sub-terrain cell is a fresh random walk
 # along x mixing flat, stair-up (with partial trailing tread), stair-down, and
-# slopes. Lateral void gaps are inserted between every adjacent pair of content
-# columns so a robot drifting sideways falls into the void instead of stepping
-# onto a neighbour's terrain.
+# slopes. Sub-terrain cells are placed directly adjacent in y; if a gap is
+# desired, set the per-block width range smaller than the cell's y extent so
+# empty strips appear inside each cell instead of as separate columns.
 _RANDOM_SIZE_X = 12.0
-_RANDOM_SIZE_Y = 6.0
+_RANDOM_SIZE_Y = 10.0
 _RANDOM_STAIR_STEP_DIM_OPTIONS = [(0.10, 0.30), (0.14, 0.28), (0.16, 0.32)]
-_RANDOM_CONTENT_NUM_COLS = 4   # content columns per row
-_RANDOM_NUM_COLS = 2 * _RANDOM_CONTENT_NUM_COLS - 1  # + gap columns between them
+_RANDOM_NUM_COLS = 4
 
 RANDOMIZED_MULTISKILL_TERRAIN_CFG = MetaTerrainGeneratorCfg(
     curriculum=False,
@@ -237,7 +236,6 @@ RANDOMIZED_MULTISKILL_TERRAIN_CFG = MetaTerrainGeneratorCfg(
     slope_threshold=0.75,
     use_cache=False,
     inter_column_borders=[],
-    inter_column_gaps=True,
     sub_terrains={
         "randomized": RandomizedCompositeSubTerrainCfg(
             proportion=1.0,
@@ -249,6 +247,7 @@ RANDOMIZED_MULTISKILL_TERRAIN_CFG = MetaTerrainGeneratorCfg(
                 BlockChoice(
                     cfg=FlatBlockCfg(
                         skill_probs={"walk_forward": 0.5, "running": 0.4, "standing": 0.1},
+                        flat_width_range=(1.5, _RANDOM_SIZE_Y),
                     ),
                     weight=2.0,
                 ),
@@ -257,7 +256,7 @@ RANDOMIZED_MULTISKILL_TERRAIN_CFG = MetaTerrainGeneratorCfg(
                         direction="up",
                         skill_probs={"stair_up": 1.0},
                         step_dim_options=_RANDOM_STAIR_STEP_DIM_OPTIONS,
-                        stair_width_range=(1.5, 2.5),
+                        stair_width_range=(1.5, _RANDOM_SIZE_Y),
                         allow_partial_last_step=True,
                         float_prob=0.0,
                         wall_prob=0.0,
@@ -271,7 +270,7 @@ RANDOMIZED_MULTISKILL_TERRAIN_CFG = MetaTerrainGeneratorCfg(
                         direction="down",
                         skill_probs={"stair_down": 1.0},
                         step_dim_options=_RANDOM_STAIR_STEP_DIM_OPTIONS,
-                        stair_width_range=(1.5, 2.5),
+                        stair_width_range=(1.5, _RANDOM_SIZE_Y),
                         allow_partial_last_step=True,
                         float_prob=0.0,
                         wall_prob=0.0,
@@ -285,7 +284,7 @@ RANDOMIZED_MULTISKILL_TERRAIN_CFG = MetaTerrainGeneratorCfg(
                         direction="up",
                         skill_probs={"walk_forward": 1.0},
                         rise_range=(0.2, 0.8),
-                        slope_width_range=(1.5, 2.5),
+                        slope_width_range=(1.5, _RANDOM_SIZE_Y),
                     ),
                     weight=0.5,
                     length_range=(1.5, 3.5),
@@ -295,7 +294,7 @@ RANDOMIZED_MULTISKILL_TERRAIN_CFG = MetaTerrainGeneratorCfg(
                         direction="down",
                         skill_probs={"walk_forward": 1.0},
                         rise_range=(0.2, 0.8),
-                        slope_width_range=(1.5, 2.5),
+                        slope_width_range=(1.5, _RANDOM_SIZE_Y),
                     ),
                     weight=0.5,
                     length_range=(1.5, 3.5),
@@ -305,6 +304,76 @@ RANDOMIZED_MULTISKILL_TERRAIN_CFG = MetaTerrainGeneratorCfg(
     },
 )
 """Randomized multiskill terrain with lateral void gaps."""
+
+
+# Three-sub-terrain multiskill mix:
+#   * ``pure_flat``     — legacy ``MeshFlatTerrainCfg`` (entire cell is one
+#     flat plane).
+#   * ``pure_stair_up`` — legacy ``MeshXStairsUpTerrainCfg`` (entire cell is
+#     a single ascending staircase, full y width).
+#   * ``flat_stair_up`` — composite cells that interleave flat and stair-up
+#     blocks only (no stair-down, no slopes); the first block is forced to
+#     flat so the spawn lands on level ground.
+# The pure sub-terrains use the same legacy types as ``STAIR_WALK_CFG``;
+# only the mixed sub-terrain needs the randomized composite (the only way to
+# interleave block types within one cell).
+FLAT_STAIR_MULTISKILL_CFG = MetaTerrainGeneratorCfg(
+    curriculum=True,
+    size=(_RANDOM_SIZE_X, _RANDOM_SIZE_Y),
+    border_width=20.0,
+    num_rows=4,
+    num_cols=_RANDOM_NUM_COLS,
+    horizontal_scale=0.1,
+    vertical_scale=0.005,
+    slope_threshold=0.75,
+    use_cache=False,
+    inter_column_borders=[],
+    sub_terrains={
+        "pure_flat": MeshFlatTerrainCfg(proportion=1.0 / 3.0),
+        "pure_stair_up": MeshXStairsUpTerrainCfg(
+            proportion=1.0 / 3.0,
+            step_dim_options=_RANDOM_STAIR_STEP_DIM_OPTIONS,
+            stair_width_range=(1.5, _RANDOM_SIZE_Y),
+            # Spawn on the first tread (lowest tread top at z=0 by default).
+            origin_distance_from_back=0.5 * _RANDOM_STAIR_STEP_DIM_OPTIONS[0][1],
+            float_prob=0.0,
+            wall_prob=0.0,
+            pole_prob=0.0,
+        ),
+        "flat_stair_up": RandomizedCompositeSubTerrainCfg(
+            proportion=1.0 / 3.0,
+            size=(_RANDOM_SIZE_X, _RANDOM_SIZE_Y),
+            origin_block_index=0,
+            force_flat_origin=True,
+            length_range=(1.0, 3.0),
+            choices=[
+                BlockChoice(
+                    cfg=FlatBlockCfg(
+                        skill_probs={"walk_forward": 0.5, "running": 0.4, "standing": 0.1},
+                        flat_width_range=(1.5, _RANDOM_SIZE_Y),
+                    ),
+                    weight=2.0,
+                ),
+                BlockChoice(
+                    cfg=StairBlockCfg(
+                        direction="up",
+                        skill_probs={"stair_up": 1.0},
+                        step_dim_options=_RANDOM_STAIR_STEP_DIM_OPTIONS,
+                        stair_width_range=(1.5, _RANDOM_SIZE_Y),
+                        allow_partial_last_step=True,
+                        float_prob=0.0,
+                        wall_prob=0.0,
+                        pole_prob=0.0,
+                    ),
+                    weight=1.0,
+                    length_range=(1.5, 4.0),
+                ),
+            ],
+        ),
+    },
+)
+"""Three-sub-terrain mix: pure flat (legacy), pure stair-up (legacy), and a
+composite flat + stair-up sub-terrain."""
 
 
 ROUGH_TERRAINS_CFG = TerrainGeneratorCfg(

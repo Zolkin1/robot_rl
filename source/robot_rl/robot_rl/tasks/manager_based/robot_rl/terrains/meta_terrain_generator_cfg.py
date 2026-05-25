@@ -44,14 +44,3 @@ class MetaTerrainGeneratorCfg(TerrainGeneratorCfg):
 
     Example: [("wave", 20.0)] inserts a 20m flat border after the "wave" terrain columns.
     """
-
-    inter_column_gaps: bool = False
-    """If True, inserts one *void gap column* (no mesh at all) between every
-    pair of adjacent content columns that don't already share a fixed
-    ``inter_column_borders`` boundary. The robot falls through the gap.
-
-    Each gap column spans ``size[1]`` in y. When True, ``num_cols`` must
-    equal ``2 * content_num_cols - 1 - num_fixed_border_boundaries +
-    total_fixed_border_cols`` (each content boundary without a fixed border
-    consumes exactly one extra gap column). The generator raises a
-    ``ValueError`` if the configured ``num_cols`` is inconsistent."""

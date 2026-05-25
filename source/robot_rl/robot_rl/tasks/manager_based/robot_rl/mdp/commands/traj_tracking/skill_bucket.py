@@ -1,7 +1,8 @@
 """Pure-function helpers for the velocity-bucket → skill-id state machine.
 
-The trajectory cmd's "active skill" is derived from which configured
-velocity bucket the live ``vel_target_b`` currently sits in.  These
+The trajectory cmd's "active skill" is derived per-step from where the
+live ``vel_target_b`` sits relative to the configured velocity buckets,
+constrained to skills the env's current terrain block allows. These
 helpers are kept side-effect-free and tensor-in/tensor-out so the unit
 tests can hit them without instantiating any IsaacLab command term.
 
@@ -13,11 +14,7 @@ Naming convention used below:
   ``[min, max]`` ranges per skill in ``skill_list`` order.
 - ``eligible``: ``[S, K]`` bool mask of which skills the env's current
   cell (or per-block region) is allowed to sample (from
-  ``terrain.skill_probs_at(xy) > 0``).  This
-  disambiguates buckets that overlap across skills (e.g.  stair_up vs
-  walk_forward both containing 0.4 m/s).
-- ``fallback``: ``[K]`` long skill_id to fall back to when no bucket
-  matches.  Typically the env's current active skill.
+  ``terrain.skill_probs_at(xy) > 0``).
 """
 
 from __future__ import annotations
@@ -33,15 +30,29 @@ def bucket_for_velocity(
     lin_x: torch.Tensor,
     lin_y: torch.Tensor,
     ang_z: torch.Tensor,
-    fallback: torch.Tensor,
 ) -> torch.Tensor:
-    """Return per-env skill_id of whichever bucket contains ``vel``.
+    """Return per-env desired skill_id by box-distance to the buckets.
 
-    A bucket *contains* ``vel`` iff each component (vx, vy, wz) lies in
-    the bucket's closed ``[min, max]`` interval.  When multiple skills'
-    buckets contain ``vel`` for an env, the ``eligible`` mask filters
-    the search to skills the env's current cell is allowed to sample;
-    among remaining ties, the lowest skill index wins (deterministic).
+    For each skill ``s``, define the *edge distance* from ``vel`` to the
+    closed axis-aligned bucket box ``[lo_x, hi_x] × [lo_y, hi_y] ×
+    [lo_w, hi_w]`` as the L2 distance from ``vel`` to the nearest point
+    on the box. This is zero when ``vel`` is inside the box and the
+    Euclidean distance to the nearest edge otherwise. The returned skill
+    is the ``argmin`` of the edge distance over eligible skills:
+
+    * **``vel`` lies in one or more eligible buckets** → dist = 0 for
+      those; the lowest-index one wins. Preserves the seam-closed
+      semantics where a velocity equal to two buckets' shared boundary
+      picks the lower-index skill (e.g. v=1.5 with walk_forward
+      (0.1, 1.5) and running (1.5, 3.7) → walk_forward).
+    * **``vel`` is outside every eligible bucket** → the eligible bucket
+      with the nearest edge (min or max along the axes) wins. This is
+      the path that fires when the stance foot lands on a block where
+      the previous skill is no longer eligible: an eligible skill is
+      picked regardless of where the velocity ramp currently sits, so
+      the trajectory cmd can enqueue pending and the next contact gate
+      can drive the skill change without waiting for the velocity cmd
+      to resample on the new block.
 
     Args:
         vel: ``[K, 3]`` velocities (vx, vy, wz) per env.
@@ -49,27 +60,33 @@ def bucket_for_velocity(
         lin_x: ``[S, 2]`` (min, max) lin-x bucket per skill.
         lin_y: ``[S, 2]`` (min, max) lin-y bucket per skill.
         ang_z: ``[S, 2]`` (min, max) ang-z bucket per skill.
-        fallback: ``[K]`` long skill_id used for envs where no eligible
-            bucket contains ``vel`` (defensive — well-formed cfgs whose
-            buckets span each cell's reachable velocity won't trip this).
 
     Returns:
         ``[K]`` long tensor of skill indices into ``skill_list``.
     """
-    vx = vel[:, 0].unsqueeze(0)                            # [1, K]
-    vy = vel[:, 1].unsqueeze(0)
-    wz = vel[:, 2].unsqueeze(0)
+    vx = vel[:, 0:1]                                            # [K, 1]
+    vy = vel[:, 1:2]
+    wz = vel[:, 2:3]
 
-    in_x = (vx >= lin_x[:, 0:1]) & (vx <= lin_x[:, 1:2])   # [S, K]
-    in_y = (vy >= lin_y[:, 0:1]) & (vy <= lin_y[:, 1:2])
-    in_w = (wz >= ang_z[:, 0:1]) & (wz <= ang_z[:, 1:2])
+    lo_x, hi_x = lin_x[:, 0].unsqueeze(0), lin_x[:, 1].unsqueeze(0)  # [1, S]
+    lo_y, hi_y = lin_y[:, 0].unsqueeze(0), lin_y[:, 1].unsqueeze(0)
+    lo_w, hi_w = ang_z[:, 0].unsqueeze(0), ang_z[:, 1].unsqueeze(0)
 
-    in_bucket = in_x & in_y & in_w & eligible              # [S, K]
-    has_match = in_bucket.any(dim=0)                       # [K]
-    # argmax on a bool tensor returns the index of the first True (or 0
-    # when all False) — broadcasts cleanly with the where-fallback below.
-    picked = in_bucket.long().argmax(dim=0)                # [K]
-    return torch.where(has_match, picked, fallback)
+    # Nearest point on each bucket box: per-axis clamp of vel into [lo, hi].
+    clamped_x = torch.minimum(torch.maximum(vx, lo_x), hi_x)         # [K, S]
+    clamped_y = torch.minimum(torch.maximum(vy, lo_y), hi_y)
+    clamped_w = torch.minimum(torch.maximum(wz, lo_w), hi_w)
+
+    dist2 = (
+        (vx - clamped_x).pow(2)
+        + (vy - clamped_y).pow(2)
+        + (wz - clamped_w).pow(2)
+    )                                                                # [K, S]
+    dist2 = dist2.masked_fill(~eligible.T, float("inf"))
+
+    # argmin returns the lowest index on ties — preserves the
+    # seam-closed lowest-index-wins semantics for the dist=0 case.
+    return dist2.argmin(dim=1)                                       # [K]
 
 
 def step_skill_pending(

@@ -66,9 +66,8 @@ class TestBucketLookup:
         lin_x, lin_y, ang_z = _flat_buckets()
         vel = torch.tensor([[0.5, 0.0, 0.0], [2.0, 0.0, 0.0]], device=DEVICE)
         eligible = _all_eligible(K=2)
-        fallback = torch.tensor([ST, ST], dtype=torch.long, device=DEVICE)
 
-        out = bucket_for_velocity(vel, eligible, lin_x, lin_y, ang_z, fallback)
+        out = bucket_for_velocity(vel, eligible, lin_x, lin_y, ang_z)
         assert out.tolist() == [WF, RN]
 
     def test_standing_bucket(self) -> None:
@@ -76,9 +75,8 @@ class TestBucketLookup:
         lin_x, lin_y, ang_z = _flat_buckets()
         vel = torch.tensor([[0.05, 0.0, 0.0]], device=DEVICE)
         eligible = _all_eligible(K=1)
-        fallback = torch.tensor([RN], dtype=torch.long, device=DEVICE)
 
-        out = bucket_for_velocity(vel, eligible, lin_x, lin_y, ang_z, fallback)
+        out = bucket_for_velocity(vel, eligible, lin_x, lin_y, ang_z)
         # 0.05 is in standing (0.0, 0.1) but NOT in walk_forward (0.1, 1.5).
         assert out.tolist() == [ST]
 
@@ -108,35 +106,111 @@ class TestBucketLookup:
             ],
             device=DEVICE,
         )
-        fallback = torch.tensor([ST, ST], dtype=torch.long, device=DEVICE)
 
-        out = bucket_for_velocity(vel, eligible, lin_x, lin_y, ang_z, fallback)
+        out = bucket_for_velocity(vel, eligible, lin_x, lin_y, ang_z)
         assert out.tolist() == [WF, SU]
 
-    def test_no_match_returns_fallback(self) -> None:
-        """Velocity outside all eligible buckets → fallback skill."""
+    def test_no_match_returns_nearest_eligible_edge(self) -> None:
+        """Velocity outside every eligible bucket → nearest-edge eligible skill.
+
+        With flat buckets and ``vx = -1.0`` (below every bucket's min), the
+        edge distances are |−1 − 0.1| = 1.1 (walk_forward), |−1 − 1.5| = 2.5
+        (running), |−1 − 0.0| = 1.0 (standing). Standing wins.
+        """
         lin_x, lin_y, ang_z = _flat_buckets()
-        # vx = -1.0 is below every bucket's minimum.
         vel = torch.tensor([[-1.0, 0.0, 0.0]], device=DEVICE)
         eligible = _all_eligible(K=1)
-        fallback = torch.tensor([RN], dtype=torch.long, device=DEVICE)
 
-        out = bucket_for_velocity(vel, eligible, lin_x, lin_y, ang_z, fallback)
-        assert out.tolist() == [RN]
+        out = bucket_for_velocity(vel, eligible, lin_x, lin_y, ang_z)
+        assert out.tolist() == [ST]
 
     def test_closed_interval_seam_lower_index(self) -> None:
         """v exactly on a seam (1.5) resolves to the lower-index skill.
 
         walk_forward (0.1, 1.5) and running (1.5, 3.7) both contain 1.5;
         skill_list order puts walk_forward (idx 0) before running (idx 1).
+        Both have dist=0, argmin breaks ties to the lower index.
         """
         lin_x, lin_y, ang_z = _flat_buckets()
         vel = torch.tensor([[1.5, 0.0, 0.0]], device=DEVICE)
         eligible = _all_eligible(K=1)
-        fallback = torch.tensor([ST], dtype=torch.long, device=DEVICE)
 
-        out = bucket_for_velocity(vel, eligible, lin_x, lin_y, ang_z, fallback)
+        out = bucket_for_velocity(vel, eligible, lin_x, lin_y, ang_z)
         assert out.tolist() == [WF]
+
+    def test_current_ineligible_single_eligible_picks_it(self) -> None:
+        """Stepping onto a stair-only block while vel is in walk_forward range.
+
+        Only ``stair_up`` is eligible. ``vel = 1.0`` doesn't fall in the
+        stair_up bucket (0.4, 0.4) — it doesn't matter; stair_up is the
+        only eligible skill so it's picked unambiguously.
+        """
+        lin_x = torch.tensor(
+            [
+                [0.1, 1.5],  # walk_forward
+                [1.5, 3.7],  # running
+                [0.0, 0.1],  # standing
+                [0.4, 0.4],  # stair_up
+            ],
+            device=DEVICE,
+        )
+        lin_y = torch.zeros(4, 2, device=DEVICE)
+        ang_z = torch.zeros(4, 2, device=DEVICE)
+        vel = torch.tensor([[1.0, 0.0, 0.0]], device=DEVICE)
+        eligible = torch.tensor(
+            [[False], [False], [False], [True]], device=DEVICE
+        )
+
+        out = bucket_for_velocity(vel, eligible, lin_x, lin_y, ang_z)
+        assert out.tolist() == [SU]
+
+    def test_current_ineligible_two_eligible_edge_tiebreak(self) -> None:
+        """Two eligible skills, vel outside both — closer edge wins.
+
+        Flat block (walk_forward + running + standing all eligible);
+        ``vel = 0.05`` is in standing (0.0, 0.1) — dist 0, standing wins
+        even though walk_forward (0.1, 1.5) is only 0.05 away on its
+        lower edge.
+        """
+        lin_x, lin_y, ang_z = _flat_buckets()
+        vel = torch.tensor([[0.05, 0.0, 0.0]], device=DEVICE)
+        # Pretend running became ineligible to stress the eligibility mask.
+        eligible = torch.tensor(
+            [[True], [False], [True]], device=DEVICE
+        )
+
+        out = bucket_for_velocity(vel, eligible, lin_x, lin_y, ang_z)
+        assert out.tolist() == [ST]
+
+        # Now move vel to where standing's edge is farther than walking's:
+        # vel = 0.3 is in walk_forward (dist 0); standing edge at 0.1 is
+        # 0.2 away. Walk_forward wins by dist=0.
+        vel = torch.tensor([[0.3, 0.0, 0.0]], device=DEVICE)
+        out = bucket_for_velocity(vel, eligible, lin_x, lin_y, ang_z)
+        assert out.tolist() == [WF]
+
+    def test_in_bucket_beats_far_eligible_neighbor(self) -> None:
+        """vel inside one eligible bucket → that bucket wins regardless of
+        whether another eligible bucket's *center* is closer.
+        """
+        # Construct buckets where running's center (2.6) is closer to vel
+        # than standing's center (0.05), but vel still sits inside standing.
+        lin_x = torch.tensor(
+            [
+                [0.1, 1.5],  # walk_forward
+                [1.5, 3.7],  # running    center 2.6
+                [0.0, 0.1],  # standing   center 0.05
+            ],
+            device=DEVICE,
+        )
+        lin_y = torch.zeros(3, 2, device=DEVICE)
+        ang_z = torch.zeros(3, 2, device=DEVICE)
+        # vel = 0.05 is inside standing (dist 0).
+        vel = torch.tensor([[0.05, 0.0, 0.0]], device=DEVICE)
+        eligible = _all_eligible(K=1)
+
+        out = bucket_for_velocity(vel, eligible, lin_x, lin_y, ang_z)
+        assert out.tolist() == [ST]
 
 
 class TestPendingStateMachine:
@@ -295,10 +369,8 @@ class TestResetPath:
         lin_x, lin_y, ang_z = _flat_buckets()
         vel = torch.tensor([[1.0, 0.0, 0.0], [2.5, 0.0, 0.0]], device=DEVICE)
         eligible = _all_eligible(K=2)
-        # Pre-reset garbage in fallback — irrelevant because vel is in-bucket.
-        fallback = torch.tensor([ST, ST], dtype=torch.long, device=DEVICE)
 
-        new_active = bucket_for_velocity(vel, eligible, lin_x, lin_y, ang_z, fallback)
+        new_active = bucket_for_velocity(vel, eligible, lin_x, lin_y, ang_z)
         assert new_active.tolist() == [WF, RN]
 
     def test_reset_with_eligibility_constraint(self) -> None:
@@ -316,7 +388,6 @@ class TestResetPath:
         ang_z = torch.zeros(4, 2, device=DEVICE)
         vel = torch.tensor([[0.4, 0.0, 0.0]], device=DEVICE)
         eligible = torch.tensor([[False], [False], [False], [True]], device=DEVICE)
-        fallback = torch.tensor([WF], dtype=torch.long, device=DEVICE)
 
-        out = bucket_for_velocity(vel, eligible, lin_x, lin_y, ang_z, fallback)
+        out = bucket_for_velocity(vel, eligible, lin_x, lin_y, ang_z)
         assert out.tolist() == [SU]
