@@ -35,7 +35,7 @@ class G1TerrainMultiskillSceneCfg(G1ClfTrackingSceneCfg):
         prim_path="{ENV_REGEX_NS}/Robot/Geometry/pelvis_link",
         offset=RayCasterCfg.OffsetCfg(pos=(0.0, 0.0, 20.0)),
         ray_alignment="yaw",
-        pattern_cfg=patterns.GridPatternCfg(resolution=0.1, size=[1.0, 1.0]),
+        pattern_cfg=patterns.GridPatternCfg(resolution=0.1, size=[2.75, 1.0]),
         debug_vis=False,
         mesh_prim_paths=["/World/ground"],
     )
@@ -189,7 +189,7 @@ class G1TerrainMultiskillCLFEnvCfg(G1MultiSkillCLFEnvCfg):
         # suppressed by a post-skill-transition grace period.
         self.terminations.pelvis_upright = DoneTerm(
             func=mdp.base_orientation_from_upright,
-            params={"roll_limit_deg": 60.0, "pitch_limit_deg": 60.0},
+            params={"roll_limit_deg": 50.0, "pitch_limit_deg": 50.0},
         )
 
 @configclass

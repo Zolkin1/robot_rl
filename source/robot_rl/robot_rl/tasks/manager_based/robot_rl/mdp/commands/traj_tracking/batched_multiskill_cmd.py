@@ -52,7 +52,7 @@ _DEBUG_VIZ_END_SPHERE_DIST_FRAC: float = 0.25
 _DEBUG_VIZ_END_SPHERE_MIN_RADIUS: float = 0.1
 # Master toggle for the end-of-trajectory spheres.  Set to False to hide
 # them entirely (no prototype, no per-step viz emission).
-_DEBUG_VIZ_SHOW_END_SPHERES: bool = True
+_DEBUG_VIZ_SHOW_END_SPHERES: bool = False #True
 # Flat disk drawn at each env's reference-pose anchor position so the
 # anchor frame the trajectory is rendered around is visible at a glance.
 _DEBUG_VIZ_SHOW_REF_POSE: bool = True
