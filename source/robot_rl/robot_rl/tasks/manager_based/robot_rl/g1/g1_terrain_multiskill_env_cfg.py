@@ -12,8 +12,8 @@ from ..mdp.commands.multiskill_velocity_commands_cfg import VelocityBucketCfg
 from robot_rl.tasks.manager_based.robot_rl import mdp
 from robot_rl.tasks.manager_based.robot_rl.g1.g1_clf_tracking_base import G1ClfTrackingSceneCfg
 from robot_rl.tasks.manager_based.robot_rl.g1.g1_clf_multiskill_base import G1MultiSkillCLFEnvCfg, G1MultiSkillObservationCfg
-from robot_rl.tasks.manager_based.robot_rl.terrains.config.terrain_cfgs import STAIR_WALK_CFG
-from robot_rl.tasks.manager_based.robot_rl.terrains.meta_stair_importer_cfg import MetaStairTerrainImporterCfg
+from robot_rl.tasks.manager_based.robot_rl.terrains.config.terrain_cfgs import FLAT_STAIR_MULTISKILL_CFG, STAIR_WALK_CFG
+from robot_rl.tasks.manager_based.robot_rl.terrains.meta_composite_importer_cfg import MetaCompositeTerrainImporterCfg
 
 
 # Body-contact sensors (declared on the base scene cfg) that should terminate
@@ -99,6 +99,10 @@ class G1TerrainMultiskillCLFEnvCfg(G1MultiSkillCLFEnvCfg):
         # Commands
         ##
         self.commands.traj_ref.path = "trajectories/retargeted/2026-05-11_12-34-50_merged"
+        # Cross-fade window after a skill commit — half a cycle of the new
+        # trajectory's phase.  Default is 1.0 (a full cycle).
+        self.commands.traj_ref.transition_blend_end_phi = 0.5
+        self.commands.traj_ref.skill_query_buffer = 0.2
 
         # Configure velocity ranges for different gaits
         # self.commands.base_velocity.ranges.lin_vel_x = (0.0, 3.7)
@@ -120,7 +124,7 @@ class G1TerrainMultiskillCLFEnvCfg(G1MultiSkillCLFEnvCfg):
             "standing":     VelocityBucketCfg(lin_vel_x=(0.0, 0.1)),
             "walk_forward": VelocityBucketCfg(lin_vel_x=(0.1, 1.5)),
             "running":      VelocityBucketCfg(lin_vel_x=(1.5, 3.7)),
-            "stair_up":     VelocityBucketCfg(lin_vel_x=(0.4, 0.4)),
+            "stair_up":     VelocityBucketCfg(lin_vel_x=(0.1, 1.5)), #VelocityBucketCfg(lin_vel_x=(0.4, 0.4)),
         }
 
 
@@ -150,11 +154,11 @@ class G1TerrainMultiskillCLFEnvCfg(G1MultiSkillCLFEnvCfg):
         # Terrain
         ##
         base_terrain = self.scene.terrain
-        self.scene.terrain = MetaStairTerrainImporterCfg(
+        self.scene.terrain = MetaCompositeTerrainImporterCfg(
             prim_path=base_terrain.prim_path,
             terrain_type="generator",
-            terrain_generator=STAIR_WALK_CFG,
-            max_init_terrain_level=0,
+            terrain_generator=FLAT_STAIR_MULTISKILL_CFG, #STAIR_WALK_CFG,
+            max_init_terrain_level=10,
             collision_group=base_terrain.collision_group,
             physics_material=base_terrain.physics_material,
             visual_material=base_terrain.visual_material,
@@ -165,19 +169,8 @@ class G1TerrainMultiskillCLFEnvCfg(G1MultiSkillCLFEnvCfg):
         self.commands.base_velocity.debug_vis = False
 
         ##
-        # Terminations: end the episode if any non-foot body takes a hard hit.
-        # Threshold is set high enough that incidental self-collision doesn't
-        # trip it — only a real impact against the staircase will.
+        # Terminations
         ##
-        # for sensor_name in _TERRAIN_CONTACT_TERMINATION_SENSORS:
-        #     setattr(
-        #         self.terminations,
-        #         f"{sensor_name}_terrain",
-        #         DoneTerm(
-        #             func=mdp.illegal_terrain_contact,
-        #             params={"sensor_cfg": SceneEntityCfg(sensor_name), "threshold": 50.0},
-        #         ),
-        #     )
 
         self.terminations.frame_drift = DoneTerm(
           func=mdp.frame_deviation_from_reference,
@@ -189,6 +182,14 @@ class G1TerrainMultiskillCLFEnvCfg(G1MultiSkillCLFEnvCfg):
               "min_dist": 0.1,
               "grace_period_s": 1.0,
           },
+        )
+
+        # Face-plant / fallen-robot detector.  Not gated by the trajectory
+        # grace window — catches falls even while ``frame_drift`` is being
+        # suppressed by a post-skill-transition grace period.
+        self.terminations.pelvis_upright = DoneTerm(
+            func=mdp.base_orientation_from_upright,
+            params={"roll_limit_deg": 60.0, "pitch_limit_deg": 60.0},
         )
 
 @configclass
@@ -243,15 +244,17 @@ class G1TerrainMultiskillCLFEnvCfgPlay(G1TerrainMultiskillCLFEnvCfg):
         # self.commands.base_velocity.ranges.lin_vel_y = (-0.75, 0.75)
         # self.commands.base_velocity.ranges.ang_vel_z = (-0.75, 0.75)
 
-        self.commands.base_velocity.resampling_time_range = (2.0, 2.0)
-        self.commands.base_velocity.skill_transition_prob = 1.0
+        self.commands.base_velocity.resampling_time_range = (4.0, 8.0)
+        self.commands.base_velocity.skill_transition_prob = 0.1 #1.0
         self.commands.base_velocity.debug_vis = False
 
-        self.episode_length_s = 15.0 #10.0 #4.0 #6.0
+        self.commands.traj_ref.debug_skill_log = False
+
+        # self.episode_length_s = 15.0 #10.0 #4.0 #6.0
 
 
         self.scene.num_envs = 2
-        self.scene.env_spacing = 2.5
+        # self.scene.env_spacing = 2.5
         self.observations.policy.enable_corruption = False
 
         # Shrink the play terrain.  The actual grid is driven by the
@@ -262,7 +265,11 @@ class G1TerrainMultiskillCLFEnvCfgPlay(G1TerrainMultiskillCLFEnvCfg):
             self.scene.terrain.terrain_generator
         )
         self.scene.terrain.terrain_generator.num_rows = self.scene.num_envs
-        self.scene.terrain.terrain_generator.num_cols = 4
+        self.scene.terrain.terrain_generator.num_cols = 2
+        self.scene.terrain.terrain_generator.sub_terrains["pure_flat"].proportion = 0.0
+        self.scene.terrain.terrain_generator.sub_terrains["pure_stair_up"].proportion = 0.0
+        self.scene.terrain.terrain_generator.sub_terrains["flat_stair_up"].proportion = 1.0
+
         # self.scene.terrain.terrain_generator.border_width = 0.0
         # self.scene.terrain.terrain_generator.inter_column_borders = []
 
@@ -277,3 +284,10 @@ class G1TerrainMultiskillCLFEnvCfgPlay(G1TerrainMultiskillCLFEnvCfg):
         self.commands.traj_ref.debug_vis = True
         self.commands.base_velocity.debug_vis = True #False
         self.scene.height_scanner.debug_vis = True
+        self.scene.terrain.terrain_generator.debug_vis = True
+        # Per-block outline rectangles around every FlatBlock / StairBlock
+        # in the composite cells. Drawn by MetaCompositeTerrainImporter.
+        # set_debug_vis. Colors come from _DEFAULT_BLOCK_OUTLINE_COLORS in
+        # meta_composite_importer.py — override here via
+        # ``self.scene.terrain.block_outline_colors = {...}`` if needed.
+        self.scene.terrain.debug_vis = True

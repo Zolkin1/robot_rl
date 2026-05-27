@@ -129,6 +129,7 @@ def _build_stair_steps(
     going_up: bool,
     x_offset: float = 0.0,
     y_offset: float = 0.0,
+    step_dim_override: tuple[float, float] | None = None,
 ) -> tuple[list[trimesh.Trimesh], np.ndarray, float, float, int, float, float | None]:
     """Build the per-step mesh + tread-center geometry for one staircase span.
 
@@ -161,11 +162,18 @@ def _build_stair_steps(
         positive float ``< step_depth`` when ``allow_partial_last_step`` is
         set on the cfg and the span doesn't tile exactly.
     """
-    # 1. Sample step (height, depth) and stair width.
-    options = list(cfg.step_dim_options)
-    if not options:
-        raise ValueError("step_dim_options must contain at least one (height, depth) tuple")
-    step_height, step_depth_nominal = options[np.random.randint(len(options))]
+    # 1. Sample step (height, depth) and stair width.  Callers that have
+    # already pre-sampled the (h, d) pair (e.g. the composite ``StairBlock``
+    # builder, which needs to validate the block's ``size_x`` against the
+    # chosen step_depth before delegating here) can pass it via
+    # ``step_dim_override`` to skip the resample.
+    if step_dim_override is not None:
+        step_height, step_depth_nominal = step_dim_override
+    else:
+        options = list(cfg.step_dim_options)
+        if not options:
+            raise ValueError("step_dim_options must contain at least one (height, depth) tuple")
+        step_height, step_depth_nominal = options[np.random.randint(len(options))]
     step_height = float(step_height)
     step_depth_nominal = float(step_depth_nominal)
     stair_width = float(np.random.uniform(*cfg.stair_width_range))

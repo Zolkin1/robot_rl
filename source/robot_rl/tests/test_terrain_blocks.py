@@ -60,12 +60,17 @@ def _attach_importer(
 
 
 def _stair_up_cfg(size_x: float = 4.0) -> StairBlockCfg:
-    """Return a deterministic stair-up cfg for tests."""
+    """Return a deterministic stair-up cfg for tests.
+
+    Uses ``step_depth = 0.5`` so the default ``size_x = 4.0`` divides
+    exactly into 8 treads (the new composite ``StairBlock`` requires
+    ``size_x`` to be an integer multiple of ``step_depth``).
+    """
     return StairBlockCfg(
         size_x=size_x,
         direction="up",
         skill_probs={"stair_up": 1.0},
-        step_dim_options=[(0.135, 0.233)],
+        step_dim_options=[(0.2, 0.5)],
         stair_width_range=(1.5, 1.5),
     )
 
@@ -193,7 +198,9 @@ def test_flat_block_honors_base_z():
 
 
 def test_stair_up_honors_base_z():
-    """A stair-up block's leftmost tread sits at base_z; exit_z is base_z + (N-1)*h."""
+    """Stair-up: leftmost tread sits one step above ``base_z``; ``entry_z =
+    base_z`` (the connecting-ground level); ``exit_z = base_z + N * step_h``.
+    """
     np.random.seed(0)
     cfg = _stair_up_cfg(size_x=4.0)
     out = cfg.class_type(cfg, difficulty=0.0).build(
@@ -202,14 +209,16 @@ def test_stair_up_honors_base_z():
     centers = out.extras["stair_top_centers"]
     step_h, _, _ = out.extras["stair_dimension"]
     num_steps = out.extras["num_steps"]
-    assert float(centers[0, 2]) == pytest.approx(0.5)
-    assert float(centers[-1, 2]) == pytest.approx(0.5 + (num_steps - 1) * step_h)
+    assert float(centers[0, 2]) == pytest.approx(0.5 + step_h)
+    assert float(centers[-1, 2]) == pytest.approx(0.5 + num_steps * step_h)
     assert out.entry_z == pytest.approx(0.5)
-    assert out.exit_z == pytest.approx(0.5 + (num_steps - 1) * step_h)
+    assert out.exit_z == pytest.approx(0.5 + num_steps * step_h)
 
 
 def test_stair_down_honors_base_z():
-    """A stair-down block's leftmost (highest) tread sits at base_z; exit_z descends."""
+    """Stair-down: leftmost (highest) tread sits one step below ``base_z``;
+    ``entry_z = base_z``; ``exit_z = base_z - N * step_h``.
+    """
     np.random.seed(0)
     cfg = _stair_down_cfg(size_x=4.0)
     out = cfg.class_type(cfg, difficulty=0.0).build(
@@ -218,10 +227,10 @@ def test_stair_down_honors_base_z():
     centers = out.extras["stair_top_centers"]
     step_h, _, _ = out.extras["stair_dimension"]
     num_steps = out.extras["num_steps"]
-    assert float(centers[0, 2]) == pytest.approx(2.0)
-    assert float(centers[-1, 2]) == pytest.approx(2.0 - (num_steps - 1) * step_h)
+    assert float(centers[0, 2]) == pytest.approx(2.0 - step_h)
+    assert float(centers[-1, 2]) == pytest.approx(2.0 - num_steps * step_h)
     assert out.entry_z == pytest.approx(2.0)
-    assert out.exit_z == pytest.approx(2.0 - (num_steps - 1) * step_h)
+    assert out.exit_z == pytest.approx(2.0 - num_steps * step_h)
 
 
 def test_composite_threads_z_across_blocks():
@@ -318,8 +327,9 @@ def test_stair_block_platforms_sit_at_entry_and_exit_z():
     assert ep_z == pytest.approx(out.exit_z, abs=1e-5)
 
 
-def test_project_world_routes_platform_points_to_flat_z():
-    """Points on the start/end platforms should project to (foot_x, foot_y, platform_z)."""
+def test_project_world_platform_heights():
+    """Start platform (at entry_z) keeps the foot's x; end platform (at
+    exit_z) resolves to the top tread by height."""
     np.random.seed(0)
     cfg = CompositeSubTerrainCfg(
         size=(6.0, 2.0),
@@ -332,38 +342,27 @@ def test_project_world_routes_platform_points_to_flat_z():
         skill_list=["stair_up"],
     )
 
-    # World cell (0, 0) spans local_x in [0, 6] (world x in [-3, 3]).
-    # local_x = world_x + 3. So world_x = local_x - 3.
-    # Pick a point on the start platform (local_x = 0.5 → world_x = -2.5).
-    # And on the end platform (local_x = 5.7 → world_x = 2.7).
-    # And on the stair region (local_x = 3.0 → world_x = 0.0).
-    queries = torch.tensor([
-        [-2.5, 0.0],   # start platform — expect z = entry_z
-        [ 2.7, 0.0],   # end platform   — expect z = exit_z
-        [ 0.0, 0.0],   # stair tread    — expect z somewhere between
-    ])
-    out = m._project_world(queries)
+    # Cell (0, 0): local_x = world_x + 3 (offset_x = -3).
+    centers = md["blocks"][0]["extras"]["stair_top_centers"]
+    entry_z = float(md["blocks"][0]["entry_z"])
+    exit_z = float(centers[-1, 2])
+    last_tread_x = float(centers[-1, 0])
 
-    # entry_z = stairs start at base_z = 0.0 (composite default).
-    # The start platform z should be 0 (entry_z) and x should NOT snap to a
-    # tread center — it should equal the foot's local_x.
-    assert out[0, 0].item() == pytest.approx(-2.5)  # foot_x preserved
-    assert out[0, 2].item() == pytest.approx(0.0, abs=1e-5)  # entry_z
+    # Start platform (local_x=0.5 → world -2.5) at the entry height: it's
+    # in-span, so the foot's x is kept and z = entry_z.
+    out = m._project_world(torch.tensor([[-2.5, 0.0, entry_z]]))
+    assert out[0, 0].item() == pytest.approx(-2.5)
+    assert out[0, 2].item() == pytest.approx(entry_z, abs=1e-5)
 
-    # End platform: foot_x preserved, z = exit_z.
-    last_tread_z = float(md["blocks"][0]["extras"]["stair_top_centers"][-1, 2])
-    assert out[1, 0].item() == pytest.approx(2.7)
-    assert out[1, 2].item() == pytest.approx(last_tread_z, abs=1e-5)
-
-    # Stair tread: x should snap to a tread center (NOT equal foot_x of 0.0).
-    # The tread center x in world coords differs from the foot x.
-    assert out[2, 2].item() > 0.0  # somewhere up the stairs
-    # Snap means the projected x doesn't equal the input world_x in general
-    # (it's the tread center x).
+    # End platform (local_x=5.7 → world 2.7) at the exit height: height
+    # resolves to the top tread → its center x and exit_z.
+    out = m._project_world(torch.tensor([[2.7, 0.0, exit_z]]))
+    assert out[0, 2].item() == pytest.approx(exit_z, abs=1e-5)
+    assert out[0, 0].item() == pytest.approx(last_tread_x - 3.0)
 
 
-def test_project_world_back_compat_no_platforms():
-    """Without platforms, projection behavior is unchanged (snap to tread center)."""
+def test_project_world_tread_by_height():
+    """A foot whose xy and height both sit on a tread snaps to that tread top."""
     np.random.seed(0)
     cfg = CompositeSubTerrainCfg(
         size=(4.0, 2.0),
@@ -375,12 +374,11 @@ def test_project_world_back_compat_no_platforms():
         {(0, 0): md}, grid_shape=(1, 1), sub_size=(4.0, 2.0),
         skill_list=["stair_up"],
     )
-    # Foot somewhere on the stairs.
-    out = m._project_world(torch.tensor([[0.5, 0.0]]))
-    # z should match one of the tread tops.
     centers = md["blocks"][0]["extras"]["stair_top_centers"]
-    z_options = centers[:, 2].tolist()
-    assert out[0, 2].item() == pytest.approx(min(z_options, key=lambda z: abs(z - out[0, 2].item())))
+    t_x, t_z = float(centers[3, 0]), float(centers[3, 2])   # tread 3
+    out = m._project_world(torch.tensor([[t_x - 2.0, 0.0, t_z]]))   # offset_x = -2
+    assert out[0, 2].item() == pytest.approx(t_z, abs=1e-5)
+    assert out[0, 0].item() == pytest.approx(t_x - 2.0)
 
 
 def test_importer_stores_per_block_z():
@@ -485,8 +483,9 @@ def test_skill_probs_at_resolves_block_by_xy():
     torch.testing.assert_close(probs, expected)
 
 
-def test_project_world_two_stair_spans():
-    """``_project_world`` resolves the correct stair span per point."""
+def test_project_world_span_resolution():
+    """xy selects the span; a foot on a tread of each span (xy+z consistent)
+    resolves to that span's tread."""
     np.random.seed(4)
     sub = CompositeSubTerrainCfg(
         size=(10.0, 2.0),
@@ -498,29 +497,179 @@ def test_project_world_two_stair_spans():
         {(0, 0): md}, grid_shape=(1, 1), sub_size=(10.0, 2.0),
         skill_list=["stair_up", "walk_forward"],
     )
+    c0 = md["blocks"][0]["extras"]["stair_top_centers"]   # span 0, local x [0, 4)
+    c2 = md["blocks"][2]["extras"]["stair_top_centers"]   # span 1, local x [6, 10)
 
-    # Point 1: local_x=2 in span 0 — should pick stair 8 of 17 in span 0 (z>0).
-    # Point 2: local_x=5 in flat block — non-stair, returns (x, y, 0).
-    # Point 3: local_x=8 in span 1 (xrange [6, 10]) — stair 8 in span 1 (z>0).
-    queries = torch.tensor([[-3.0, 0.0], [0.0, 0.0], [3.0, 0.0]])
+    # Foot on span 0, tread 3.
+    out = m._project_world(torch.tensor([[float(c0[3, 0]) - 5.0, 0.0, float(c0[3, 2])]]))
+    assert out[0, 0].item() == pytest.approx(float(c0[3, 0]) - 5.0)
+    assert out[0, 2].item() == pytest.approx(float(c0[3, 2]), abs=1e-5)
+
+    # Foot on span 1, tread 3 (its z is threaded up from span 0).
+    out = m._project_world(torch.tensor([[float(c2[3, 0]) - 5.0, 0.0, float(c2[3, 2])]]))
+    assert out[0, 0].item() == pytest.approx(float(c2[3, 0]) - 5.0)
+    assert out[0, 2].item() == pytest.approx(float(c2[3, 2]), abs=1e-5)
+
+
+def test_project_world_z_exit_fictitious():
+    """A foot past the top of the stairs (xy beyond span_xmax) at the
+    top-of-stairs height → exit-side fictitious tread at exit_z."""
+    np.random.seed(0)
+    sub = CompositeSubTerrainCfg(
+        size=(7.0, 2.0),
+        proportion=1.0,
+        blocks=[_stair_up_cfg(4.0), _flat_cfg(3.0)],
+    )
+    _, _, md = composite_terrain(0.5, sub)
+    m = _attach_importer(
+        {(0, 0): md}, grid_shape=(1, 1), sub_size=(7.0, 2.0),
+        skill_list=["walk_forward", "stair_up"],
+    )
+    # stair span [0, 4), flat [4, 7).  Cell offset_x = -3.5.
+    step_depth = float(md["blocks"][0]["extras"]["stair_dimension"][1])
+    exit_z = float(md["blocks"][0]["extras"]["stair_top_centers"][-1, 2])
+
+    # Foot on the flat past the stair (local_x=5.0 ≥ span_xmax=4) at exit_z.
+    out = m._project_world(torch.tensor([[5.0 - 3.5, 0.0, exit_z]]))
+    assert out[0, 0].item() == pytest.approx((4.0 + 0.5 * step_depth) - 3.5)
+    assert out[0, 2].item() == pytest.approx(exit_z, abs=1e-5)
+
+
+def test_project_world_passthrough_when_no_stair_in_cell():
+    """Cells with zero stair spans pass through ``(x, y, 0)`` — the query
+    z does not pull the result onto any (non-existent) stair."""
+    np.random.seed(0)
+    sub = CompositeSubTerrainCfg(
+        size=(4.0, 2.0),
+        proportion=1.0,
+        blocks=[_flat_cfg(4.0)],
+    )
+    _, _, md = composite_terrain(0.0, sub)
+    m = _attach_importer(
+        {(0, 0): md}, grid_shape=(1, 1), sub_size=(4.0, 2.0),
+        skill_list=["walk_forward"],
+    )
+
+    queries = torch.tensor([[-1.5, 0.5, 0.3], [0.0, -0.3, 1.0], [1.7, 0.0, 0.0]])
     out = m._project_world(queries)
+    torch.testing.assert_close(out[:, 2], torch.zeros(3))
+    # x and y pass through (z column is dropped to 0).
+    torch.testing.assert_close(out[:, :2], queries[:, :2])
 
-    # Stair span 0 hit.
-    assert out[0, 2].item() > 0.0
-    # Flat passthrough.
-    torch.testing.assert_close(out[1], torch.tensor([0.0, 0.0, 0.0]))
-    # Stair span 1 hit.
-    assert out[2, 2].item() > 0.0
+
+def test_project_world_nearest_span_selection():
+    """In a cell with two stair spans, a between-spans point resolves
+    against whichever span is nearer by ``|local_x − span_center|``; height
+    then picks the level on that span."""
+    np.random.seed(4)
+    sub = CompositeSubTerrainCfg(
+        size=(11.0, 2.0),
+        proportion=1.0,
+        blocks=[
+            _stair_up_cfg(2.0),                          # span [0, 2),  center 1.0
+            _flat_cfg(5.0, {"walk_forward": 1.0}),       # flat  [2, 7)
+            _stair_up_cfg(4.0),                          # span [7, 11), center 9.0
+        ],
+    )
+    _, _, md = composite_terrain(0.5, sub)
+    m = _attach_importer(
+        {(0, 0): md}, grid_shape=(1, 1), sub_size=(11.0, 2.0),
+        skill_list=["stair_up", "walk_forward"],
+    )
+
+    # Cell offset_x = -5.5.  local_x=3.0 (dist 2 from span 0, 6 from span 1)
+    # → span 0, past its xmax → exit-side fictitious at exit_z.
+    sd0 = float(md["blocks"][0]["extras"]["stair_dimension"][1])
+    exit_z0 = float(md["blocks"][0]["extras"]["stair_top_centers"][-1, 2])
+    out = m._project_world(torch.tensor([[3.0 - 5.5, 0.0, exit_z0]]))
+    assert out[0, 0].item() == pytest.approx((2.0 + 0.5 * sd0) - 5.5)
+    assert out[0, 2].item() == pytest.approx(exit_z0, abs=1e-5)
+
+    # local_x=6.0 (dist 5 from span 0, 3 from span 1) → span 1, before its
+    # xmin, at entry height → entry-side fictitious at entry_z.
+    sd1 = float(md["blocks"][2]["extras"]["stair_dimension"][1])
+    entry_z1 = float(md["blocks"][2]["entry_z"])
+    out = m._project_world(torch.tensor([[6.0 - 5.5, 0.0, entry_z1]]))
+    assert out[0, 0].item() == pytest.approx((7.0 - 0.5 * sd1) - 5.5)
+    assert out[0, 2].item() == pytest.approx(entry_z1, abs=1e-5)
+
+
+def _flat_then_stair_importer():
+    """Build a ``[flat(3) | stair_up(4)]`` importer in a 7×2 cell.
+
+    Cell origin is centred, so ``offset_x = -3.5`` (world_x = local_x − 3.5).
+    Flat block spans local x [0, 3); stair span is [3, 7) with no start
+    platform (riser at local x = 3.0).  Returns ``(importer, md)``.
+    """
+    np.random.seed(0)
+    sub = CompositeSubTerrainCfg(
+        size=(7.0, 2.0),
+        proportion=1.0,
+        blocks=[_flat_cfg(3.0), _stair_up_cfg(4.0)],
+    )
+    _, _, md = composite_terrain(0.5, sub)
+    m = _attach_importer(
+        {(0, 0): md}, grid_shape=(1, 1), sub_size=(7.0, 2.0),
+        skill_list=["walk_forward", "stair_up"],
+    )
+    return m, md
+
+
+def test_project_world_z_picks_tread_when_ankle_over_flat():
+    """The key fix: ankle xy still over the flat (before the riser) but the
+    foot is at the first tread's height → the xyz projection snaps to the
+    real first tread, NOT the fictitious entry tread a full step below."""
+    m, md = _flat_then_stair_importer()
+    centers = md["blocks"][1]["extras"]["stair_top_centers"]
+    tread0_x_local = float(centers[0, 0])   # 3.0 + step_depth/2
+    tread0_z = float(centers[0, 2])         # base_z + step_height (> entry_z)
+
+    # Ankle over the flat: local_x = 2.5 (world -1.0), but foot height is
+    # the first tread top.  xy-only would give entry_z; xyz must give tread 0.
+    out = m._project_world(torch.tensor([[2.5 - 3.5, 0.0, tread0_z]]))
+    assert out[0, 2].item() == pytest.approx(tread0_z, abs=1e-5)
+    assert out[0, 0].item() == pytest.approx(tread0_x_local - 3.5)
+
+    # The whole-step error this fixes: the fictitious entry level sits one
+    # step below the foot, so a height-blind projection would have placed
+    # the reference there.
+    entry_z = float(md["blocks"][1]["entry_z"])
+    assert entry_z < tread0_z
+
+
+def test_project_world_z_on_flat_picks_fictitious_entry():
+    """Ankle over the flat AND foot at the connecting-ground height →
+    fictitious entry tread (height nearest entry_z)."""
+    m, md = _flat_then_stair_importer()
+    entry_z = float(md["blocks"][1]["entry_z"])
+    step_depth = float(md["blocks"][1]["extras"]["stair_dimension"][1])
+
+    out = m._project_world(torch.tensor([[2.5 - 3.5, 0.0, entry_z]]))
+    assert out[0, 2].item() == pytest.approx(entry_z, abs=1e-5)
+    # Fictitious entry x sits half a step-depth before the riser.
+    assert out[0, 0].item() == pytest.approx((3.0 - 0.5 * step_depth) - 3.5)
+
+
+def test_project_world_z_matches_full_tread():
+    """A foot fully on a tread (xy and height agree) returns that tread."""
+    m, md = _flat_then_stair_importer()
+    centers = md["blocks"][1]["extras"]["stair_top_centers"]
+    t2_x_local = float(centers[2, 0])
+    t2_z = float(centers[2, 2])
+
+    out = m._project_world(torch.tensor([[t2_x_local - 3.5, 0.0, t2_z]]))
+    assert out[0, 0].item() == pytest.approx(t2_x_local - 3.5, abs=1e-5)
+    assert out[0, 2].item() == pytest.approx(t2_z, abs=1e-5)
 
 
 def test_project_world_single_point_signature():
-    """Pass-through for non-stair cells must respect (N, 2) -> (N, 3)."""
+    """Non-stair cells pass through (x, y, 0) for an (N, 3) query."""
     legacy_md = {"is_border": False, "skill_probs": {"walk_forward": 1.0}}
     m = _attach_importer(
         {(0, 0): legacy_md}, grid_shape=(1, 1), sub_size=(4.0, 2.0),
         skill_list=["walk_forward"],
     )
-    pts = torch.tensor([[0.5, 0.1], [-1.0, 0.0]])
+    pts = torch.tensor([[0.5, 0.1, 0.0], [-1.0, 0.0, 0.4]])
     out = m._project_world(pts)
     assert out.shape == (2, 3)
     torch.testing.assert_close(out[:, 2], torch.zeros(2))
@@ -533,7 +682,9 @@ def test_project_world_rejects_wrong_shape():
         skill_list=["walk_forward"],
     )
     with pytest.raises(ValueError, match="shape"):
-        m._project_world(torch.zeros((1, 1, 2)))  # extra k axis
+        m._project_world(torch.zeros((1, 2)))  # missing z column
+    with pytest.raises(ValueError, match="shape"):
+        m._project_world(torch.zeros((1, 1, 3)))  # extra axis
 
 
 # ---------------------------------------------------------------------------
@@ -555,7 +706,6 @@ def _stair_choice_cfg(weight: float = 1.0) -> BlockChoice:
             skill_probs={"stair_up": 1.0},
             step_dim_options=[(0.135, 0.233)],
             stair_width_range=(1.5, 1.5),
-            allow_partial_last_step=True,
         ),
         weight=weight,
     )
@@ -633,21 +783,20 @@ def test_randomized_composite_empty_choices_raises():
 
 def test_randomized_composite_per_choice_length_override():
     np.random.seed(7)
-    tight_stair = BlockChoice(
-        cfg=StairBlockCfg(
-            direction="up",
-            skill_probs={"stair_up": 1.0},
-            step_dim_options=[(0.135, 0.233)],
-            stair_width_range=(1.5, 1.5),
-        ),
+    # Flat block with a tight length-range override — exercises the
+    # per-choice length_range path independently of stair rounding (which
+    # always rounds DOWN to N*step_depth and so can't be used to assert a
+    # tight upper bound on sampled length).
+    tight_flat = BlockChoice(
+        cfg=FlatBlockCfg(skill_probs={"walk_forward": 1.0}),
         weight=1.0,
         length_range=(0.8, 0.81),
     )
     cfg = _randomized_cfg(
         size_x=10.0,
         force_flat_origin=False,
-        choices=[tight_stair],
-        length_range=(5.0, 5.0),  # global range, ignored by tight_stair
+        choices=[tight_flat],
+        length_range=(5.0, 5.0),  # global range, ignored by tight_flat
     )
     randomized_composite_terrain(0.0, cfg)
     for b in cfg.blocks[:-1]:
@@ -657,18 +806,43 @@ def test_randomized_composite_per_choice_length_override():
 
 
 def test_randomized_composite_force_flat_origin():
+    # The forced spawn block must inherit the configured FlatBlockCfg from
+    # ``choices`` (skill_probs, flat_width_range, etc.) — not the legacy
+    # ``FlatBlockCfg()`` default, which would silently re-introduce
+    # running-eligible flat skill_probs on the spawn block.
+    custom_skill_probs = {"walk_forward": 0.9, "standing": 0.1}
     for seed in (1, 2, 3, 4, 5):
         np.random.seed(seed)
         cfg = _randomized_cfg(
             size_x=8.0,
             force_flat_origin=True,
-            # No flat among choices -> if force_flat_origin is honoured, the
-            # first slot is still a FlatBlockCfg.
-            choices=[_stair_choice_cfg(1.0)],
+            choices=[
+                BlockChoice(
+                    cfg=FlatBlockCfg(skill_probs=dict(custom_skill_probs)),
+                    weight=1.0,
+                ),
+                _stair_choice_cfg(1.0),
+            ],
             length_range=(1.0, 2.0),
         )
         randomized_composite_terrain(0.0, cfg)
         assert isinstance(cfg.blocks[0], FlatBlockCfg)
+        assert cfg.blocks[0].skill_probs == custom_skill_probs
+
+
+def test_randomized_composite_force_flat_origin_without_flat_choice_raises():
+    # With ``force_flat_origin=True`` and no FlatBlockCfg in ``choices`` the
+    # builder used to silently fall back to a default FlatBlockCfg (which
+    # advertises running). Now it surfaces the inconsistency.
+    np.random.seed(0)
+    cfg = _randomized_cfg(
+        size_x=8.0,
+        force_flat_origin=True,
+        choices=[_stair_choice_cfg(1.0)],
+        length_range=(1.0, 2.0),
+    )
+    with pytest.raises(ValueError, match="FlatBlockCfg"):
+        randomized_composite_terrain(0.0, cfg)
 
 
 def test_randomized_composite_distribution_sanity():
@@ -713,7 +887,34 @@ def test_randomized_composite_distribution_sanity():
 # ---------------------------------------------------------------------------
 
 
-def test_stair_partial_last_step_emits_extra_tread():
+def test_stair_block_exact_tiling_no_partial():
+    """Composite ``StairBlock`` requires ``size_x = N * step_depth`` exactly
+    and never emits a partial trailing tread. Each tread is full depth.
+    """
+    np.random.seed(0)
+    cfg = StairBlockCfg(
+        size_x=3.0,  # exactly 3 treads of step_depth 1.0
+        direction="up",
+        skill_probs={"stair_up": 1.0},
+        step_dim_options=[(0.15, 1.0)],
+        stair_width_range=(1.5, 1.5),
+    )
+    out = cfg.class_type(cfg, difficulty=0.0).build(local_origin_xy=(0.0, 0.0), subterrain_size_y=2.0)
+    extras = out.extras
+    assert extras["num_steps"] == 3
+    step_depth = float(extras["stair_dimension"][1])
+    assert pytest.approx(step_depth, abs=1e-6) == 1.0
+    # No partial tread ever.
+    assert extras["partial_step_length"] is None
+    # entry_z is the connecting ground; exit_z is N * step_h above it.
+    assert pytest.approx(out.entry_z, abs=1e-6) == 0.0
+    assert pytest.approx(out.exit_z, abs=1e-6) == 3 * 0.15
+
+
+def test_stair_block_size_x_not_multiple_raises():
+    """If ``size_x`` is not an integer multiple of ``step_depth``, the
+    composite StairBlock raises rather than silently rescaling.
+    """
     np.random.seed(0)
     cfg = StairBlockCfg(
         size_x=3.1,
@@ -721,60 +922,47 @@ def test_stair_partial_last_step_emits_extra_tread():
         skill_probs={"stair_up": 1.0},
         step_dim_options=[(0.15, 1.0)],
         stair_width_range=(1.5, 1.5),
-        allow_partial_last_step=True,
     )
-    out = cfg.class_type(cfg, difficulty=0.0).build(local_origin_xy=(0.0, 0.0), subterrain_size_y=2.0)
-    extras = out.extras
-    assert extras["num_steps"] == 4
-    step_depth = float(extras["stair_dimension"][1])
-    assert pytest.approx(step_depth, abs=1e-6) == 1.0
-    partial = extras["partial_step_length"]
-    assert partial is not None
-    assert pytest.approx(partial, abs=1e-6) == 0.1
-    # exit_z is the partial tread's top (start_z_zero=True by default).
-    assert pytest.approx(out.exit_z, abs=1e-6) == 3 * 0.15
+    with pytest.raises(ValueError, match="integer multiple of step_depth"):
+        cfg.class_type(cfg, difficulty=0.0).build(local_origin_xy=(0.0, 0.0), subterrain_size_y=2.0)
 
 
-def test_stair_partial_last_step_z_threads_correctly():
+def test_stair_block_chain_continuous_staircase():
+    """Two back-to-back stair blocks chain into a single continuous staircase:
+    block B's first tread sits one step above block A's last tread.
+    """
     np.random.seed(0)
     cfg = CompositeSubTerrainCfg(
-        size=(6.1, 2.0),
+        size=(6.0, 2.0),
         proportion=1.0,
         blocks=[
-            FlatBlockCfg(size_x=1.0, skill_probs={"walk_forward": 1.0}),
             StairBlockCfg(
-                size_x=3.1,
+                size_x=3.0,  # 3 treads
                 direction="up",
                 skill_probs={"stair_up": 1.0},
                 step_dim_options=[(0.15, 1.0)],
                 stair_width_range=(1.5, 1.5),
-                allow_partial_last_step=True,
             ),
-            FlatBlockCfg(size_x=2.0, skill_probs={"walk_forward": 1.0}),
+            StairBlockCfg(
+                size_x=3.0,  # 3 more treads
+                direction="up",
+                skill_probs={"stair_up": 1.0},
+                step_dim_options=[(0.15, 1.0)],
+                stair_width_range=(1.5, 1.5),
+            ),
         ],
     )
     _, _, md = composite_terrain(0.0, cfg)
-    flat_after = md["blocks"][2]
-    stair_block = md["blocks"][1]
-    assert pytest.approx(flat_after["entry_z"], abs=1e-6) == stair_block["exit_z"]
-    assert pytest.approx(stair_block["exit_z"], abs=1e-6) == 3 * 0.15
-
-
-def test_stair_no_partial_default_behaviour():
-    np.random.seed(0)
-    cfg = StairBlockCfg(
-        size_x=3.1,
-        direction="up",
-        skill_probs={"stair_up": 1.0},
-        step_dim_options=[(0.15, 1.0)],
-        stair_width_range=(1.5, 1.5),
-    )
-    out = cfg.class_type(cfg, difficulty=0.0).build(local_origin_xy=(0.0, 0.0), subterrain_size_y=2.0)
-    extras = out.extras
-    assert extras["partial_step_length"] is None
-    step_depth = float(extras["stair_dimension"][1])
-    n = extras["num_steps"]
-    assert pytest.approx(step_depth * n, abs=1e-6) == 3.1
+    a = md["blocks"][0]
+    b = md["blocks"][1]
+    # Block A's exit_z = base_z + N_A * step_h; block B's first tread top =
+    # A.exit_z + step_h (the chain "continues" without any flat plateau).
+    a_centers = a["extras"]["stair_top_centers"]
+    b_centers = b["extras"]["stair_top_centers"]
+    step_h = a["extras"]["stair_dimension"][0]
+    assert pytest.approx(b["entry_z"], abs=1e-6) == a["exit_z"]
+    assert pytest.approx(float(a_centers[-1, 2]), abs=1e-6) == a["exit_z"]
+    assert pytest.approx(float(b_centers[0, 2]), abs=1e-6) == a["exit_z"] + step_h
 
 
 # ---------------------------------------------------------------------------

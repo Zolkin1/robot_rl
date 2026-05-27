@@ -13,6 +13,7 @@ from isaaclab.utils import configclass
 
 from ..trimesh.stair import _build_stair_steps
 from .base import BlockOutput, TerrainBlock, TerrainBlockCfg, validate_skill_probs
+from .composite import _LAYOUT_TOL
 
 
 def _default_stair_up_skill_probs() -> dict[str, float]:
@@ -90,6 +91,35 @@ class StairBlock(TerrainBlock):
         # The stairs themselves occupy [stair_x0, stair_x0 + stair_size_x).
         stair_x0 = x0 + start_plat_len
 
+        # Pre-sample (step_height, step_depth) so we can validate the block's
+        # ``stair_size_x`` against the chosen step_depth before delegating to
+        # the shared tread builder.  This composite block requires
+        # ``stair_size_x == N * step_depth`` exactly — the sub-terrain
+        # sampler (``randomized_composite``) is responsible for sizing each
+        # stair block accordingly, and any sub-terrain-level leftover is
+        # absorbed by a trailing FlatBlockCfg appended at the end of the
+        # cell.  No partial-depth trailing tread; no step_depth rescaling.
+        step_dim_options = list(self.cfg.step_dim_options)
+        if not step_dim_options:
+            raise ValueError(
+                f"StairBlockCfg.step_dim_options must contain at least one "
+                f"(step_height, step_depth) tuple."
+            )
+        sampled_h, sampled_d = step_dim_options[np.random.randint(len(step_dim_options))]
+        sampled_h = float(sampled_h)
+        sampled_d = float(sampled_d)
+        N_round = int(round(stair_size_x / sampled_d))
+        if N_round < 1 or abs(stair_size_x - N_round * sampled_d) > _LAYOUT_TOL:
+            raise ValueError(
+                f"StairBlock requires ``stair_size_x`` ({stair_size_x:.6f}) to "
+                f"be an integer multiple of step_depth ({sampled_d:.6f}); "
+                f"got N={N_round}, leftover="
+                f"{stair_size_x - N_round * sampled_d:.6f}. "
+                f"Use ``RandomizedCompositeSubTerrainCfg`` (which rounds stair "
+                f"block lengths and appends a trailing FlatBlockCfg to absorb "
+                f"the leftover) or size the block manually."
+            )
+
         (
             meshes,
             stair_top_centers,
@@ -105,22 +135,30 @@ class StairBlock(TerrainBlock):
             going_up=going_up,
             x_offset=stair_x0,
             y_offset=y0,
+            step_dim_override=(sampled_h, sampled_d),
         )
 
         # Shift everything in z so the leftmost (index 0) tread top sits at
-        # ``base_z``. Works regardless of ``cfg.start_z_zero`` because we read
-        # the actual leftmost z from the un-shifted output.
+        # ``base_z + signed_step_height`` — one full step *above* the
+        # connecting ground for stair-up, one full step below for stair-down.
+        # This makes the left edge of every composite stair block a vertical
+        # riser face (not flush ground), so walking into the block is a real
+        # step up / down.
+        signed_step_height = step_height if going_up else -step_height
         leftmost_top_z = float(stair_top_centers[0, 2])
-        z_shift = base_z - leftmost_top_z
+        z_shift = (base_z + signed_step_height) - leftmost_top_z
         if z_shift != 0.0:
             transform = trimesh.transformations.translation_matrix((0.0, 0.0, z_shift))
             for mesh in meshes:
                 mesh.apply_transform(transform)
             stair_top_centers[:, 2] += z_shift
 
-        # entry_z is the leftmost tread top (now equal to base_z);
-        # exit_z is the rightmost tread top.
-        entry_z = float(stair_top_centers[0, 2])
+        # entry_z is the connecting ground (= base_z, *not* the first tread
+        # top which is one step above).  exit_z is the rightmost tread top —
+        # adjacent stair blocks chain off this so two back-to-back composite
+        # stair blocks form one continuous staircase (each subsequent block's
+        # first tread sits one step above the previous block's last tread).
+        entry_z = float(base_z)
         exit_z = float(stair_top_centers[-1, 2])
 
         # Optional start platform at entry_z.
@@ -150,10 +188,19 @@ class StairBlock(TerrainBlock):
         origin = np.array(stair_top_centers[origin_idx], dtype=np.float64)
 
         centers_t = torch.from_numpy(stair_top_centers).clone()
+        # Walkable y-extent: stair treads occupy ``stair_width`` centered
+        # in y.  Used by the importer's debug-viz so the outline hugs the
+        # actual stair plate instead of the full sub-terrain y.  If start/
+        # end platforms are present they extend across the full y, but the
+        # outline still tracks the (narrower) stair region for simplicity.
+        wy_center = y0 + size_y / 2.0
+        walkable_ymin = wy_center - stair_width / 2.0
+        walkable_ymax = wy_center + stair_width / 2.0
         return BlockOutput(
             meshes=meshes,
             origin=origin,
             aabb=(x0, x0 + size_x, y0, y0 + size_y),
+            walkable_aabb=(x0, x0 + size_x, walkable_ymin, walkable_ymax),
             skill_probs=dict(self.cfg.skill_probs),
             needs_projection=True,
             needs_directional_cmd=True,
@@ -247,11 +294,8 @@ class StairBlockCfg(TerrainBlockCfg):
 
     start_z_zero: bool = True
     """If ``True`` (default), the lowest tread top sits at z=0. If ``False``
-    the staircase is vertically centred around z=0."""
-
-    allow_partial_last_step: bool = False
-    """If ``True``, the sampled ``(step_height, step_depth)`` are taken at
-    face value: the stair span is tiled with full-depth treads and the
-    trailing leftover (if any) becomes a single partial-depth tread at the
-    last position. If ``False`` (default), the nominal ``step_depth`` is
-    rescaled so the treads tile the span exactly."""
+    the staircase is vertically centred around z=0.  Note that
+    :meth:`StairBlock.build` applies its own z-shift on top of this so the
+    leftmost tread lands at ``base_z + signed_step_height`` (one step above
+    the connecting ground).  ``start_z_zero`` therefore only affects the
+    un-shifted pre-shift z anchor used by :func:`_build_stair_steps`."""

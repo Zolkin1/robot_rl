@@ -220,7 +220,7 @@ STAIR_FLAT_STAIR_CFG = MetaTerrainGeneratorCfg(
 # slopes. Sub-terrain cells are placed directly adjacent in y; if a gap is
 # desired, set the per-block width range smaller than the cell's y extent so
 # empty strips appear inside each cell instead of as separate columns.
-_RANDOM_SIZE_X = 12.0
+_RANDOM_SIZE_X = 20.0 #12.0
 _RANDOM_SIZE_Y = 10.0
 _RANDOM_STAIR_STEP_DIM_OPTIONS = [(0.10, 0.30), (0.14, 0.28), (0.16, 0.32)]
 _RANDOM_NUM_COLS = 4
@@ -243,6 +243,7 @@ RANDOMIZED_MULTISKILL_TERRAIN_CFG = MetaTerrainGeneratorCfg(
             origin_block_index=0,
             force_flat_origin=True,
             length_range=(1.0, 3.0),
+            trailing_flat_length_range=(1.5, 3.0),
             choices=[
                 BlockChoice(
                     cfg=FlatBlockCfg(
@@ -257,7 +258,6 @@ RANDOMIZED_MULTISKILL_TERRAIN_CFG = MetaTerrainGeneratorCfg(
                         skill_probs={"stair_up": 1.0},
                         step_dim_options=_RANDOM_STAIR_STEP_DIM_OPTIONS,
                         stair_width_range=(1.5, _RANDOM_SIZE_Y),
-                        allow_partial_last_step=True,
                         float_prob=0.0,
                         wall_prob=0.0,
                         pole_prob=0.0,
@@ -271,7 +271,6 @@ RANDOMIZED_MULTISKILL_TERRAIN_CFG = MetaTerrainGeneratorCfg(
                         skill_probs={"stair_down": 1.0},
                         step_dim_options=_RANDOM_STAIR_STEP_DIM_OPTIONS,
                         stair_width_range=(1.5, _RANDOM_SIZE_Y),
-                        allow_partial_last_step=True,
                         float_prob=0.0,
                         wall_prob=0.0,
                         pole_prob=0.0,
@@ -321,52 +320,55 @@ FLAT_STAIR_MULTISKILL_CFG = MetaTerrainGeneratorCfg(
     curriculum=True,
     size=(_RANDOM_SIZE_X, _RANDOM_SIZE_Y),
     border_width=20.0,
-    num_rows=4,
-    num_cols=_RANDOM_NUM_COLS,
+    # num_rows=4,
+    # num_cols=_RANDOM_NUM_COLS,
+    num_rows=10,
+    num_cols=22,
     horizontal_scale=0.1,
     vertical_scale=0.005,
     slope_threshold=0.75,
     use_cache=False,
     inter_column_borders=[],
     sub_terrains={
-        "pure_flat": MeshFlatTerrainCfg(proportion=1.0 / 3.0),
+        "pure_flat": MeshFlatTerrainCfg(proportion=0.2),
         "pure_stair_up": MeshXStairsUpTerrainCfg(
-            proportion=1.0 / 3.0,
-            step_dim_options=_RANDOM_STAIR_STEP_DIM_OPTIONS,
+            proportion=0.2,
+            step_dim_options=[(_LONG_STAIRS_STEP_HEIGHT, _LONG_STAIRS_STEP_DEPTH)],
+            # Lowest stair top sits at z=0 (default ``start_z_zero=True``);
+            # spawn the env on stair 0 so the robot starts at ground level.
+            origin_distance_from_back=0.5 * _LONG_STAIRS_STEP_DEPTH,
             stair_width_range=(1.5, _RANDOM_SIZE_Y),
-            # Spawn on the first tread (lowest tread top at z=0 by default).
-            origin_distance_from_back=0.5 * _RANDOM_STAIR_STEP_DIM_OPTIONS[0][1],
-            float_prob=0.0,
+            float_prob=0.5,
             wall_prob=0.0,
             pole_prob=0.0,
         ),
         "flat_stair_up": RandomizedCompositeSubTerrainCfg(
-            proportion=1.0 / 3.0,
+            proportion=0.6,
             size=(_RANDOM_SIZE_X, _RANDOM_SIZE_Y),
             origin_block_index=0,
             force_flat_origin=True,
-            length_range=(1.0, 3.0),
+            length_range=(1.0, 2.0),
+            trailing_flat_length_range=(1.5, 3.0),
             choices=[
                 BlockChoice(
                     cfg=FlatBlockCfg(
-                        skill_probs={"walk_forward": 0.5, "running": 0.4, "standing": 0.1},
+                        skill_probs={"walk_forward": 0.98, "running": 0.0, "standing": 0.02},
                         flat_width_range=(1.5, _RANDOM_SIZE_Y),
                     ),
-                    weight=2.0,
+                    weight=1.0,
                 ),
                 BlockChoice(
                     cfg=StairBlockCfg(
                         direction="up",
                         skill_probs={"stair_up": 1.0},
-                        step_dim_options=_RANDOM_STAIR_STEP_DIM_OPTIONS,
+                        step_dim_options=[(_LONG_STAIRS_STEP_HEIGHT, _LONG_STAIRS_STEP_DEPTH)],
                         stair_width_range=(1.5, _RANDOM_SIZE_Y),
-                        allow_partial_last_step=True,
-                        float_prob=0.0,
+                        float_prob=0.5,
                         wall_prob=0.0,
                         pole_prob=0.0,
                     ),
                     weight=1.0,
-                    length_range=(1.5, 4.0),
+                    length_range=(0.5, 2.0),
                 ),
             ],
         ),

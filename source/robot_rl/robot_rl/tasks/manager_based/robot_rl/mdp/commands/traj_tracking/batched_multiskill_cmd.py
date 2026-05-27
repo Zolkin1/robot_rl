@@ -10,6 +10,7 @@ from isaaclab.utils.math import quat_apply, quat_from_angle_axis, yaw_quat
 from .base_trajectory_cmd import BaseTrajectoryCommand
 from .manager_base import ManagerBase
 from .multiskill_manager import MultiSkillManager
+from .terrain_aware_ref import _TERRAIN_AWARE_SKILLS
 from .skill_bucket import (
     bucket_for_velocity,
     commit_pending_at_fire,
@@ -40,25 +41,70 @@ _DEBUG_VIZ_PRIM_PATH: str = "/Visuals/traj_ref_segments"
 # debug-viz discovery.  Default hides the hand trajectories (named
 # ``*_wrist_yaw_link`` on the G1); clear the tuple to show them again.
 _DEBUG_VIZ_HIDDEN_FRAME_SUBSTRINGS: tuple[str, ...] = ("wrist", "hand")
-# Spheres drawn at the end of each visualized frame's trajectory.  Per-env
-# radius is ``max(_DEBUG_VIZ_END_SPHERE_DIST_FRAC * chord,
-# _DEBUG_VIZ_END_SPHERE_MIN_RADIUS)`` where ``chord`` is
-# ``||last_cp - first_cp||`` of the **current domain's** Bezier for that
-# frame.  Matches the scale used by the
-# ``frame_deviation_from_reference`` termination — set this fraction and
-# min equal to the termination's ``max_frac`` / ``min_dist`` to visualize
-# the actual cutoff.
+# Spheres drawn at the end of each visualized frame's trajectory — the
+# "frame-drift ball".  Radius and grace gating are pulled live from the
+# ``frame_deviation_from_reference`` termination cfg at runtime (see
+# :meth:`BatchedMultiSkillCommand._frame_drift_viz_params`), so the ball is
+# the termination's true cutoff and vanishes while its grace window is
+# active.  The constants below are only fallbacks used when no such
+# termination is configured.
 _DEBUG_VIZ_END_SPHERE_DIST_FRAC: float = 0.25
 _DEBUG_VIZ_END_SPHERE_MIN_RADIUS: float = 0.1
 # Master toggle for the end-of-trajectory spheres.  Set to False to hide
 # them entirely (no prototype, no per-step viz emission).
-_DEBUG_VIZ_SHOW_END_SPHERES: bool = False
+_DEBUG_VIZ_SHOW_END_SPHERES: bool = True
 # Flat disk drawn at each env's reference-pose anchor position so the
 # anchor frame the trajectory is rendered around is visible at a glance.
 _DEBUG_VIZ_SHOW_REF_POSE: bool = True
 _DEBUG_VIZ_REF_POSE_RADIUS: float = 0.15
 _DEBUG_VIZ_REF_POSE_HEIGHT: float = 0.005
 _DEBUG_VIZ_REF_POSE_COLOR: tuple[float, float, float] = (1.0, 1.0, 1.0)
+
+# Per-skill color palette for the active-skill debug marker.  One prototype
+# per entry of ``self._skill_list`` is registered with the matching color;
+# unknown skills fall back to grey.  Same hues as
+# ``meta_composite_importer._DEFAULT_BLOCK_OUTLINE_COLORS`` so the floating
+# sphere over the robot matches the colored block outline it's standing on.
+_SKILL_MARKER_COLORS: dict[str, tuple[float, float, float]] = {
+    "walk_forward": (0.20, 0.80, 0.30),  # green   (matches FlatBlock outline)
+    "running":      (0.95, 0.55, 0.15),  # orange
+    "standing":     (0.85, 0.85, 0.20),  # yellow
+    "stair_up":     (0.30, 0.60, 0.90),  # blue
+}
+_SKILL_MARKER_FALLBACK_COLOR: tuple[float, float, float] = (0.55, 0.55, 0.55)
+_SKILL_MARKER_PRIM_PATH: str = "/Visuals/traj_ref_skill_markers"
+
+
+def _format_skill_palette(skill_list: list[str]) -> str:
+    """Build the one-shot skill -> color legend printed at debug-viz init.
+
+    Uses ANSI 24-bit color escapes so a color terminal renders the swatch
+    in the same RGB the on-screen sphere will be drawn in. Non-color
+    terminals just see the raw escape characters — harmless.
+    """
+    if not skill_list:
+        return "[BatchedMultiSkillCommand] Skill marker palette: (no skills)"
+    name_w = max(len("Skill"), *(len(n) for n in skill_list))
+
+    def _swatch(color: tuple[float, float, float]) -> str:
+        r, g, b = (int(round(v * 255)) for v in color)
+        return f"\x1b[38;2;{r};{g};{b}m███\x1b[0m"
+
+    sep = f"  +-------+-{'-' * name_w}-+--------------------+"
+    lines = [
+        "[BatchedMultiSkillCommand] Skill marker palette (debug_vis=True):",
+        sep,
+        f"  | Color | {'Skill'.ljust(name_w)} | RGB                |",
+        sep,
+    ]
+    for name in skill_list:
+        color = _SKILL_MARKER_COLORS.get(name, _SKILL_MARKER_FALLBACK_COLOR)
+        rgb = f"({color[0]:.2f}, {color[1]:.2f}, {color[2]:.2f})"
+        lines.append(
+            f"  |  {_swatch(color)}  | {name.ljust(name_w)} | {rgb} |"
+        )
+    lines.append(sep)
+    return "\n".join(lines)
 
 
 class BatchedMultiSkillCommand(BaseTrajectoryCommand):
@@ -85,6 +131,12 @@ class BatchedMultiSkillCommand(BaseTrajectoryCommand):
     # remembers a ``set_debug_vis(True)`` request that arrived before then.
     _debug_markers: object | None = None
     _debug_vis_pending: bool = False
+    # Same lifecycle as ``_debug_markers``: created lazily once
+    # ``_post_init`` has populated ``self._skill_list`` (the prototype list
+    # is one sphere per entry of that list), toggled by the shared
+    # ``debug_vis`` cfg flag.  See ``_set_debug_vis_impl`` /
+    # ``_create_skill_markers`` / ``_debug_vis_callback``.
+    _skill_markers: object | None = None
 
     def _create_manager(self, cfg, env) -> ManagerBase:
         """Create a :class:`MultiSkillManager` from a folder of skill subfolders.
@@ -177,6 +229,16 @@ class BatchedMultiSkillCommand(BaseTrajectoryCommand):
                 f"missing buckets for skills: {sorted(missing)}; "
                 f"extra buckets not in skill_list: {sorted(extra)}."
             )
+        # Columns of ``skill_probs_at`` (== ``_skill_list`` order) that are
+        # terrain-aware skills (stairs).  Used by the asymmetric buffer in
+        # :meth:`_ref_xy_at_next_gate` to detect when the ankle prediction
+        # is already on a stair (so the toe buffer must not pull the skill
+        # off it early).
+        self._terrain_skill_cols = torch.tensor(
+            [self._skill_list.index(n) for n in _TERRAIN_AWARE_SKILLS
+             if n in self._skill_list],
+            dtype=torch.long, device=self.device,
+        )
         self._skill_lin_vel_x = torch.tensor(
             [self.cfg.velocity_buckets[s].lin_vel_x for s in self._skill_list],
             device=self.device, dtype=torch.float,
@@ -226,6 +288,28 @@ class BatchedMultiSkillCommand(BaseTrajectoryCommand):
             )
         else:
             self._transition_quat_index_groups = None
+
+        # --- Ref-frame → pos output indices (for next-gate prediction) ---
+        # Maps each entry in ``self.ref_frames`` to its (pos_x, pos_y) column
+        # indices in ``ordered_pos_output_names``.  ``_ref_xy_at_next_gate``
+        # uses this to extract the swing foot's local-frame xy from the
+        # batched trajectory output vector.
+        ref_pos_xy: list[list[int]] = []
+        for frame in self.ref_frames:
+            try:
+                ref_pos_xy.append([
+                    self.ordered_pos_output_names.index(f"{frame}:pos_x"),
+                    self.ordered_pos_output_names.index(f"{frame}:pos_y"),
+                ])
+            except ValueError as e:
+                raise ValueError(
+                    f"Ref frame '{frame}' is missing pos_x or pos_y in the "
+                    f"trajectory output names.  Next-gate prediction needs "
+                    f"both components."
+                ) from e
+        self._ref_frame_to_pos_xy_idx = torch.tensor(
+            ref_pos_xy, dtype=torch.long, device=self.device,
+        )  # [num_ref_frames, 2]
 
         # --- Contact-gate wiring -----------------------------------------
         self._gating_enabled = self.cfg.contact_gate_window_frac is not None
@@ -319,10 +403,15 @@ class BatchedMultiSkillCommand(BaseTrajectoryCommand):
         # ``CommandTerm.__init__`` calls it before ``_post_init`` runs),
         # construct the marker instance now that we know how many frame
         # prototypes to allocate.
-        if self._debug_vis_pending and self._debug_markers is None:
-            self._debug_markers = self._create_debug_markers()
-            if self._debug_markers is not None:
-                self._debug_markers.set_visibility(True)
+        if self._debug_vis_pending:
+            if self._debug_markers is None:
+                self._debug_markers = self._create_debug_markers()
+                if self._debug_markers is not None:
+                    self._debug_markers.set_visibility(True)
+            if self._skill_markers is None:
+                self._skill_markers = self._create_skill_markers()
+                if self._skill_markers is not None:
+                    self._skill_markers.set_visibility(True)
             self._debug_vis_pending = False
 
     @property
@@ -446,6 +535,40 @@ class BatchedMultiSkillCommand(BaseTrajectoryCommand):
         # change buffered on the velocity command, commit it now and start
         # the cross-fade.
         if fire_ids.numel() > 0:
+            # Before the commit, refresh the pending queue for the firing
+            # envs.  ``self.ref_poses`` won't be updated until
+            # ``get_measured_outputs`` runs later this step, so the
+            # per-step ``_update_skill_pending_from_velocity`` call at the
+            # top of ``_pre_update_phase`` saw a stale anchor — the
+            # *previous* gate's foot pose.  We re-query here against the
+            # *just-landed foot's* world pose so the same gate fire that
+            # landed the foot on a new block both enqueues *and* commits
+            # the skill change.  The query position is still the
+            # predicted next-gate touchdown (one half-period further),
+            # but anchored at the just-landed foot rather than the stale
+            # ``ref_poses`` — keeps the prediction-based skill query
+            # consistent across both paths.
+            new_phase = self.manager.phase[fire_ids]
+            new_ref_frame_local = self.manager.get_ref_frames_in_use(
+                new_phase, self.ref_frames, env_ids=fire_ids,
+            )                                              # [K] index into ref_frames
+            # ``self.ref_frame_indices`` is a Python ``list[int]`` (set in
+            # ``BaseTrajectoryCommand._parse_ref_frames``).  Convert lazily
+            # so we can fancy-index it with the per-env ``new_ref_frame_local``
+            # tensor.
+            ref_frame_idx_t = torch.as_tensor(
+                self.ref_frame_indices, dtype=torch.long, device=self.device,
+            )
+            body_articulation_idx = ref_frame_idx_t[new_ref_frame_local]
+            body_pos_w_all = wp.to_torch(self.robot.data.body_pos_w)  # [N, B, 3]
+            body_quat_w_all = wp.to_torch(self.robot.data.body_quat_w)  # [N, B, 4]
+            landed_xy = body_pos_w_all[fire_ids, body_articulation_idx, :2]  # [K, 2]
+            landed_quat = body_quat_w_all[fire_ids, body_articulation_idx]   # [K, 4]
+            predicted_xy = self._ref_xy_at_next_gate(
+                fire_ids, anchor_xy=landed_xy, anchor_quat=landed_quat,
+            )
+            self._update_skill_pending_from_velocity(fire_ids, xy_w=predicted_xy)
+
             self._commit_pending_skill_change_and_start_transition(fire_ids, cur_traj)
 
     def current_chord_per_frame(self, frame_pos_indices: torch.Tensor) -> torch.Tensor:
@@ -620,19 +743,22 @@ class BatchedMultiSkillCommand(BaseTrajectoryCommand):
         sits inside an eligible bucket that bucket wins (dist 0); when ``vel``
         is outside every eligible bucket the eligible bucket with the
         nearest edge wins. The latter is what flips the skill the instant
-        the stance foot enters a block where the previous skill is no
-        longer eligible — independent of where the velocity ramp currently
-        sits.
+        the predicted swing-foot touchdown lands in a block where the
+        previous skill is no longer eligible — independent of where the
+        velocity ramp currently sits.
 
         Args:
             vel: ``[K, 3]`` ``(vx, vy, wz)`` per env.
-            env_ids: ``[K]`` global env indices (used for the cell lookup
-                anchor when ``xy_w`` is not supplied).
-            xy_w: Optional ``[K, 2]`` world-frame ``(x, y)`` override
-                for the cell lookup.  Default uses ``self.ref_poses`` —
-                stable across pelvis jitter mid-episode.  The reset
-                path must override with ``env.scene.env_origins`` since
-                ``ref_poses`` is stale at reset-event time.
+            env_ids: ``[K]`` global env indices (used only for the cell
+                lookup when ``xy_w`` is supplied with leading shape ``[K]``).
+            xy_w: ``[K, 2]`` world-frame ``(x, y)`` cell-lookup anchor.
+                Callers compute this via :meth:`_ref_xy_at_next_gate`
+                (per-step + gate-fire paths) or pass an explicit override
+                (the reset path, which uses ``env.scene.env_origins``
+                because ``ref_poses`` is stale at reset-event time).
+                ``None`` falls back to ``self.ref_poses[env_ids, :2]``,
+                used as a last-resort anchor if a caller omits an explicit
+                xy.
 
         Returns:
             ``[K]`` long skill indices into ``terrain.skill_list``.
@@ -648,6 +774,130 @@ class BatchedMultiSkillCommand(BaseTrajectoryCommand):
             self._skill_ang_vel_z,
         )
 
+    def _ref_xy_at_next_gate(
+        self,
+        env_ids: torch.Tensor,
+        anchor_xy: torch.Tensor | None = None,
+        anchor_quat: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        """Predict the world xy where the swing foot will land at the
+        next contact gate.
+
+        Evaluates the reference trajectory at the next gate's phi,
+        extracts the post-gate ref frame's (= the foot that's about to
+        land) local-frame xy, and transforms it to world frame using
+        ``anchor_xy`` / ``anchor_quat`` as the local frame's origin.
+        For envs whose trajectory has no upcoming gate (perpetual /
+        post-last-gate episodic), the predicted xy is undefined so the
+        method returns ``anchor_xy`` unchanged.
+
+        Used by the per-step and gate-fire skill-query paths to anchor
+        ``skill_probs_at`` at *where the foot will touch down* rather
+        than where the current stance foot is — necessary for terrain
+        blocks whose leading edge is a vertical riser (stairs), where
+        the stance foot never enters the block before the controller
+        needs to switch skills.
+
+        Args:
+            env_ids: ``[K]`` env indices to query.
+            anchor_xy: Optional ``[K, 2]`` world xy for the local-frame
+                origin.  ``None`` uses ``self.ref_poses[env_ids, :2]``.
+            anchor_quat: Optional ``[K, 4]`` world quaternion for the
+                local frame.  ``None`` uses ``self.ref_poses[env_ids, 3:]``.
+                Only the yaw component is used (matches
+                :func:`_align_yaw`'s yaw-only convention).
+
+        Returns:
+            ``[K, 2]`` predicted world xy.
+        """
+        if anchor_xy is None:
+            anchor_xy = self.ref_poses[env_ids, :2]
+        if anchor_quat is None:
+            anchor_quat = self.ref_poses[env_ids, 3:]
+
+        mgr = self.manager
+        eps = mgr._EPS_PHI
+
+        traj_idx = mgr.get_current_trajectory_indices(env_ids)
+        next_gate = mgr.next_gate_idx[env_ids]
+        has_gate = next_gate >= 0
+        safe_gate = torch.clamp(next_gate, min=0)
+        gate_phi = mgr._gate_phi_table[traj_idx, safe_gate]
+
+        # Post-gate ref frame = the foot that will land at the gate.
+        # Wrap to [0, 1] so the phi=1.0 gate's post-side reads from
+        # phase ≈ 0 (start of the next period) rather than landing on
+        # the clamped last-domain ref frame.
+        post_phi = torch.remainder(gate_phi + eps, 1.0)
+        swing_ref_local = mgr.get_ref_frames_in_use(
+            post_phi, self.ref_frames, env_ids=env_ids,
+        )
+
+        # Pre-gate eval at gate_phi - EPS lands strictly inside the
+        # last domain of the current period, where the swing foot's
+        # bezier endpoint is its predicted touchdown position in the
+        # *current* ref_pose's local (yaw-aligned) frame.  ``gate_phi``
+        # is always 0.5 or 1.0 so the subtraction stays positive.
+        pre_phi = gate_phi - eps
+        pos_local, _ = mgr.get_output(pre_phi, env_ids=env_ids)
+
+        # Gather swing-foot xy from the batched output via the
+        # precomputed name lookup.
+        xy_cols = self._ref_frame_to_pos_xy_idx[swing_ref_local]  # [K, 2]
+        local_x = torch.gather(pos_local, 1, xy_cols[:, :1]).squeeze(1)
+        local_y = torch.gather(pos_local, 1, xy_cols[:, 1:]).squeeze(1)
+
+        # Local → world helper: yaw-rotate the local offset by the anchor
+        # quat (inverse of :func:`_align_yaw`, which does
+        # ``yaw_quat(quat_inv(root_quat))``).  Pad to 3-vec for
+        # ``quat_apply``; z is don't-care for the xy cell lookup.
+        def _to_world(lx: torch.Tensor, ly: torch.Tensor) -> torch.Tensor:
+            local_xyz = torch.stack([lx, ly, torch.zeros_like(lx)], dim=-1)
+            off = quat_apply(yaw_quat(anchor_quat), local_xyz)
+            return anchor_xy + off[..., :2]
+
+        # Unbuffered (ankle) prediction.
+        unbuffered_xy = _to_world(local_x, local_y)
+
+        # Toe-vs-ankle buffer: extend the predicted xy by
+        # ``cfg.skill_query_buffer`` in the ref-frame *forward* direction
+        # (local +x, which is yaw-aligned to the stance foot's heading ≈
+        # direction of travel).  The toe leads the ankle along the foot's
+        # heading, so the buffer must be purely forward — NOT along the
+        # full swing displacement ``(local_x, local_y)``, whose large
+        # lateral component (≈ half the stance width) would otherwise eat
+        # most of the buffer's forward reach (worst for slow gaits, where
+        # the per-step lateral offset dominates the short forward stride).
+        # TODO: this assumes forward locomotion (+local_x).  When walking
+        # backwards / sideways the toe leads in a different direction, so
+        # the buffer needs to follow the travel direction (e.g. sign of
+        # the swing-foot velocity or the commanded velocity) rather than a
+        # fixed +x offset.
+        buf = float(self.cfg.skill_query_buffer)
+        if buf == 0.0:
+            world_xy = unbuffered_xy
+        else:
+            buffered_xy = _to_world(local_x + buf, local_y)
+            # The buffer is a forward look-ahead.  It must only *promote*
+            # the query onto a stair when approaching (ankle still on the
+            # flat below the riser) — never *pull off* one when exiting
+            # (ankle still on a tread, toe already over the flat top),
+            # which would flip the skill to walk a full step early.  So
+            # use the buffered (toe) position only when the ankle is NOT
+            # already on a terrain-aware (stair) block; once the ankle is
+            # on a tread, query at the ankle so the skill stays on the
+            # stair until the foot genuinely steps off.
+            if self._terrain_skill_cols.numel() > 0:
+                elig = self._terrain.skill_probs_at(unbuffered_xy) > 0.0  # [K, S]
+                on_terrain = elig[:, self._terrain_skill_cols].any(dim=1)  # [K]
+                world_xy = torch.where(
+                    on_terrain.unsqueeze(-1), unbuffered_xy, buffered_xy
+                )
+            else:
+                world_xy = buffered_xy
+
+        return torch.where(has_gate.unsqueeze(-1), world_xy, anchor_xy)
+
     def _resolve_vel_cmd(self) -> None:
         """Lazy-resolve the velocity command term on first compute."""
         if self._vel_cmd is None:
@@ -655,23 +905,41 @@ class BatchedMultiSkillCommand(BaseTrajectoryCommand):
                 self.cfg.velocity_command_name
             )
 
-    def _update_skill_pending_from_velocity(self, env_ids: torch.Tensor) -> None:
+    def _update_skill_pending_from_velocity(
+        self,
+        env_ids: torch.Tensor,
+        xy_w: torch.Tensor | None = None,
+    ) -> None:
         """Per-step: derive desired skill from ``vel_target_b`` and update
         ``self.skill_id`` / ``self.pending`` accordingly.
 
         Called at the top of :meth:`_pre_update_phase` before the manager
         cache rebuild so the trajectory-selection step sees the freshest
-        ``skill_id``.
+        ``skill_id``.  Also called from :meth:`_apply_contact_gate` for
+        envs whose contact gate just fired, with the just-landed foot's
+        world pose passed via ``xy_w`` after being routed through
+        :meth:`_ref_xy_at_next_gate` — that lets the same gate fire that
+        landed the foot on a new block both enqueue *and* commit the
+        skill change.
 
         Args:
             env_ids: ``[K]`` long indices of envs to process (typically the
                 advance mask — envs that actually stepped this tick).
+            xy_w: Optional ``[K, 2]`` world-frame ``(x, y)`` override for
+                the cell-lookup anchor inside :meth:`_skill_for_velocity`.
+                ``None`` defaults to the predicted next-gate touchdown xy
+                (from :meth:`_ref_xy_at_next_gate` anchored at
+                ``self.ref_poses``) — this is the anchor that lets the
+                skill switch *before* the swing foot tries to step onto a
+                new block.
         """
         if env_ids.numel() == 0:
             return
         self._resolve_vel_cmd()
+        if xy_w is None:
+            xy_w = self._ref_xy_at_next_gate(env_ids)
         vel = self._vel_cmd.vel_target_b[env_ids]
-        desired = self._skill_for_velocity(vel, env_ids)
+        desired = self._skill_for_velocity(vel, env_ids, xy_w=xy_w)
 
         active_subset = self.skill_id[env_ids]
         pa_subset = self.pending.active[env_ids]
@@ -1117,11 +1385,13 @@ class BatchedMultiSkillCommand(BaseTrajectoryCommand):
     # ------------------------------------------------------------------
 
     def _set_debug_vis_impl(self, debug_vis: bool) -> None:
-        """Toggle the trajectory-segment marker visualizer.
+        """Toggle the trajectory-segment + active-skill marker visualizers.
 
         Uses :class:`isaaclab.markers.VisualizationMarkers` to render one
-        cylinder per Bezier-sample segment per discovered reference frame.
-        The actual per-step update happens in :meth:`_debug_vis_callback`.
+        cylinder per Bezier-sample segment per discovered reference frame,
+        plus one colored sphere per env that encodes the current
+        ``skill_id`` (color from :data:`_SKILL_MARKER_COLORS`). The actual
+        per-step update happens in :meth:`_debug_vis_callback`.
         """
         if debug_vis:
             # Frame discovery happens in ``_post_init``, which the parent
@@ -1129,14 +1399,20 @@ class BatchedMultiSkillCommand(BaseTrajectoryCommand):
             # — defer construction until we know the prototype layout.
             if self._debug_markers is None and hasattr(self, "_debug_frame_pos_idx"):
                 self._debug_markers = self._create_debug_markers()
+            if self._skill_markers is None and hasattr(self, "_skill_list"):
+                self._skill_markers = self._create_skill_markers()
             if self._debug_markers is not None:
                 self._debug_markers.set_visibility(True)
-            else:
+            if self._skill_markers is not None:
+                self._skill_markers.set_visibility(True)
+            if self._debug_markers is None and self._skill_markers is None:
                 self._debug_vis_pending = True
         else:
             self._debug_vis_pending = False
             if self._debug_markers is not None:
                 self._debug_markers.set_visibility(False)
+            if self._skill_markers is not None:
+                self._skill_markers.set_visibility(False)
 
     def _create_debug_markers(self):
         """Instantiate the :class:`VisualizationMarkers` with one cylinder
@@ -1194,6 +1470,87 @@ class BatchedMultiSkillCommand(BaseTrajectoryCommand):
             print(f"[WARN BatchedMultiSkillCommand] "
                   f"Could not create VisualizationMarkers: {exc}")
             return None
+
+    def _create_skill_markers(self):
+        """Instantiate the per-skill sphere marker visualizer.
+
+        One sphere prototype per entry of :attr:`_skill_list`; the diffuse
+        color comes from :data:`_SKILL_MARKER_COLORS` (fallback grey for
+        unrecognised names).  Per-env emission in
+        :meth:`_debug_vis_callback` uses ``self.skill_id`` directly as the
+        ``marker_indices`` arg — the prototype order matches
+        ``self._skill_list`` so no remap is needed.
+
+        Returns ``None`` if Isaac Lab markers/sim aren't importable yet.
+        """
+        try:
+            import isaaclab.sim as sim_utils
+            from isaaclab.markers import VisualizationMarkers, VisualizationMarkersCfg
+        except Exception as exc:
+            print(f"[WARN BatchedMultiSkillCommand] "
+                  f"Could not import VisualizationMarkers for skill markers: {exc}")
+            return None
+
+        radius = float(self.cfg.debug_skill_marker_radius)
+        prototypes: dict[str, object] = {}
+        for name in self._skill_list:
+            color = _SKILL_MARKER_COLORS.get(name, _SKILL_MARKER_FALLBACK_COLOR)
+            prototypes[name] = sim_utils.SphereCfg(
+                radius=radius,
+                visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=color),
+            )
+        cfg = VisualizationMarkersCfg(
+            prim_path=_SKILL_MARKER_PRIM_PATH, markers=prototypes,
+        )
+        try:
+            markers = VisualizationMarkers(cfg)
+        except Exception as exc:
+            print(f"[WARN BatchedMultiSkillCommand] "
+                  f"Could not create skill VisualizationMarkers: {exc}")
+            return None
+
+        # One-shot palette legend so the on-screen colors are easy to map
+        # back to skill names at a glance.  This helper is gated by
+        # ``_set_debug_vis_impl(True)`` and only runs when ``_skill_markers``
+        # is still ``None``, so the legend is emitted exactly once per
+        # command instance with debug viz enabled.
+        print(_format_skill_palette(self._skill_list))
+        return markers
+
+    def _frame_drift_viz_params(self) -> tuple[float, float, float]:
+        """``(grace_s, max_frac, min_dist)`` of the
+        ``frame_deviation_from_reference`` termination that watches *this*
+        command, looked up once from the termination manager and cached.
+
+        Lets the debug end-sphere mirror that termination exactly: the
+        sphere radius is its live cutoff (``max(max_frac * chord, min_dist)``)
+        and it is hidden while the grace window is suppressing the
+        termination — so a *visible* ball means the termination is armed at
+        its true size.  ``max_frac`` / ``min_dist`` fall back to the module
+        sphere constants and ``grace_s`` to ``0.0`` (always shown) when no
+        such termination is configured."""
+        cached = getattr(self, "_frame_drift_viz_cached", None)
+        if cached is not None:
+            return cached
+        grace = 0.0
+        frac = _DEBUG_VIZ_END_SPHERE_DIST_FRAC
+        min_d = _DEBUG_VIZ_END_SPHERE_MIN_RADIUS
+        try:
+            tm = self.env.termination_manager
+            for name in tm.active_terms:
+                tcfg = tm.get_term_cfg(name)
+                if getattr(tcfg.func, "__name__", "") != "frame_deviation_from_reference":
+                    continue
+                cmd_name = tcfg.params.get("cmd_name")
+                if cmd_name is not None and self.env.command_manager.get_term(cmd_name) is self:
+                    grace = float(tcfg.params.get("grace_period_s", 0.0))
+                    frac = float(tcfg.params.get("max_frac", frac))
+                    min_d = float(tcfg.params.get("min_dist", min_d))
+                    break
+        except Exception:
+            pass
+        self._frame_drift_viz_cached = (grace, frac, min_d)
+        return self._frame_drift_viz_cached
 
     def _debug_vis_callback(self, event) -> None:  # noqa: D401 — IsaacLab convention
         """Push one batched ``visualize`` call per tick.
@@ -1363,10 +1720,24 @@ class BatchedMultiSkillCommand(BaseTrajectoryCommand):
             frame_start = world_pos[:, 0, :, :]                                    # (N, F, 3)
             frame_end = world_pos[:, -1, :, :]                                     # (N, F, 3)
             frame_dist = torch.linalg.norm(frame_end - frame_start, dim=-1)        # (N, F)
+            # Mirror the frame-drift termination: radius is its live cutoff
+            # ``max(max_frac * chord, min_dist)`` (pulled from the term cfg so
+            # the ball can't drift out of sync), and the ball is hidden for
+            # envs whose grace window is still suppressing the termination.
+            # A visible ball therefore means the termination is armed at its
+            # true size — eyeball the size (a) and watch it vanish/appear to
+            # see exactly when grace gates it (b).
+            grace_s, sphere_frac, sphere_min_r = self._frame_drift_viz_params()
             sphere_radius = torch.clamp(
-                frame_dist * _DEBUG_VIZ_END_SPHERE_DIST_FRAC,
-                min=_DEBUG_VIZ_END_SPHERE_MIN_RADIUS,
+                frame_dist * sphere_frac, min=sphere_min_r,
             )                                                                       # (N, F)
+            if grace_s > 0.0:
+                grace_active = self.time_since_traj_change_s < grace_s             # (N,)
+                sphere_radius = torch.where(
+                    grace_active.unsqueeze(1),
+                    torch.zeros_like(sphere_radius),
+                    sphere_radius,
+                )
             sphere_translations = frame_end.reshape(-1, 3)                         # (N*F, 3)
             sphere_scales = sphere_radius.unsqueeze(-1).expand(N, F, 3).reshape(-1, 3)
             sphere_quats = quat_from_angle_axis(
@@ -1414,3 +1785,18 @@ class BatchedMultiSkillCommand(BaseTrajectoryCommand):
             scales=scales_flat,
             marker_indices=marker_indices,
         )
+
+        # One colored sphere per env above the pelvis, color-coded by the
+        # current ``skill_id``.  Prototype order matches ``self._skill_list``
+        # so ``marker_indices`` is just ``self.skill_id``.  Cheap: a single
+        # ``visualize`` call with one instance per env.
+        if self._skill_markers is not None:
+            pelvis = wp.to_torch(self.robot.data.root_pos_w)            # (num_envs, 3)
+            skill_pos = pelvis.clone()
+            skill_pos[:, 2] = skill_pos[:, 2] + float(
+                self.cfg.debug_skill_marker_height
+            )
+            self._skill_markers.visualize(
+                translations=skill_pos,
+                marker_indices=self.skill_id,
+            )

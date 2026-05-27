@@ -66,6 +66,41 @@ def base_orientation(env, cmd_name: str, roll_limit_deg: float = 30.0, pitch_lim
     return (roll_err.abs() > roll_limit) | (pitch_err.abs() > pitch_limit)
 
 
+def base_orientation_from_upright(
+    env,
+    roll_limit_deg: float = 70.0,
+    pitch_limit_deg: float = 70.0,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    """Terminate when the base roll or pitch deviates from upright (world z) by more than the limits.
+
+    Unlike :func:`base_orientation`, the reference here is the world-frame
+    upright (identity rotation) — yaw is ignored.  Useful as a face-plant /
+    fallen-robot detector that is independent of the trajectory reference,
+    and therefore not subject to whatever grace gating the deviation-from-
+    reference termination uses.
+
+    Args:
+        env: IsaacLab environment.
+        roll_limit_deg: Maximum allowed |roll| from upright in degrees.
+        pitch_limit_deg: Maximum allowed |pitch| from upright in degrees.
+        asset_cfg: Robot scene entity.
+
+    Returns:
+        Boolean tensor of shape ``[num_envs]`` — ``True`` for envs that
+        should terminate this step.
+    """
+    asset: Articulation = env.scene[asset_cfg.name]
+    act_quat = wp.to_torch(asset.data.root_quat_w)  # (x, y, z, w)
+    roll, pitch, _ = euler_xyz_from_quat(act_quat, wrap_to_2pi=False)
+    roll = wrap_to_pi(roll)
+    pitch = wrap_to_pi(pitch)
+
+    roll_limit = torch.deg2rad(torch.tensor(roll_limit_deg, device=act_quat.device))
+    pitch_limit = torch.deg2rad(torch.tensor(pitch_limit_deg, device=act_quat.device))
+    return (roll.abs() > roll_limit) | (pitch.abs() > pitch_limit)
+
+
 def frame_deviation_from_reference(
     env,
     cmd_name: str,
@@ -199,12 +234,18 @@ def illegal_terrain_contact(
     exceeds ``threshold``.
 
     Mirrors :func:`isaaclab.envs.mdp.terminations.illegal_contact` and reads
-    unfiltered :attr:`ContactSensor.data.net_forces_w_history`. Backend-level
-    filtering of contact partners (e.g. terrain-only) does not work reliably
-    against the static terrain mesh in the Newton backend, so instead we set
-    ``threshold`` high enough that incidental self-collision forces don't trip
-    the termination — only a hard impact (e.g. torso/thigh striking a stair)
-    will. The "terrain" in the name reflects the intent.
+    unfiltered :attr:`ContactSensor.data.net_forces_w_history` — the total
+    force from all contact partners, self-collision included.
+
+    Note: filtering this to terrain-only contact is not viable on the PhysX
+    GPU pipeline — it cannot filter against the static terrain mesh (logs
+    ``GPU contact filter for collider '/World/ground' is not supported`` and
+    zeroes the force matrix), and filtering against the robot's own bodies to
+    subtract self-contact does not capture intra-articulation contacts
+    reliably.  Use an orientation-based fall detector
+    (:func:`base_orientation_from_upright`) instead of trying to isolate
+    terrain contact by force.  This function remains for non-terrain hard
+    contacts where ``threshold`` can simply be set above self-collision noise.
     """
     contact_sensor = env.scene.sensors[sensor_cfg.name]
     net_contact_forces = wp.to_torch(contact_sensor.data.net_forces_w_history)

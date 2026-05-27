@@ -75,6 +75,15 @@ class BlockOutput:
     blocks this equals ``entry_z``; for stair-up it's ``entry_z + (N-1) *
     step_height``; for stair-down it's ``entry_z - (N-1) * step_height``."""
 
+    walkable_aabb: tuple[float, float, float, float] | None = None
+    """Optional sub-terrain-local AABB ``(xmin, xmax, ymin, ymax)`` of the
+    block's *actual* walkable plate (narrower than :attr:`aabb` when the
+    block's width is restricted, e.g. via ``flat_width_range`` /
+    ``stair_width_range`` / ``slope_width_range``).  Drives the
+    importer's debug-viz outline so the rendered rectangle hugs the real
+    block geometry instead of the full sub-terrain y-extent.  ``None``
+    falls back to :attr:`aabb` (legacy / full-width blocks)."""
+
     extras: dict[str, Any] = field(default_factory=dict)
     """Block-type-specific metadata (e.g. stair_top_centers, stair_dimension,
     num_steps, direction)."""

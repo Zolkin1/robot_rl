@@ -93,8 +93,12 @@ def apply_terrain_aware_ref(
     stair_off = manager.data["origin_relative_to_stair_center"][sub_traj_idx]        # [K, 3]
     spawn_off = ref_off + stair_off
 
-    ref_xy = default_new_ref[is_terrain, :2]                                          # [K, 2]
-    stair_center = project(ref_xy)                                                    # [K, 3]
+    # Pass the foot's full xyz: the projector uses the height to pick the
+    # tread the foot is physically on, so a foot whose toe is up on a step
+    # while the ankle's xy still sits over the flat below the riser snaps
+    # to the correct (upper) step rather than a whole step too low.
+    ref_xyz = default_new_ref[is_terrain, :3]                                         # [K, 3]
+    stair_center = project(ref_xyz)                                                   # [K, 3]
 
     new_pose = default_new_ref.clone()
     new_pose[is_terrain, 0] = stair_center[:, 0] + spawn_off[:, 0]

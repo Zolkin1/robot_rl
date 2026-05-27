@@ -179,6 +179,7 @@ class SlopeBlock(TerrainBlock):
             meshes=meshes,
             origin=origin,
             aabb=(x0, x0 + size_x, y0, y0 + size_y),
+            walkable_aabb=(x0, x0 + size_x, slope_y0, slope_y1),
             skill_probs=dict(self.cfg.skill_probs),
             needs_projection=False,
             needs_directional_cmd=True,

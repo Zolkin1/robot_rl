@@ -10,7 +10,7 @@ per-block resolution within a single sub-terrain.
 It also generalises the stair projection: a cell may contain zero, one, or
 multiple stair spans (one per stair block in the composite), each with its
 own ``[xmin, xmax]`` extent and per-tread centers. The single-point
-``project(points: (N, 2)) -> (N, 3)`` callable in :attr:`terrain_meta_data`
+``project(points: (N, 3)) -> (N, 3)`` callable in :attr:`terrain_meta_data`
 finds the matching span for each query point and returns the tread top
 center.
 
@@ -119,6 +119,20 @@ class MetaCompositeTerrainImporter(MetaTerrainImporter):
         self._block_aabbs[..., 1] = float("-inf")
         self._block_aabbs[..., 2] = float("inf")
         self._block_aabbs[..., 3] = float("-inf")
+        # Walkable AABB (per-block actual y-extent — narrower than
+        # ``_block_aabbs`` when ``flat_width_range`` / ``stair_width_range``
+        # / ``slope_width_range`` restrict the block's plate).  Used by
+        # ``_draw_block_outlines`` so the debug-viz rectangle hugs the
+        # actual block geometry instead of the full sub-terrain y.
+        # Falls back to ``_block_aabbs`` when a block doesn't expose its
+        # own walkable AABB (legacy blocks via ``_legacy_cell_to_block``).
+        self._block_walkable_aabbs = torch.empty(
+            (nrows, ncols, max_blocks, 4), dtype=torch.float, device=self.device
+        )
+        self._block_walkable_aabbs[..., 0] = float("inf")
+        self._block_walkable_aabbs[..., 1] = float("-inf")
+        self._block_walkable_aabbs[..., 2] = float("inf")
+        self._block_walkable_aabbs[..., 3] = float("-inf")
         self._block_skill_probs = torch.zeros(
             (nrows, ncols, max_blocks, num_skills), dtype=torch.float, device=self.device
         )
@@ -167,6 +181,16 @@ class MetaCompositeTerrainImporter(MetaTerrainImporter):
         self._stair_span_centers = torch.zeros(
             (nrows, ncols, max_spans, max_steps_per_span, 3),
             dtype=torch.float, device=self.device,
+        )
+        # Connecting-ground elevation at the span's left edge. With the
+        # composite ``StairBlock`` now placing its first tread one step
+        # *above* base_z (entry riser), this no longer matches
+        # ``stair_top_centers[0, 2]`` — read it from the block's
+        # ``BlockOutput.entry_z`` instead.  Used in ``_project_world`` to
+        # route start-platform points to the actual flat ground (not the
+        # first tread top).
+        self._stair_span_entry_z = torch.zeros(
+            (nrows, ncols, max_spans), dtype=torch.float, device=self.device
         )
         self._stair_span_valid = torch.zeros(
             (nrows, ncols, max_spans), dtype=torch.bool, device=self.device
@@ -248,6 +272,15 @@ class MetaCompositeTerrainImporter(MetaTerrainImporter):
         self._block_aabbs[r, c, b_idx, 1] = float(aabb[1])
         self._block_aabbs[r, c, b_idx, 2] = float(aabb[2])
         self._block_aabbs[r, c, b_idx, 3] = float(aabb[3])
+        # Walkable AABB (narrower than ``aabb`` when the block restricts
+        # its y-extent).  Composite-builder blocks emit this in their
+        # metadata; legacy blocks (via ``_legacy_cell_to_block``) fall
+        # back to the full ``aabb`` so the outline matches the cell.
+        walkable = b.get("walkable_aabb", aabb)
+        self._block_walkable_aabbs[r, c, b_idx, 0] = float(walkable[0])
+        self._block_walkable_aabbs[r, c, b_idx, 1] = float(walkable[1])
+        self._block_walkable_aabbs[r, c, b_idx, 2] = float(walkable[2])
+        self._block_walkable_aabbs[r, c, b_idx, 3] = float(walkable[3])
         self._block_valid[r, c, b_idx] = True
         self._block_needs_projection[r, c, b_idx] = bool(b["needs_projection"])
         self._block_needs_dir_cmd[r, c, b_idx] = bool(b["needs_directional_cmd"])
@@ -298,6 +331,13 @@ class MetaCompositeTerrainImporter(MetaTerrainImporter):
         self._stair_span_step_depth[r, c, span_idx] = step_depth
         self._stair_span_num_steps[r, c, span_idx] = ns
         self._stair_span_centers[r, c, span_idx, :ns] = centers
+        # Connecting-ground z (composer-threaded). Falls back to the first
+        # tread top z for legacy / hand-written blocks that don't expose
+        # ``entry_z`` — that keeps the pre-entry-riser behavior for any
+        # block that hasn't migrated yet.
+        self._stair_span_entry_z[r, c, span_idx] = float(
+            b.get("entry_z", float(centers[0, 2]))
+        )
         self._stair_span_valid[r, c, span_idx] = True
 
     # ------------------------------------------------------------------
@@ -333,25 +373,45 @@ class MetaCompositeTerrainImporter(MetaTerrainImporter):
         return self.skill_probs_at(xy_w) > 0.0
 
     def _project_world(self, points: torch.Tensor) -> torch.Tensor:
-        """Project a batch of world ``(x, y)`` points to ``(x, y, z)``.
+        """Project a batch of world foot poses ``(x, y, z)`` to stair ``(x, y, z)``.
 
-        Routing per point:
-          * On a stair tread → ``(tread_center_x, tread_center_y, tread_top_z)``.
-          * On a stair-block start/end platform → ``(local_x, local_y, platform_z)``.
-          * Outside any stair span → passthrough ``(local_x, local_y, 0)``.
+        The xy selects the **span** (which staircase — the one the point is
+        inside, else the nearest by ``|local_x − span_center|``).  The query
+        **z selects the step within that span**: the tread (or the
+        fictitious entry/exit level) whose top-z is nearest ``z``.  This
+        snaps the reference to the step the foot is physically resting on,
+        even when the ankle's xy still sits over the flat below a riser —
+        an xy-only tread index would land a whole step too low there.
+
+        Routing:
+          * Height nearest a real tread → ``(tread_center_x, ·, tread_top_z)``.
+          * Height nearest the entry level (one step below tread 0, at the
+            riser) → ``(span_xmin − sd/2, ·, entry_z)``, or the foot's own x
+            if it is on a real start platform (in-span).
+          * ``local_x`` past ``span_xmax`` → exit-side fictitious tread
+            ``(span_xmax + sd/2, ·, exit_z)`` (its z equals the last tread's,
+            so height alone can't pick it — gated on xy).
+          * Cell with no stair span at all → passthrough ``(x, y, 0)``.
+
+        Always takes the full ``(x, y, z)`` because its sole caller
+        (:func:`apply_terrain_aware_ref`) places the reference at a contact
+        gate, where the landed foot's height is always available and is the
+        unambiguous signal for which step it is on.
 
         Args:
-            points: World-frame ``(x, y)`` positions of shape ``(N, 2)``.
+            points: World-frame foot positions of shape ``(N, 3)``.
 
         Returns:
             Tensor of shape ``(N, 3)``.
         """
-        if points.dim() != 2 or points.shape[-1] != 2:
+        if points.dim() != 2 or points.shape[-1] != 3:
             raise ValueError(
-                f"_project_world expects points of shape (N, 2); got {tuple(points.shape)}"
+                f"_project_world expects points of shape (N, 3); "
+                f"got {tuple(points.shape)}"
             )
+        query_z = points[..., 2]
 
-        rows, cols, local_x, local_y = self._cell_and_local(points)
+        rows, cols, local_x, local_y = self._cell_and_local(points[..., :2])
         size_x = float(self.cfg.terrain_generator.size[0])
         size_y = float(self.cfg.terrain_generator.size[1])
         nrows, ncols = self.terrain_origins.shape[:2]
@@ -364,42 +424,73 @@ class MetaCompositeTerrainImporter(MetaTerrainImporter):
             & valid
         )
         has_hit = in_span.any(dim=-1)
-        span_idx = in_span.float().argmax(dim=-1)
+        cell_has_stair = valid.any(dim=-1)
+        in_span_idx = in_span.float().argmax(dim=-1)
 
-        n_idx = torch.arange(points.shape[0], device=points.device)
-        # The stair tread region starts at start_plat_xmax (== span_xmin when
-        # there's no start platform). Stair indexing uses that as the origin
-        # so platforms don't bias the floor division.
-        start_plat_xmax = self._stair_span_start_plat_xmax[rows, cols, span_idx]
-        end_plat_xmin = self._stair_span_end_plat_xmin[rows, cols, span_idx]
+        # For points outside any span, pick the nearest valid span by
+        # ``|local_x − span_center|``.  Invalid spans get +inf distance so
+        # they're never chosen.  For cells with no valid span at all the
+        # argmin is arbitrary (all +inf), but those points are routed
+        # through the passthrough branch below regardless.
+        span_centers = 0.5 * (spans[..., 0] + spans[..., 1])
+        span_dist = (local_x.unsqueeze(-1) - span_centers).abs()
+        span_dist = torch.where(
+            valid, span_dist, torch.full_like(span_dist, float("inf"))
+        )
+        nearest_span_idx = span_dist.argmin(dim=-1)
+
+        # Unified span_idx: in-span points use the span they're inside;
+        # outside-span points use the nearest span.
+        span_idx = torch.where(has_hit, in_span_idx, nearest_span_idx)
+
         step_depth = self._stair_span_step_depth[rows, cols, span_idx].clamp_min(1e-6)
         num_steps = self._stair_span_num_steps[rows, cols, span_idx]
-        stair_idx = torch.div(local_x - start_plat_xmax, step_depth, rounding_mode="floor").long()
-        stair_idx = torch.minimum(stair_idx, num_steps - 1).clamp_min(0)
-
-        # Tread-region projection (snap to tread center).
-        tread_center = self._stair_span_centers[rows, cols, span_idx, stair_idx]
-
-        # Platform-region projection (keep foot's xy, elevate to platform z).
-        # entry_z = first tread top z; exit_z = last tread top z. With the
-        # block's base_z chaining, those equal the platforms' z values.
-        entry_z = self._stair_span_centers[rows, cols, span_idx, 0, 2]
+        # ``entry_z`` is the connecting-ground z (from ``BlockOutput.entry_z``)
+        # — for composite ``StairBlock`` this is ``base_z``, one full step
+        # *below* the first tread top (the left edge is a riser).  ``exit_z``
+        # is the last tread top, which doubles as the top-platform z.
+        entry_z = self._stair_span_entry_z[rows, cols, span_idx]
         last_idx = (num_steps - 1).clamp_min(0)
         exit_z = self._stair_span_centers[rows, cols, span_idx, last_idx, 2]
-
-        on_start_plat = local_x < start_plat_xmax
-        on_end_plat = local_x >= end_plat_xmin
-
-        plat_z = torch.where(on_start_plat, entry_z, exit_z)
-        plat_proj = torch.stack([local_x, local_y, plat_z], dim=-1)
-
-        on_platform = on_start_plat | on_end_plat
-        in_span_proj = torch.where(on_platform.unsqueeze(-1), plat_proj, tread_center)
+        span_xmin = self._stair_span_xrange[rows, cols, span_idx, 0]
+        span_xmax = self._stair_span_xrange[rows, cols, span_idx, 1]
 
         non_stair = torch.stack(
             [local_x, local_y, torch.zeros_like(local_x)], dim=-1
         )
-        local_out = torch.where(has_hit.unsqueeze(-1), in_span_proj, non_stair)
+
+        # Among the real treads of the chosen span, pick the one whose top-z
+        # is nearest the query z; weigh that against the fictitious entry
+        # level (whichever is closer in z wins).
+        centers_all_z = self._stair_span_centers[rows, cols, span_idx, :, 2]  # (N, S)
+        n_step_slots = centers_all_z.shape[1]
+        step_ids = torch.arange(n_step_slots, device=points.device)
+        tread_valid = step_ids.unsqueeze(0) < num_steps.unsqueeze(1)          # (N, S)
+        d_tread = torch.where(
+            tread_valid,
+            (centers_all_z - query_z.unsqueeze(1)).abs(),
+            torch.full_like(centers_all_z, float("inf")),
+        )
+        best_tread_d, best_tread_k = d_tread.min(dim=1)                        # (N,)
+        tread_sel = self._stair_span_centers[rows, cols, span_idx, best_tread_k]  # (N, 3)
+
+        # Fictitious entry level (at the riser).  Keep the foot's xy when it
+        # is on a real start platform (in-span); else snap just before the riser.
+        d_entry = (entry_z - query_z).abs()                                   # (N,)
+        entry_x = torch.where(has_hit, local_x, span_xmin - 0.5 * step_depth)
+        entry_sel = torch.stack([entry_x, local_y, entry_z], dim=-1)          # (N, 3)
+
+        use_entry = (d_entry < best_tread_d).unsqueeze(-1)
+        z_sel = torch.where(use_entry, entry_sel, tread_sel)
+
+        # Exit-side fictitious level shares the top tread's z, so height
+        # can't distinguish it — gate it on xy being past the span.
+        exit_x = span_xmax + 0.5 * step_depth
+        exit_sel = torch.stack([exit_x, local_y, exit_z], dim=-1)             # (N, 3)
+        past_exit = (local_x >= span_xmax).unsqueeze(-1)
+        z_sel = torch.where(past_exit, exit_sel, z_sel)
+
+        local_out = torch.where(cell_has_stair.unsqueeze(-1), z_sel, non_stair)
 
         offset_x = rows.to(local_out.dtype) * size_x - nrows * size_x / 2.0
         offset_y = cols.to(local_out.dtype) * size_y - ncols * size_y / 2.0
@@ -518,7 +609,12 @@ class MetaCompositeTerrainImporter(MetaTerrainImporter):
         z_off = float(self.cfg.block_outline_z_offset)
 
         valid_cpu = self._block_valid.detach().cpu().numpy()
-        aabbs_cpu = self._block_aabbs.detach().cpu().numpy()
+        # Outline uses the *walkable* AABB so narrow blocks (those with
+        # ``flat_width_range`` / ``stair_width_range`` / ``slope_width_range``
+        # set) render an outline that hugs the actual block plate rather
+        # than the full sub-terrain y-extent.  Falls back to the full AABB
+        # for legacy blocks (cell-wide).
+        aabbs_cpu = self._block_walkable_aabbs.detach().cpu().numpy()
         entry_z_cpu = self._block_entry_z.detach().cpu().numpy()
         exit_z_cpu = self._block_exit_z.detach().cpu().numpy()
 

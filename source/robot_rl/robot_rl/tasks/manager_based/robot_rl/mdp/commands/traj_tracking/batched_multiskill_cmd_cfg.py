@@ -106,3 +106,33 @@ class BatchedMultiSkillCommandCfg(BaseTrajectoryCommandCfg):
     eligible candidates when ``vel_target_b`` would otherwise match
     multiple buckets (e.g. ``stair_up (0.4, 0.4)`` overlapping
     ``walk_forward (0.1, 1.5)``)."""
+
+    debug_skill_marker_height: float = 1.5
+    """Z offset (m) above each env's pelvis at which the active-skill
+    debug marker is drawn when ``debug_vis=True``."""
+
+    debug_skill_marker_radius: float = 0.08
+    """Radius (m) of the active-skill debug sphere marker."""
+
+    skill_query_buffer: float = 0.0
+    """Extra distance (m) added to the predicted swing-foot landing xy
+    before it's used as the terrain-skill cell-lookup anchor in
+    :meth:`BatchedMultiSkillCommand._ref_xy_at_next_gate`.  Applied purely
+    in the ref-frame *forward* direction (local +x, yaw-aligned to the
+    stance foot's heading ≈ direction of travel), so the value maps
+    directly to the toe-ahead-of-ankle distance: a 0.15 m toe overhang is
+    covered by ``skill_query_buffer = 0.15`` (plus any margin).  This is
+    deliberately NOT applied along the full swing displacement vector —
+    that vector carries a large lateral component (≈ half the stance
+    width), which for slower gaits would shrink the buffer's forward
+    reach well below its nominal value.  Useful when the ankle reference
+    lands just short of a terrain feature (e.g. a stair riser) that the
+    toe would actually touch — the buffered query then triggers the
+    terrain-aware skill switch in time.  Set to ``0.0`` to disable (query
+    at the bare ankle prediction).
+
+    The look-ahead is *asymmetric*: it only applies while the ankle
+    prediction is still on a flat (non-terrain) block, so it promotes onto
+    a stair when approaching but never pulls the skill off a stair early
+    when exiting (where the toe clears onto the flat top a step before the
+    ankle leaves the last tread)."""

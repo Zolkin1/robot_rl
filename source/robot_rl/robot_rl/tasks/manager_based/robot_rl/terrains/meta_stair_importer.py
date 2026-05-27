@@ -28,7 +28,7 @@ class MetaStairTerrainImporter(MetaTerrainImporter):
     Replaces ``self.terrain_meta_data`` with ``{"project": <callable>}`` after
     construction. The callable signature is::
 
-        project(points: Tensor[N, 2]) -> Tensor[N, 3]
+        project(points: Tensor[N, 3]) -> Tensor[N, 3]
 
     where ``points`` are world-frame ``(x, y)`` (typically the trajectory
     reference pose / stance-foot pose) and the output is the world
@@ -108,21 +108,27 @@ class MetaStairTerrainImporter(MetaTerrainImporter):
         return r, c, local_x, local_y
 
     def _project_world(self, points: torch.Tensor) -> torch.Tensor:
-        """Project a batch of ``(N, 2)`` world points to per-stair tread centers.
+        """Project a batch of ``(N, 3)`` world foot poses to per-stair tread centers.
 
         For each query point, computes its sub-terrain cell ``(row, col)``,
         finds the tread index within that cell's staircase via integer
         division of the local x coordinate by the cell's step depth, and
         returns the world ``(x, y, z)`` of the tread top center. Points in
         non-stair cells pass through as ``(x, y, 0)``.
+
+        Takes the full ``(N, 3)`` foot pose for a uniform ``project``
+        contract across importer types, but this importer projects purely
+        by xy (flush stairs, no riser ambiguity), so the z column is ignored.
         """
-        if points.dim() != 2 or points.shape[-1] != 2:
-            raise ValueError(f"Expected points of shape (N, 2); got {tuple(points.shape)}")
+        if points.dim() != 2 or points.shape[-1] != 3:
+            raise ValueError(
+                f"Expected points of shape (N, 3); got {tuple(points.shape)}"
+            )
 
         size_x, size_y = self._stair_size[0], self._stair_size[1]
         nrows, ncols = int(self._stair_grid[0]), int(self._stair_grid[1])
 
-        r, c, local_x, local_y = self._world_to_subterrain(points)
+        r, c, local_x, local_y = self._world_to_subterrain(points[..., :2])
 
         step_depth = self._stair_step_depths[r, c].clamp_min(1e-6)
         num_steps = self._stair_num_steps[r, c]

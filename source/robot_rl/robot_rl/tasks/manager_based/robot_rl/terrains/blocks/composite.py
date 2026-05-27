@@ -85,8 +85,14 @@ def composite_terrain(
             )
 
         all_meshes.extend(out.meshes)
+        # Default walkable_aabb to the full block footprint when the block
+        # doesn't restrict its walkable y-extent.  The importer uses this
+        # for the debug-viz outline rectangle so it hugs the actual block
+        # geometry instead of the full sub-terrain.
+        walkable = out.walkable_aabb if out.walkable_aabb is not None else out.aabb
         block_metadata.append({
             "aabb": tuple(float(v) for v in out.aabb),
+            "walkable_aabb": tuple(float(v) for v in walkable),
             "skill_probs": dict(out.skill_probs),
             "needs_projection": bool(out.needs_projection),
             "needs_directional_cmd": bool(out.needs_directional_cmd),

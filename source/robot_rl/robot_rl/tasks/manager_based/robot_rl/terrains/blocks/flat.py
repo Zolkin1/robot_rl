@@ -86,6 +86,7 @@ class FlatBlock(TerrainBlock):
             meshes=[mesh],
             origin=np.array([x0 + size_x / 2.0, y0 + size_y / 2.0, base_z]),
             aabb=(x0, x0 + size_x, y0, y0 + size_y),
+            walkable_aabb=(x0, x0 + size_x, mesh_y0, mesh_y0 + mesh_size_y),
             skill_probs=dict(self.cfg.skill_probs),
             needs_projection=False,
             needs_directional_cmd=False,
