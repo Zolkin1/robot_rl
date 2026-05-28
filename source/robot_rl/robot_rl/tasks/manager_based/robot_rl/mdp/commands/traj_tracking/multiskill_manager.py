@@ -228,6 +228,11 @@ class MultiSkillManager(ManagerBase):
         # term is still used as the ``command`` source via
         # ``conditioner_generator_name``.
         self._skill_owner: Any = None
+        # Optional per-env :class:`ForcedTrajLatch` overlaying the velocity
+        # selection (terrain-approach "slow-down" steps).  Registered by the
+        # owning command via :meth:`set_forced_traj_latch`; ``None`` means no
+        # override is ever applied.
+        self._forced_traj_latch: Any = None
 
         # --- Pre-compute binomial coefficients for Bezier evaluation -------
         self._binomial_coeffs: dict[int, Tensor] = {}
@@ -722,6 +727,16 @@ class MultiSkillManager(ManagerBase):
         """
         self._skill_owner = owner
 
+    def set_forced_traj_latch(self, latch: Any) -> None:
+        """Register the per-env :class:`ForcedTrajLatch` for this manager.
+
+        While a row of the latch is ``active``, :meth:`_select_trajectories`
+        overrides its velocity-nearest pick with the latched trajectory
+        index.  The owner must guarantee the latched index belongs to the
+        env's current skill (the override is applied *after* the skill mask).
+        """
+        self._forced_traj_latch = latch
+
     def _select_trajectories(
         self,
         conditioner: Tensor,
@@ -770,6 +785,56 @@ class MultiSkillManager(ManagerBase):
         allowed = self._traj_skill_idx.unsqueeze(0) == env_traj_skill_ids.unsqueeze(1)
         vel_dists = vel_dists.masked_fill(~allowed, float("inf"))
 
+        selected = vel_dists.argmin(dim=1)
+
+        # NOTE: the forced-latch overlay below is intentionally applied to
+        # the live per-env selection only — :meth:`nearest_traj_in_skill`
+        # (used by the terrain-approach planner to peek at the *candidate*
+        # terrain trajectory) deliberately skips it.
+
+        # Terrain-approach override: a "slow-down" step pins selected envs to
+        # a specific (shorter) trajectory regardless of velocity.  The latch
+        # is owned by the command's choke point; here we only read it.  The
+        # override wins *after* the skill mask, so the caller must guarantee
+        # the forced index lives in the env's current skill (asserted by the
+        # approach planner that sets the latch).
+        latch = self._forced_traj_latch
+        if latch is not None:
+            active = latch.active if env_ids is None else latch.active[env_ids]
+            forced = latch.traj_idx if env_ids is None else latch.traj_idx[env_ids]
+            selected = torch.where(active, forced, selected)
+
+        return selected
+
+    def nearest_traj_in_skill(
+        self, owner_skill_ids: Tensor, env_ids: Tensor,
+    ) -> Tensor:
+        """Nearest trajectory (by velocity) within an *arbitrary* skill.
+
+        Unlike :meth:`_select_trajectories` (which picks within each env's
+        *current* owner skill and applies the forced-traj latch), this
+        resolves the nearest trajectory in a caller-supplied skill,
+        ignoring the latch.  Used by the terrain-approach planner to peek
+        at the stair trajectory an env *would* commit to, so it can predict
+        that trajectory's snapped stance reference.
+
+        Args:
+            owner_skill_ids: ``[K]`` skill indices in the owner's
+                (terrain ``skill_list``) index space.
+            env_ids: ``[K]`` env indices, aligned to ``owner_skill_ids``,
+                used to read each env's velocity conditioner.
+
+        Returns:
+            ``[K]`` global trajectory indices.
+        """
+        self._lazy_init_skill_filter()
+        conditioner = self._get_conditioner_from_env(env_ids)
+        vel_cmd = conditioner[:, :3]                                # (K, 3)
+        vel_global = self._global_conditioning[:, :3]               # (T, 3)
+        vel_dists = torch.cdist(vel_cmd, vel_global)                # (K, T)
+        traj_skill_ids = self._vel_skill_to_traj_skill[owner_skill_ids]  # (K,)
+        allowed = self._traj_skill_idx.unsqueeze(0) == traj_skill_ids.unsqueeze(1)
+        vel_dists = vel_dists.masked_fill(~allowed, float("inf"))
         return vel_dists.argmin(dim=1)
 
     # ------------------------------------------------------------------

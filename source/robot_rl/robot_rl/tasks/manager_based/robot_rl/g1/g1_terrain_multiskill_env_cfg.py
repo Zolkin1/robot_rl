@@ -33,9 +33,9 @@ class G1TerrainMultiskillSceneCfg(G1ClfTrackingSceneCfg):
     # sensors
     height_scanner = RayCasterCfg(
         prim_path="{ENV_REGEX_NS}/Robot/Geometry/pelvis_link",
-        offset=RayCasterCfg.OffsetCfg(pos=(0.0, 0.0, 20.0)),
+        offset=RayCasterCfg.OffsetCfg(pos=(0.75, 0.0, 20.0)),
         ray_alignment="yaw",
-        pattern_cfg=patterns.GridPatternCfg(resolution=0.1, size=[2.75, 1.0]),
+        pattern_cfg=patterns.GridPatternCfg(resolution=0.1, size=[1.5, 1.0]),
         debug_vis=False,
         mesh_prim_paths=["/World/ground"],
     )
@@ -57,7 +57,7 @@ class G1TerrainMultiskillObservationCfg(G1MultiSkillObservationCfg):
         height_scan = ObsTerm(
             func=mdp.height_scan,
             params={"sensor_cfg": SceneEntityCfg("height_scanner")},
-            noise=Unoise(n_min=-0.1, n_max=0.1),
+            noise=Unoise(n_min=-0.01, n_max=0.01),
             clip=(-1.0, 1.0),
         )
 
@@ -69,7 +69,7 @@ class G1TerrainMultiskillObservationCfg(G1MultiSkillObservationCfg):
         height_scan = ObsTerm(
             func=mdp.height_scan,
             params={"sensor_cfg": SceneEntityCfg("height_scanner")},
-            noise=Unoise(n_min=-0.1, n_max=0.1),
+            noise=Unoise(n_min=-0.01, n_max=0.01),
             clip=(-1.0, 1.0),
         )
 
@@ -178,7 +178,7 @@ class G1TerrainMultiskillCLFEnvCfg(G1MultiSkillCLFEnvCfg):
               "debug": False,
               "cmd_name": "traj_ref",
               "frame_names": ["pelvis_link", "left_ankle_roll_link", "right_ankle_roll_link"],
-              "max_frac": 0.3, #0.25,
+              "max_frac": 0.3,
               "min_dist": 0.1,
               "grace_period_s": 1.0,
           },

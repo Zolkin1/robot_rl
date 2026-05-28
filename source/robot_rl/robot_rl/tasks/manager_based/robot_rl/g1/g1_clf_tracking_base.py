@@ -108,6 +108,12 @@ class G1ClfTrackingSceneCfg(InteractiveSceneCfg):
     right_elbow_contact = ClfTrackingBaseEnvContactSensorCfg("{ENV_REGEX_NS}/Robot/Geometry/pelvis_link/waist_yaw_link/right_shoulder_pitch_link/right_shoulder_roll_link/right_shoulder_yaw_link/.*")
     left_foot_contact = ClfTrackingBaseEnvContactSensorCfg("{ENV_REGEX_NS}/Robot/Geometry/pelvis_link/left_hip_pitch_link/left_hip_roll_link/left_hip_yaw_link/left_knee_link/left_ankle_pitch_link/.*")
     right_foot_contact = ClfTrackingBaseEnvContactSensorCfg("{ENV_REGEX_NS}/Robot/Geometry/pelvis_link/right_hip_pitch_link/right_hip_roll_link/right_hip_yaw_link/right_knee_link/right_ankle_pitch_link/.*")
+    # Shin == the ``knee_link`` rigid body (the shank between the knee joint
+    # and the ankle).  Match the link itself (no trailing ``/.*``) so the
+    # sensor sees only the shin and not its foot descendants — used for a
+    # dedicated shin-contact termination on the stairs.
+    left_shin_contact = ClfTrackingBaseEnvContactSensorCfg("{ENV_REGEX_NS}/Robot/Geometry/pelvis_link/left_hip_pitch_link/left_hip_roll_link/left_hip_yaw_link/left_knee_link")
+    right_shin_contact = ClfTrackingBaseEnvContactSensorCfg("{ENV_REGEX_NS}/Robot/Geometry/pelvis_link/right_hip_pitch_link/right_hip_roll_link/right_hip_yaw_link/right_knee_link")
 
     #RecursiveContactSensorCfg(prim_path="{ENV_REGEX_NS}/Robot/Geometry/.*", history_length=3, track_air_time=True)
 
@@ -376,6 +382,20 @@ class G1ClfTrackingRewardCfg:
                             SceneEntityCfg("torso_contact",),
                             SceneEntityCfg("left_elbow_contact",),
                             SceneEntityCfg("right_elbow_contact",),],
+            "threshold": 1.0,
+        },
+    )
+
+    # Shin (knee_link) contacts — split out from ``undesired_contacts`` so the
+    # weight can be tuned independently for stair scenarios where the shin
+    # banging the riser is a particularly bad failure mode.  Uses the
+    # dedicated shin sensors that match only ``knee_link`` (feet excluded).
+    shin_contacts = RewTerm(
+        func=mdp.multiple_undesired_contacts,
+        weight=-0.75,
+        params={
+            "sensor_cfgs": [SceneEntityCfg("left_shin_contact",),
+                            SceneEntityCfg("right_shin_contact",),],
             "threshold": 1.0,
         },
     )

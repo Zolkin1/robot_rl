@@ -136,3 +136,20 @@ class BatchedMultiSkillCommandCfg(BaseTrajectoryCommandCfg):
     a stair when approaching but never pulls the skill off a stair early
     when exiting (where the toe clears onto the flat top a step before the
     ankle leaves the last tread)."""
+
+    enable_terrain_approach: bool = True
+    """If True, when a contact gate is about to commit a terrain-aware
+    skill (e.g. ``stair_up``) but the current stance foot is still far from
+    that skill's snapped stance reference, insert one shortened "slow-down"
+    step in the current (walk) skill that lands the swing foot at the
+    terrain skill's stance reference, deferring the terrain-skill commit by
+    one stride.  This avoids the awkward over-extended step + dragged-up
+    stance foot that committing directly would produce.  Set to ``False``
+    to commit terrain skills immediately (legacy behaviour)."""
+
+    approach_threshold: float = 0.15
+    """Distance (m) the current stance foot must be from a terrain-aware
+    skill's snapped stance reference, measured along the travel direction,
+    before a slow-down step is inserted (condition (2) of the terrain
+    approach).  Below this the stance is "already aligned" and the terrain
+    skill commits directly.  Only used when ``enable_terrain_approach``."""

@@ -135,3 +135,40 @@ class CrossfadeState:
         done = self.phi_elapsed[env_ids] >= blend_end_phi
         if done.any():
             self.active[env_ids[done]] = False
+
+
+class ForcedTrajLatch:
+    """Per-env one-stride override of the manager's velocity-based
+    trajectory selection.
+
+    Set at a contact gate, consumed by
+    :meth:`MultiSkillManager._select_trajectories` (which overlays the
+    forced index on top of its velocity ``argmin``), and cleared at the
+    *next* gate fire.  Used for terrain-approach "slow-down" steps: the
+    env stays in its current skill but is pinned to a specific (shorter)
+    trajectory whose end-of-stride swing displacement lands the foot in
+    front of the terrain feature.  The commanded velocity is deliberately
+    NOT modified, so this latch is the only thing breaking the normal
+    nearest-by-velocity selection.
+
+    Per-env fields:
+
+    - ``active``: True while the env's selection is pinned.
+    - ``traj_idx``: the global trajectory index to force (meaningful only
+      where ``active`` is True).  The caller must guarantee the forced
+      index belongs to the env's current skill, since the overlay wins
+      *after* the skill mask in ``_select_trajectories``.
+    """
+
+    def __init__(self, num_envs: int, device: torch.device | str = "cpu"):
+        self.active = torch.zeros(num_envs, dtype=torch.bool, device=device)
+        self.traj_idx = torch.zeros(num_envs, dtype=torch.long, device=device)
+
+    def set(self, env_ids: torch.Tensor, traj_idx: torch.Tensor) -> None:
+        """Pin ``env_ids`` to ``traj_idx`` (overrides any prior latch)."""
+        self.traj_idx[env_ids] = traj_idx
+        self.active[env_ids] = True
+
+    def clear(self, env_ids: torch.Tensor) -> None:
+        """Release the latch for ``env_ids`` (back to velocity selection)."""
+        self.active[env_ids] = False

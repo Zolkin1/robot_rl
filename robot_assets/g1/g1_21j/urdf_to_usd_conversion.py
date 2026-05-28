@@ -32,7 +32,7 @@ from isaaclab.sim.converters import UrdfConverter, UrdfConverterCfg
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 cfg = UrdfConverterCfg(
-    asset_path=os.path.join(SCRIPT_DIR, "g1_21j_box_merged.urdf"),
+    asset_path=os.path.join(SCRIPT_DIR, "g1_21j_box_merged_v2.urdf"),
     usd_dir=SCRIPT_DIR,
     fix_base=False,
     merge_fixed_joints=False,

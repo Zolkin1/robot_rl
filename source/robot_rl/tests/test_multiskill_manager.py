@@ -211,6 +211,38 @@ class TestTrajectorySelection:
         assert (global_idx >= 0).all()
         assert (global_idx < msm.num_trajectories).all()
 
+    def test_forced_traj_latch_overrides_selection(self, multiskill_single_skill):
+        """An active forced-traj latch wins over the velocity argmin; an
+        inactive row falls through to the normal nearest pick."""
+        from robot_rl.tasks.manager_based.robot_rl.mdp.commands.traj_tracking.skill_state import (
+            ForcedTrajLatch,
+        )
+
+        msm = multiskill_single_skill
+        N = 3
+        _attach_stub_owner(msm, torch.zeros(N, dtype=torch.long, device=DEVICE))
+
+        # Baseline selection from a fixed conditioner.
+        cond = torch.zeros(N, 6, device=DEVICE)
+        baseline = msm._select_trajectories(cond).clone()
+
+        # Latch env 0 and env 2 to a specific (different) trajectory; leave
+        # env 1 unlatched.
+        forced_idx = (baseline[0].item() + 1) % msm.num_trajectories
+        latch = ForcedTrajLatch(N, device=DEVICE)
+        latch.set(torch.tensor([0, 2], device=DEVICE),
+                  torch.tensor([forced_idx, forced_idx], device=DEVICE))
+        msm.set_forced_traj_latch(latch)
+        try:
+            out = msm._select_trajectories(cond)
+            assert out[0].item() == forced_idx
+            assert out[2].item() == forced_idx
+            # Unlatched row unchanged.
+            assert out[1].item() == baseline[1].item()
+        finally:
+            # Don't leak the latch into other tests sharing the fixture.
+            msm.set_forced_traj_latch(None)
+
 
 # ---------------------------------------------------------------------------
 # Cross-Validation: Output

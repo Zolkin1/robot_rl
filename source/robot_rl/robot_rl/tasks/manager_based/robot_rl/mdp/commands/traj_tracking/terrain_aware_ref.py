@@ -28,6 +28,50 @@ if TYPE_CHECKING:
 _TERRAIN_AWARE_SKILLS = ("stair_up",)
 
 
+def stair_stance_ref(
+    manager,
+    project,
+    traj_idx: torch.Tensor,
+    foot_xyz: torch.Tensor,
+    domain: torch.Tensor,
+) -> torch.Tensor:
+    """Snapped world stance-reference position for terrain-aware trajectories.
+
+    Pure geometry helper shared by :func:`apply_terrain_aware_ref` (which
+    re-anchors ``cmd.ref_poses`` at each stair domain switch) and the
+    terrain-approach planner (which predicts where a stair trajectory's
+    first stance foot would snap to, to decide whether a slow-down step is
+    needed).  Mirrors the composition used at episode reset
+    (``reset_on_reference``): ``project(foot) + ref_frame_offset[traj,dom]
+    + origin_relative_to_stair_center[traj]`` in x/z, with y left at the
+    foot's current value.
+
+    Args:
+        manager: The :class:`MultiSkillManager` (provides the per-traj /
+            per-domain offset tables in ``manager.data``).
+        project: The terrain projector callable
+            (``terrain.terrain_meta_data["project"]``) mapping a foot
+            ``[K, 3]`` world xyz to its snapped stair tread / entry xyz.
+        traj_idx: ``[K]`` global stair-trajectory indices.
+        foot_xyz: ``[K, 3]`` world foot positions to project.  The z is
+            used by ``project`` to disambiguate which tread the foot is on.
+        domain: ``[K]`` domain index per row (selects the per-domain
+            ``ref_frame_offset``).
+
+    Returns:
+        ``[K, 3]`` world xyz of the snapped stance reference.
+    """
+    stair_center = project(foot_xyz)                                       # [K, 3]
+    ref_off = manager.data["ref_frame_offset"][traj_idx, domain]           # [K, 3]
+    stair_off = manager.data["origin_relative_to_stair_center"][traj_idx]  # [K, 3]
+    spawn_off = ref_off + stair_off
+    out = foot_xyz.clone()
+    out[:, 0] = stair_center[:, 0] + spawn_off[:, 0]
+    # y stays at the foot's current value (matches apply_terrain_aware_ref).
+    out[:, 2] = stair_center[:, 2] + spawn_off[:, 2]
+    return out
+
+
 def apply_terrain_aware_ref(
     cmd: "BaseTrajectoryCommand",
     env_indices: torch.Tensor,
@@ -89,21 +133,17 @@ def apply_terrain_aware_ref(
     sub_traj_idx = traj_idx[is_terrain]
     sub_dom_idx = new_domain[is_terrain]
 
-    ref_off = manager.data["ref_frame_offset"][sub_traj_idx, sub_dom_idx]            # [K, 3]
-    stair_off = manager.data["origin_relative_to_stair_center"][sub_traj_idx]        # [K, 3]
-    spawn_off = ref_off + stair_off
-
     # Pass the foot's full xyz: the projector uses the height to pick the
     # tread the foot is physically on, so a foot whose toe is up on a step
     # while the ankle's xy still sits over the flat below the riser snaps
     # to the correct (upper) step rather than a whole step too low.
     ref_xyz = default_new_ref[is_terrain, :3]                                         # [K, 3]
-    stair_center = project(ref_xyz)                                                   # [K, 3]
+    snapped = stair_stance_ref(manager, project, sub_traj_idx, ref_xyz, sub_dom_idx)  # [K, 3]
 
     new_pose = default_new_ref.clone()
-    new_pose[is_terrain, 0] = stair_center[:, 0] + spawn_off[:, 0]
-    # default_new_ref[is_terrain, 1] is already the foot's current Y — leave it.
-    new_pose[is_terrain, 2] = stair_center[:, 2] + spawn_off[:, 2]
+    # ``stair_stance_ref`` keeps the foot's current y, so the [K, 3] result
+    # carries x/z snapped + y unchanged — assign all three.
+    new_pose[is_terrain, :3] = snapped
     new_pose[is_terrain, 3:6] = 0.0
     new_pose[is_terrain, 6] = 1.0
     return new_pose

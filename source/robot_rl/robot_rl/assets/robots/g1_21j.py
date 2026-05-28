@@ -38,7 +38,8 @@ ROBOT_ASSETS = str(_find_project_root() / "robot_assets" / "g1")
 # TODO: Fix warnings about waist_roll_link and yaw_link inertia and mass
 G1_CFG = ArticulationCfg(
     spawn=sim_utils.UsdFileCfg(
-        usd_path=f"{ROBOT_ASSETS}/g1_21j/g1_21j_box_merged/g1_21j_box_merged.usda",
+        # usd_path=f"{ROBOT_ASSETS}/g1_21j/g1_21j_box_merged/g1_21j_box_merged.usda",
+        usd_path=f"{ROBOT_ASSETS}/g1_21j/g1_21j_box_merged_v2/g1_21j_box_merged_v2.usda",
         # usd_path=f"{ROBOT_ASSETS}/g1_21j/g1_21j_merged/g1_21j_merged.usda",
         activate_contact_sensors=True,
         rigid_props=sim_utils.RigidBodyPropertiesCfg(

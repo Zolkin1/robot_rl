@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import enum
+
 import torch
 import warp as wp
 
@@ -16,8 +18,34 @@ from .skill_bucket import (
     commit_pending_at_fire,
     step_skill_pending,
 )
-from .skill_state import CrossfadeState, PendingSkillChange
+from .skill_state import CrossfadeState, ForcedTrajLatch, PendingSkillChange
 from .skill_transition import blend_outputs
+from .terrain_transition import (
+    ApproachContext,
+    get_approach_planner,
+    registered_skills,
+)
+
+
+class SkillEvent(enum.Enum):
+    """The lifecycle moment driving a :meth:`select_skill_and_traj` call.
+
+    The three moments are *inputs* to the single skill/trajectory choke
+    point — none of them mutate skill/trajectory state on their own:
+
+    - ``PER_STEP``: the per-tick velocity-bucket update (enqueue/clear a
+      pending skill change, or instant-flip in gate-off mode), followed by
+      the trajectory-assignment re-resolve.
+    - ``GATE_FIRE``: a contact gate fired — re-query the pending skill at
+      the just-landed foot, optionally insert a terrain-approach slow-down
+      step, then commit any pending skill change and start the cross-fade.
+    - ``RESET``: a fresh episode — snap the active skill to the velocity
+      bucket and clear all pending / transition / forced-traj state.
+    """
+
+    PER_STEP = enum.auto()
+    GATE_FIRE = enum.auto()
+    RESET = enum.auto()
 
 
 # Per-frame color palette for debug viz cylinder prototypes. Cycled if there
@@ -251,10 +279,22 @@ class BatchedMultiSkillCommand(BaseTrajectoryCommand):
             [self.cfg.velocity_buckets[s].ang_vel_z for s in self._skill_list],
             device=self.device, dtype=torch.float,
         )
-        self.skill_id = torch.zeros(
+        # The active skill is privatised behind a read-only ``skill_id``
+        # property so that nothing outside :meth:`select_skill_and_traj`
+        # can mutate it.  All skill/trajectory changes flow through that
+        # single choke point (see its docstring).
+        self._skill_id = torch.zeros(
             self.num_envs, dtype=torch.long, device=self.device,
         )
         self.pending = PendingSkillChange(self.num_envs, device=self.device)
+        # Per-env one-stride override of the velocity-based trajectory
+        # selection, used for terrain-approach "slow-down" steps.  Written
+        # only by the choke point (plus the defensive reset-safety clear in
+        # ``_pre_update_phase``, mirroring ``self.transition``); consumed by
+        # ``MultiSkillManager._select_trajectories`` via the latch registered
+        # below.
+        self._forced_traj = ForcedTrajLatch(self.num_envs, device=self.device)
+        self.manager.set_forced_traj_latch(self._forced_traj)
         # Velocity cmd is registered alongside this term; resolution is
         # lazy because ``env.command_manager`` is only finalised after
         # all terms construct.
@@ -310,6 +350,15 @@ class BatchedMultiSkillCommand(BaseTrajectoryCommand):
         self._ref_frame_to_pos_xy_idx = torch.tensor(
             ref_pos_xy, dtype=torch.long, device=self.device,
         )  # [num_ref_frames, 2]
+
+        # --- Per-trajectory step-length table ----------------------------
+        # Forward (local +x) swing-foot reach at the end of the first
+        # stride, per trajectory.  Used by the terrain-approach planner to
+        # pick the walk trajectory whose step lands the swing foot at the
+        # stair stance reference.  Built here (not at manager load) because
+        # it needs ``_ref_frame_to_pos_xy_idx``, which is keyed on the
+        # *final* output-column ordering produced by ``order_outputs``.
+        self._build_step_length_table()
 
         # --- Contact-gate wiring -----------------------------------------
         self._gating_enabled = self.cfg.contact_gate_window_frac is not None
@@ -413,6 +462,19 @@ class BatchedMultiSkillCommand(BaseTrajectoryCommand):
                 if self._skill_markers is not None:
                     self._skill_markers.set_visibility(True)
             self._debug_vis_pending = False
+
+    @property
+    def skill_id(self) -> torch.Tensor:
+        """Read-only view of the per-env active skill index.
+
+        Backed by ``self._skill_id``, which is written *only* inside
+        :meth:`select_skill_and_traj`.  Exposed as a property (no setter)
+        so accidental ``cmd.skill_id[...] = ...`` writes from elsewhere
+        fail loudly instead of silently diverging the manager's selection.
+        Consumers (the manager's skill filter, observations, debug viz)
+        read it freely.
+        """
+        return self._skill_id
 
     @property
     def traj_time(self) -> torch.Tensor:
@@ -532,44 +594,58 @@ class BatchedMultiSkillCommand(BaseTrajectoryCommand):
             fire_ids = new_dom_ids
 
         # If any of the envs that just fired a gate has a pending skill
-        # change buffered on the velocity command, commit it now and start
-        # the cross-fade.
+        # change buffered on the velocity command, commit it now (and
+        # possibly insert a terrain-approach slow-down step) and start the
+        # cross-fade.  All skill / trajectory mutation runs through the
+        # single choke point.
         if fire_ids.numel() > 0:
-            # Before the commit, refresh the pending queue for the firing
-            # envs.  ``self.ref_poses`` won't be updated until
-            # ``get_measured_outputs`` runs later this step, so the
-            # per-step ``_update_skill_pending_from_velocity`` call at the
-            # top of ``_pre_update_phase`` saw a stale anchor — the
-            # *previous* gate's foot pose.  We re-query here against the
-            # *just-landed foot's* world pose so the same gate fire that
-            # landed the foot on a new block both enqueues *and* commits
-            # the skill change.  The query position is still the
-            # predicted next-gate touchdown (one half-period further),
-            # but anchored at the just-landed foot rather than the stale
-            # ``ref_poses`` — keeps the prediction-based skill query
-            # consistent across both paths.
-            new_phase = self.manager.phase[fire_ids]
-            new_ref_frame_local = self.manager.get_ref_frames_in_use(
-                new_phase, self.ref_frames, env_ids=fire_ids,
-            )                                              # [K] index into ref_frames
-            # ``self.ref_frame_indices`` is a Python ``list[int]`` (set in
-            # ``BaseTrajectoryCommand._parse_ref_frames``).  Convert lazily
-            # so we can fancy-index it with the per-env ``new_ref_frame_local``
-            # tensor.
-            ref_frame_idx_t = torch.as_tensor(
-                self.ref_frame_indices, dtype=torch.long, device=self.device,
+            self.select_skill_and_traj(
+                fire_ids, SkillEvent.GATE_FIRE, ctx={"cur_traj": cur_traj},
             )
-            body_articulation_idx = ref_frame_idx_t[new_ref_frame_local]
-            body_pos_w_all = wp.to_torch(self.robot.data.body_pos_w)  # [N, B, 3]
-            body_quat_w_all = wp.to_torch(self.robot.data.body_quat_w)  # [N, B, 4]
-            landed_xy = body_pos_w_all[fire_ids, body_articulation_idx, :2]  # [K, 2]
-            landed_quat = body_quat_w_all[fire_ids, body_articulation_idx]   # [K, 4]
-            predicted_xy = self._ref_xy_at_next_gate(
-                fire_ids, anchor_xy=landed_xy, anchor_quat=landed_quat,
-            )
-            self._update_skill_pending_from_velocity(fire_ids, xy_w=predicted_xy)
 
-            self._commit_pending_skill_change_and_start_transition(fire_ids, cur_traj)
+    def _gate_fire_landed_query(
+        self, fire_ids: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Return ``(predicted_xy, landed_xy, landed_quat)`` for gate-fire envs.
+
+        ``self.ref_poses`` won't be updated until ``get_measured_outputs``
+        runs later this step, so the per-step
+        ``_update_skill_pending_from_velocity`` call at the top of
+        ``_pre_update_phase`` saw a stale anchor — the *previous* gate's
+        foot pose.  We re-query here against the *just-landed foot's* world
+        pose so the same gate fire that landed the foot on a new block both
+        enqueues *and* commits the skill change.  The query position is
+        still the predicted next-gate touchdown (one half-period further),
+        but anchored at the just-landed foot rather than the stale
+        ``ref_poses`` — keeps the prediction-based skill query consistent
+        across both paths.
+
+        Returns:
+            predicted_xy: ``[K, 2]`` predicted next-gate touchdown anchored
+                at the just-landed foot.
+            landed_pos: ``[K, 3]`` just-landed (new stance) foot world xyz.
+            landed_quat: ``[K, 4]`` just-landed foot world quaternion.
+        """
+        new_phase = self.manager.phase[fire_ids]
+        new_ref_frame_local = self.manager.get_ref_frames_in_use(
+            new_phase, self.ref_frames, env_ids=fire_ids,
+        )                                              # [K] index into ref_frames
+        # ``self.ref_frame_indices`` is a Python ``list[int]`` (set in
+        # ``BaseTrajectoryCommand._parse_ref_frames``).  Convert lazily
+        # so we can fancy-index it with the per-env ``new_ref_frame_local``
+        # tensor.
+        ref_frame_idx_t = torch.as_tensor(
+            self.ref_frame_indices, dtype=torch.long, device=self.device,
+        )
+        body_articulation_idx = ref_frame_idx_t[new_ref_frame_local]
+        body_pos_w_all = wp.to_torch(self.robot.data.body_pos_w)  # [N, B, 3]
+        body_quat_w_all = wp.to_torch(self.robot.data.body_quat_w)  # [N, B, 4]
+        landed_pos = body_pos_w_all[fire_ids, body_articulation_idx, :]  # [K, 3]
+        landed_quat = body_quat_w_all[fire_ids, body_articulation_idx]   # [K, 4]
+        predicted_xy = self._ref_xy_at_next_gate(
+            fire_ids, anchor_xy=landed_pos[:, :2], anchor_quat=landed_quat,
+        )
+        return predicted_xy, landed_pos, landed_quat
 
     def current_chord_per_frame(self, frame_pos_indices: torch.Tensor) -> torch.Tensor:
         """Per-env per-frame Bezier chord length of the current target.
@@ -663,7 +739,7 @@ class BatchedMultiSkillCommand(BaseTrajectoryCommand):
             return
         pending_active_subset = self.pending.active[fire_ids]
         pending_skill_subset = self.pending.skill_id[fire_ids]
-        active_subset = self.skill_id[fire_ids]
+        active_subset = self._skill_id[fire_ids]
         new_active, new_pending_active, commit_mask = commit_pending_at_fire(
             torch.ones_like(pending_active_subset),  # all fire_ids fired by definition
             pending_active_subset,
@@ -675,7 +751,7 @@ class BatchedMultiSkillCommand(BaseTrajectoryCommand):
         commit_ids = fire_ids[commit_mask]
 
         # Write back into the global buffers.
-        self.skill_id[commit_ids] = new_active[commit_mask]
+        self._skill_id[commit_ids] = new_active[commit_mask]
         self.pending.active[fire_ids] = new_pending_active
 
         # Snapshot the env's phase BEFORE rebuilding the cache (the new
@@ -728,6 +804,153 @@ class BatchedMultiSkillCommand(BaseTrajectoryCommand):
     # ------------------------------------------------------------------
     # Bucket-driven active-skill state machine
     # ------------------------------------------------------------------
+
+    def select_skill_and_traj(
+        self,
+        env_ids: torch.Tensor,
+        event: SkillEvent,
+        ctx: dict | None = None,
+    ) -> None:
+        """Single choke point for all skill / trajectory mutation.
+
+        This is the **sole writer** of ``self._skill_id`` and
+        ``self._forced_traj`` and the **sole trigger** of manager
+        trajectory re-selection (``invalidate_cache`` +
+        ``get_current_trajectory_indices``).  The three lifecycle moments
+        are *inputs* (the ``event``), not independent writers — so the
+        active skill and the trajectory assignment can only change as a
+        consequence of state written here plus the externally owned,
+        read-only velocity conditioner.
+
+        Args:
+            env_ids: ``[K]`` env indices to operate on (the advance mask
+                for ``PER_STEP``, the firing envs for ``GATE_FIRE``, the
+                resetting envs for ``RESET``).
+            event: which lifecycle moment is driving the call.
+            ctx: event-specific payload.  ``GATE_FIRE`` requires
+                ``{"cur_traj": <[N] pre-commit trajectory indices>}``.
+        """
+        if env_ids.numel() == 0:
+            return
+
+        if event is SkillEvent.PER_STEP:
+            # Derive the active skill from where the velocity cmd has
+            # ramped ``vel_target_b`` to (enqueue / clear pending, or
+            # instant-flip in gate-off mode), then re-resolve the
+            # trajectory assignment so the gate logic downstream sees the
+            # freshest skill / velocity-nearest / forced-latch selection.
+            self._update_skill_pending_from_velocity(env_ids)
+            self.manager.invalidate_cache()
+            self.manager.get_current_trajectory_indices()
+
+        elif event is SkillEvent.GATE_FIRE:
+            cur_traj = ctx["cur_traj"]
+            predicted_xy, landed_pos, landed_quat = self._gate_fire_landed_query(
+                env_ids
+            )
+            # The slow-down stride (if any) just ended for these firing
+            # envs — release the latch they were carrying BEFORE the planner
+            # runs, so it starts from a clean slate (and may re-arm a fresh
+            # latch below).
+            self._forced_traj.clear(env_ids)
+            # Re-query pending against the just-landed foot pose.
+            self._update_skill_pending_from_velocity(env_ids, xy_w=predicted_xy)
+            # Optionally convert an imminent terrain-skill commit into a
+            # one-stride slow-down step (sets the forced latch + defers the
+            # commit by clearing the pending entry).  No-op when disabled.
+            self._maybe_plan_terrain_approach(
+                env_ids, landed_pos, landed_quat, predicted_xy
+            )
+            self._commit_pending_skill_change_and_start_transition(
+                env_ids, cur_traj
+            )
+
+        elif event is SkillEvent.RESET:
+            self._reset_skill_state(env_ids)
+
+        else:
+            raise ValueError(f"Unknown SkillEvent: {event!r}")
+
+    def _maybe_plan_terrain_approach(
+        self,
+        fire_ids: torch.Tensor,
+        stance_pos: torch.Tensor,
+        stance_quat: torch.Tensor,
+        predicted_xy: torch.Tensor,
+    ) -> None:
+        """Terrain-entry hook (GATE_FIRE): optionally insert a slow-down step.
+
+        For firing envs whose freshly-queried pending skill is a
+        registered terrain-aware skill (condition 1: predicted touchdown on
+        that terrain), consult that skill's approach planner.  Where the
+        planner decides a slow-down step is needed it sets
+        ``self._forced_traj`` to a shorter same-skill trajectory and the
+        pending entry is cleared so the terrain-skill commit is deferred by
+        one stride.
+
+        No-op unless ``cfg.enable_terrain_approach`` is set.
+
+        Args:
+            fire_ids: ``[K]`` firing env indices (aligned to the pose args).
+            stance_pos: ``[K, 3]`` just-landed stance foot world xyz.
+            stance_quat: ``[K, 4]`` just-landed stance foot world quat.
+            predicted_xy: ``[K, 2]`` predicted next-gate touchdown world xy.
+        """
+        if not self.cfg.enable_terrain_approach:
+            return
+        pend_active = self.pending.active[fire_ids]
+        if not pend_active.any():
+            return
+        pend_skill = self.pending.skill_id[fire_ids]
+
+        latched_any = False
+        for skill_name in registered_skills():
+            if skill_name not in self._skill_list:
+                continue
+            planner = get_approach_planner(skill_name)
+            owner_idx = self._skill_list.index(skill_name)
+            # Candidates: pending change to THIS terrain skill (condition 1).
+            cand = pend_active & (pend_skill == owner_idx)
+            if not cand.any():
+                continue
+            cand_ids = fire_ids[cand]
+            decision = planner.plan(
+                ApproachContext(
+                    cmd=self,
+                    env_ids=cand_ids,
+                    stance_pos=stance_pos[cand],
+                    stance_quat=stance_quat[cand],
+                    predicted_xy=predicted_xy[cand],
+                )
+            )
+            do = decision.do_approach
+            if not do.any():
+                continue
+            do_ids = cand_ids[do]
+            forced = decision.forced_traj_idx[do]
+            # Defer the terrain-skill commit (drop pending) and pin the
+            # shorter same-skill trajectory for the slow-down stride.
+            self.pending.clear(do_ids)
+            self._forced_traj.set(do_ids, forced)
+            # Grant the frame-drift grace window NOW.  The shorter ``y_des``
+            # takes effect this step (via the cache rebuild below), but the
+            # automatic ``manager._traj_changed`` → grace reset in
+            # ``_pre_update_phase`` lags one step here: unlike a normal skill
+            # commit, the slow-down path intentionally does NOT rebuild the
+            # cache in-place (that would snapshot the forced traj into
+            # ``_prev_global_indices`` and break the gate re-arm for the
+            # shorter trajectory next step).  So ``_traj_changed`` won't
+            # reflect the forced swap until the next step's PER_STEP rebuild.
+            # Reset the grace timer explicitly to close the one-step window
+            # where the shorter reference would otherwise be live without
+            # grace — exactly when frame drift transiently spikes.
+            self.time_since_traj_change_s[do_ids] = 0.0
+            latched_any = True
+
+        if latched_any:
+            # Apply the forced selection this step so the slow-down stride
+            # starts immediately rather than one tick late.
+            self.manager.invalidate_cache()
 
     def _skill_for_velocity(
         self,
@@ -898,6 +1121,52 @@ class BatchedMultiSkillCommand(BaseTrajectoryCommand):
 
         return torch.where(has_gate.unsqueeze(-1), world_xy, anchor_xy)
 
+    def _build_step_length_table(self) -> None:
+        """Populate ``self._traj_step_length`` ``[T]`` (forward swing reach).
+
+        For each trajectory with contact gates, evaluate its position
+        output just before the *first* gate (``gate_phi - EPS``) and read
+        the swing foot's local-frame x — the forward distance the swing
+        foot lands ahead of the stance-foot anchor over one stride.  This
+        is the same quantity :meth:`_ref_xy_at_next_gate` extracts at
+        runtime (before the world transform), so the table and the live
+        prediction stay consistent.  Trajectories without gates (perpetual,
+        e.g. standing) get ``inf`` so they are never chosen as a slow-down
+        step.
+        """
+        mgr = self.manager
+        eps = mgr._EPS_PHI
+        T = mgr.num_trajectories
+        step_len = torch.full((T,), float("inf"), device=self.device)
+
+        t_ids = torch.where(mgr._num_gates_per_traj > 0)[0]
+        if t_ids.numel() == 0:
+            self._traj_step_length = step_len
+            return
+
+        # First gate (index 0) = end of the first stride.  ``_gate_phi_table``
+        # stores gate phis (0.5 / 1.0) in order.
+        gate_phi = mgr._gate_phi_table[t_ids, 0]                # [G]
+        pre_phi = gate_phi - eps
+        # Post-gate ref frame = the foot that lands at the gate (wrap so a
+        # phi=1.0 gate reads from the next period's start, matching
+        # ``_ref_xy_at_next_gate``).
+        post_phi = torch.remainder(gate_phi + eps, 1.0)
+        post_dom = mgr._get_domain_indices(post_phi, t_ids)
+        swing_ref = mgr._ref_frame_map[t_ids, post_dom]         # [G] -> ref_frames idx
+
+        # Evaluate the position output at ``pre_phi`` per trajectory.
+        pre_dom = mgr._get_domain_indices(pre_phi, t_ids)
+        tau = mgr._compute_normalized_tau(pre_phi, t_ids, pre_dom)
+        coeffs = mgr.data["coeffs_pos"][t_ids, pre_dom]         # [G, P, K+1]
+        T_dom = mgr.data["domain_times"][t_ids, pre_dom]
+        pos = mgr._compute_bezier_batched(tau, coeffs, T_dom, derivative=False)  # [G, P]
+
+        x_cols = self._ref_frame_to_pos_xy_idx[swing_ref, 0]    # [G] swing pos_x col
+        local_x = pos.gather(1, x_cols.unsqueeze(1)).squeeze(1)  # [G]
+        step_len[t_ids] = local_x
+        self._traj_step_length = step_len
+
     def _resolve_vel_cmd(self) -> None:
         """Lazy-resolve the velocity command term on first compute."""
         if self._vel_cmd is None:
@@ -941,7 +1210,7 @@ class BatchedMultiSkillCommand(BaseTrajectoryCommand):
         vel = self._vel_cmd.vel_target_b[env_ids]
         desired = self._skill_for_velocity(vel, env_ids, xy_w=xy_w)
 
-        active_subset = self.skill_id[env_ids]
+        active_subset = self._skill_id[env_ids]
         pa_subset = self.pending.active[env_ids]
         ps_subset = self.pending.skill_id[env_ids]
         a_out, pa_out, ps_out, tx_clear = step_skill_pending(
@@ -968,7 +1237,7 @@ class BatchedMultiSkillCommand(BaseTrajectoryCommand):
             tx_clear = tx_clear | force_instant
 
         # Scatter back into global buffers.
-        self.skill_id[env_ids] = a_out
+        self._skill_id[env_ids] = a_out
         self.pending.active[env_ids] = pa_out
         self.pending.skill_id[env_ids] = ps_out
         if tx_clear.any():
@@ -984,30 +1253,40 @@ class BatchedMultiSkillCommand(BaseTrajectoryCommand):
     def reset_for_episode(self, env_ids: torch.Tensor) -> None:
         """Snap the active skill_id to whichever bucket contains the
         velocity cmd's freshly-set ``vel_target_b``, and clear any stale
-        pending / cross-fade state.
+        pending / cross-fade / forced-traj state.
 
         Called from :func:`mdp.events.resets.reset_on_reference` AFTER
         the velocity cmd's own ``reset_for_episode`` has run, so
         ``vel_target_b`` reflects the new episode's freshly-sampled
         velocity (snapped past the max-acc clamp on the reset path).
 
-        Uses ``env.scene.env_origins`` for the cell lookup because
-        ``ref_poses`` on this term is still stale from the previous
-        episode at reset-event time.
+        Thin wrapper around the single skill/trajectory choke point —
+        routes through :meth:`select_skill_and_traj` so the actual writes
+        live in one place.
         """
         env_ids_t = (
             env_ids if isinstance(env_ids, torch.Tensor)
             else torch.as_tensor(env_ids, dtype=torch.long, device=self.device)
         )
-        if env_ids_t.numel() == 0:
-            return
+        self.select_skill_and_traj(env_ids_t, SkillEvent.RESET)
+
+    def _reset_skill_state(self, env_ids_t: torch.Tensor) -> None:
+        """RESET-event writer: snap the active skill and clear pending /
+        transition / forced-traj state.  Called only from
+        :meth:`select_skill_and_traj`.
+
+        Uses ``env.scene.env_origins`` for the cell lookup because
+        ``ref_poses`` on this term is still stale from the previous
+        episode at reset-event time.
+        """
         self._resolve_vel_cmd()
         vel = self._vel_cmd.vel_target_b[env_ids_t]
         xy_spawn = self.env.scene.env_origins[env_ids_t, :2]
         new_active = self._skill_for_velocity(vel, env_ids_t, xy_w=xy_spawn)
-        self.skill_id[env_ids_t] = new_active
+        self._skill_id[env_ids_t] = new_active
         self.pending.clear(env_ids_t)
         self.transition.clear(env_ids_t)
+        self._forced_traj.clear(env_ids_t)
 
     def compute_blended_outputs_at(
         self,
@@ -1271,7 +1550,14 @@ class BatchedMultiSkillCommand(BaseTrajectoryCommand):
         # transition state.
         just_reset = ep_len == 0
         if just_reset.any():
-            self.transition.clear(torch.where(just_reset)[0])
+            # Defensive reset-safety clears (the reset event also clears
+            # these via the RESET choke-point path, but this guards an env
+            # that re-enters training with stale cross-fade / forced-traj
+            # state).  These do not change the skill/trajectory *decision* —
+            # they only drop a stale override / blend on a fresh episode.
+            just_reset_ids = torch.where(just_reset)[0]
+            self.transition.clear(just_reset_ids)
+            self._forced_traj.clear(just_reset_ids)
 
         in_window = (ep_len > 0) & (ep_len < self.env.max_episode_length)
         if self._last_compute_step is None:
@@ -1309,19 +1595,15 @@ class BatchedMultiSkillCommand(BaseTrajectoryCommand):
             self.transition.last_old_phase_delta[:] = 0.0
 
         # Derive the active skill from where the velocity cmd has ramped
-        # ``vel_target_b`` to.  Bucket transitions queue / clear pending;
-        # actual ``skill_id`` flips happen later in the gate-fire path
-        # (deferred) or directly inline (instant-flip mode).  Done BEFORE
-        # the cache rebuild so the manager's trajectory selection sees
-        # the freshest ``skill_id``.
-        self._update_skill_pending_from_velocity(adv_ids)
-
-        # Resolve current trajectory assignment after any phase mutations.
-        # Populates ``manager._traj_changed`` against the previous-tick
-        # snapshot.  Crucially this no longer commits the snapshot — see
-        # ``MultiSkillManager.commit_traj_state``.
-        self.manager.invalidate_cache()
-        self.manager.get_current_trajectory_indices()
+        # ``vel_target_b`` to and resolve the trajectory assignment, all
+        # through the single choke point.  Bucket transitions queue / clear
+        # pending; actual ``skill_id`` flips happen later in the gate-fire
+        # path (deferred) or directly inline (instant-flip mode).  The
+        # PER_STEP event re-resolves the cache (populating
+        # ``manager._traj_changed`` against the previous-tick snapshot, but
+        # NOT committing it — see ``MultiSkillManager.commit_traj_state``)
+        # so the contact gate below sees the post-advance trajectory.
+        self.select_skill_and_traj(adv_ids, SkillEvent.PER_STEP)
 
         if self._gating_enabled:
             # Unified reseed: arm the gate for any env that is either
