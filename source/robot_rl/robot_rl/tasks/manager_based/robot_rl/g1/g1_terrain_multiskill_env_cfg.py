@@ -101,7 +101,7 @@ class G1TerrainMultiskillCLFEnvCfg(G1MultiSkillCLFEnvCfg):
         self.commands.traj_ref.path = "trajectories/retargeted/2026-05-11_12-34-50_merged"
         # Cross-fade window after a skill commit — half a cycle of the new
         # trajectory's phase.  Default is 1.0 (a full cycle).
-        self.commands.traj_ref.transition_blend_end_phi = 0.5
+        self.commands.traj_ref.transition_blend_end_phi = 0.3 #0.5
         self.commands.traj_ref.skill_query_buffer = 0.2
 
         # Configure velocity ranges for different gaits
@@ -192,6 +192,22 @@ class G1TerrainMultiskillCLFEnvCfg(G1MultiSkillCLFEnvCfg):
             params={"roll_limit_deg": 50.0, "pitch_limit_deg": 50.0},
         )
 
+        # Per-skill breakdown of frame_drift for logging
+        # (wandb: Episode_Termination/frame_drift_<skill>). Generated from the
+        # terrain's skill_list so new skills are picked up automatically. Each
+        # term is an exact subset of frame_drift, so training dynamics are
+        # unchanged. Registered after frame_drift so it computes first and the
+        # subset terms can read its done via the termination manager.
+        for skill in self.scene.terrain.skill_list:
+            setattr(
+                self.terminations,
+                f"frame_drift_{skill}",
+                DoneTerm(
+                    func=mdp.frame_drift_in_skill,
+                    params={"cmd_name": "traj_ref", "skill_name": skill},
+                ),
+            )
+
 @configclass
 class G1TerrainMultiskillCLFDistillationEnvCfg(G1TerrainMultiskillCLFEnvCfg):
     def __post_init__(self):
@@ -237,24 +253,13 @@ class G1TerrainMultiskillCLFEnvCfgPlay(G1TerrainMultiskillCLFEnvCfg):
     def __post_init__(self):
         super().__post_init__()
 
-        self.commands.base_velocity.ranges.lin_vel_x = (0.0, 3.6)
-        self.commands.base_velocity.ranges.lin_vel_y = (0.0, 0.0)
-        self.commands.base_velocity.ranges.ang_vel_z = (0.0, 0.0)
-        # self.commands.base_velocity.ranges.lin_vel_x = (1.1, 3.7)
-        # self.commands.base_velocity.ranges.lin_vel_y = (-0.75, 0.75)
-        # self.commands.base_velocity.ranges.ang_vel_z = (-0.75, 0.75)
-
         self.commands.base_velocity.resampling_time_range = (4.0, 8.0)
-        self.commands.base_velocity.skill_transition_prob = 0.1 #1.0
         self.commands.base_velocity.debug_vis = False
 
         self.commands.traj_ref.debug_skill_log = False
 
-        # self.episode_length_s = 15.0 #10.0 #4.0 #6.0
-
 
         self.scene.num_envs = 2
-        # self.scene.env_spacing = 2.5
         self.observations.policy.enable_corruption = False
 
         # Shrink the play terrain.  The actual grid is driven by the
@@ -265,13 +270,11 @@ class G1TerrainMultiskillCLFEnvCfgPlay(G1TerrainMultiskillCLFEnvCfg):
             self.scene.terrain.terrain_generator
         )
         self.scene.terrain.terrain_generator.num_rows = self.scene.num_envs
-        self.scene.terrain.terrain_generator.num_cols = 2
-        self.scene.terrain.terrain_generator.sub_terrains["pure_flat"].proportion = 0.0
-        self.scene.terrain.terrain_generator.sub_terrains["pure_stair_up"].proportion = 0.0
-        self.scene.terrain.terrain_generator.sub_terrains["flat_stair_up"].proportion = 1.0
+        self.scene.terrain.terrain_generator.num_cols = 4
+        # self.scene.terrain.terrain_generator.sub_terrains["pure_flat"].proportion = 0.0
+        # self.scene.terrain.terrain_generator.sub_terrains["pure_stair_up"].proportion = 0.0
+        # self.scene.terrain.terrain_generator.sub_terrains["flat_stair_up"].proportion = 1.0
 
-        # self.scene.terrain.terrain_generator.border_width = 0.0
-        # self.scene.terrain.terrain_generator.inter_column_borders = []
 
         self.events.randomize_ground_contact_friction = None
         self.events.add_base_mass = None

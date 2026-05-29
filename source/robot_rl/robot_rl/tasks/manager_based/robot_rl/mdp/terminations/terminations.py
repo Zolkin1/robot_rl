@@ -227,6 +227,50 @@ def frame_deviation_from_reference(
     return terminate
 
 
+def frame_drift_in_skill(
+    env,
+    skill_name: str,
+    cmd_name: str = "traj_ref",
+    base_term: str = "frame_drift",
+) -> torch.Tensor:
+    """Subset of ``base_term``'s frame-drift done, masked to envs whose active
+    skill is ``skill_name`` — purely for a per-skill breakdown in the logs.
+
+    IsaacLab's ``TerminationManager`` logs every term as
+    ``Episode_Termination/<name>`` (the fraction of envs whose most recent
+    episode ended via that term), so registering one of these per skill yields
+    ``Episode_Termination/frame_drift_<skill>`` series that partition the parent
+    ``frame_drift`` fraction. Because each is an exact subset of ``base_term``
+    (already an active termination term), the union of all done signals — and
+    therefore the training dynamics — is unchanged.
+
+    The already-computed ``base_term`` done is read via the manager's public
+    ``get_term`` accessor, so the underlying frame-drift logic (including its
+    grace period) is not recomputed. This requires ``base_term`` to be computed
+    earlier in the step than these per-skill terms, which holds as long as it is
+    registered before them in the terminations cfg.
+
+    Args:
+        env: The IsaacLab environment.
+        skill_name: Skill whose frame-drift terminations to isolate. Must be
+            present in the command's ``_skill_list``.
+        cmd_name: Trajectory command term exposing ``skill_id`` and
+            ``_skill_list`` (the multiskill command).
+        base_term: Name of the parent frame-drift termination term.
+
+    Returns:
+        Boolean tensor of shape ``[num_envs]`` — ``True`` for envs that
+        terminated via ``base_term`` this step while ``skill_name`` was active.
+    """
+    # Safe no-op if the parent term is not active (e.g. disabled in a subclass).
+    if base_term not in env.termination_manager.active_terms:
+        return torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
+    drift = env.termination_manager.get_term(base_term)                       # (N,) bool
+    cmd = env.command_manager.get_term(cmd_name)
+    skill_idx = cmd._skill_list.index(skill_name)
+    return drift & (cmd.skill_id == skill_idx)
+
+
 def illegal_terrain_contact(
     env, threshold: float, sensor_cfg: SceneEntityCfg
 ) -> torch.Tensor:

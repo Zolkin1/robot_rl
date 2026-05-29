@@ -386,20 +386,6 @@ class G1ClfTrackingRewardCfg:
         },
     )
 
-    # Shin (knee_link) contacts — split out from ``undesired_contacts`` so the
-    # weight can be tuned independently for stair scenarios where the shin
-    # banging the riser is a particularly bad failure mode.  Uses the
-    # dedicated shin sensors that match only ``knee_link`` (feet excluded).
-    shin_contacts = RewTerm(
-        func=mdp.multiple_undesired_contacts,
-        weight=-0.75,
-        params={
-            "sensor_cfgs": [SceneEntityCfg("left_shin_contact",),
-                            SceneEntityCfg("right_shin_contact",),],
-            "threshold": 1.0,
-        },
-    )
-
     ##
     # Action rate
     ##
