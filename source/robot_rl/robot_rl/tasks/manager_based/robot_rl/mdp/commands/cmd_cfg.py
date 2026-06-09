@@ -1,3 +1,5 @@
+# Copyright 2026 Zachary Olkin. All rights reserved.
+
 from .hlip_cmd import HLIPCommandTerm
 from isaaclab.utils import configclass
 from isaaclab.managers import CommandTermCfg

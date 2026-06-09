@@ -1,4 +1,6 @@
 #!/bin/bash
+# Copyright 2026 Zachary Olkin. All rights reserved.
+
 export CUDA_VISIBLE_DEVICES=1  # or 1,2,...
 # === Configurable Inputs ===
 env_type="clf_vdot"

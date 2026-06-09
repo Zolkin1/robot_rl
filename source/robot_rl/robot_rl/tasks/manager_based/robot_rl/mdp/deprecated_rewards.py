@@ -1,3 +1,5 @@
+# Copyright 2026 Zachary Olkin. All rights reserved.
+
 raise ImportError("[DEPRECATED REWARDS] This module is deprecated. Use a not-deprecated reward instead.")
 
 # def lip_gait_tracking(env: ManagerBasedRLEnv, sensor_cfg: SceneEntityCfg, period: float, std: float,

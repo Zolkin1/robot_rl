@@ -1,3 +1,5 @@
+# Copyright 2026 Zachary Olkin. All rights reserved.
+
 # my_modules/cnn_actor_critic.py   (excerpt)
 
 from math import prod

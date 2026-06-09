@@ -1,3 +1,5 @@
+# Copyright 2026 Zachary Olkin. All rights reserved.
+
 import numpy as np
 
 def step_to_max(sim_time):

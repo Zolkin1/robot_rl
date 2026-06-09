@@ -1,3 +1,5 @@
+# Copyright 2026 Zachary Olkin. All rights reserved.
+
 from dataclasses import MISSING
 from typing import Literal
 

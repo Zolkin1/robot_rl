@@ -1,3 +1,5 @@
+# Copyright 2026 Zachary Olkin. All rights reserved.
+
 import torch
 import torch.nn as nn
 from torch.distributions import Normal

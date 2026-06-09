@@ -1,3 +1,5 @@
+# Copyright 2026 Zachary Olkin. All rights reserved.
+
 import os
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Dict

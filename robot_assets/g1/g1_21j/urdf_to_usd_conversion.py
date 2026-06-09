@@ -1,3 +1,5 @@
+# Copyright 2026 Zachary Olkin. All rights reserved.
+
 # Isaac Sim app must be launched FIRST
 from isaaclab.app import AppLauncher
 

@@ -1,3 +1,5 @@
+# Copyright 2026 Zachary Olkin. All rights reserved.
+
 import torch
 from isaaclab.assets import Articulation
 from isaaclab.managers import SceneEntityCfg

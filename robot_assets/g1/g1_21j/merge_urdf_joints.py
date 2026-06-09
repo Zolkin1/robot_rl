@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Copyright 2026 Zachary Olkin. All rights reserved.
+
 """
 URDF Fixed Joint Merger
 

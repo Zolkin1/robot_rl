@@ -211,3 +211,69 @@ Some examples of packages that can likely be excluded are:
 "<path-to-isaac-sim>/extscache/omni.services.*"     // Services tools
 ...
 ```
+
+## Citing
+If you use this repo in any publications, please consider citing the relevant paper (see below).
+
+### Walking
+For the original CLF-RL idea and basic walking:
+```
+@article{li_clf-rl_2026,
+  author={Li, Kejun and Olkin, Zachary and Yue, Yisong and Ames, Aaron D.},
+  journal={IEEE Robotics and Automation Letters}, 
+  title={CLF-RL: Control Lyapunov Function Guided Reinforcement Learning}, 
+  year={2026},
+  volume={11},
+  number={3},
+  pages={3230-3237},
+  doi={10.1109/LRA.2026.3653329}}
+```
+### Running
+```
+@misc{olkin2026chasingautonomydynamicretargeting,
+      title={Chasing Autonomy: Dynamic Retargeting and Control Guided RL for Performant and Controllable Humanoid Running}, 
+      author={Zachary Olkin and William D. Compton and Ryan M. Bena and Aaron D. Ames},
+      year={2026},
+      eprint={2603.25902},
+      archivePrefix={arXiv},
+      primaryClass={cs.RO},
+      url={https://arxiv.org/abs/2603.25902}, 
+}
+```
+and
+```
+@misc{olkin_chasing_2025,
+      title={Chasing Stability: Humanoid Running via Control Lyapunov Function Guided Reinforcement Learning}, 
+      author={Zachary Olkin and Kejun Li and William D. Compton and Aaron D. Ames},
+      year={2025},
+      eprint={2509.19573},
+      archivePrefix={arXiv},
+      primaryClass={cs.RO},
+      url={https://arxiv.org/abs/2509.19573}, 
+}
+```
+### Stepping stones
+```
+@misc{dai_walk_2026,
+      title={Walk the PLANC: Physics-Guided RL for Agile Humanoid Locomotion on Constrained Footholds}, 
+      author={Min Dai and William D. Compton and Junheng Li and Lizhi Yang and Aaron D. Ames},
+      year={2026},
+      eprint={2601.06286},
+      archivePrefix={arXiv},
+      primaryClass={cs.RO},
+      url={https://arxiv.org/abs/2601.06286}, 
+}
+```
+
+### Theoretical Results
+```
+@misc{olkin2026stabilitycontrollyapunovfunction,
+      title={Stability of Control Lyapunov Function Guided Reinforcement Learning}, 
+      author={Zachary Olkin and William D. Compton and Aaron D. Ames},
+      year={2026},
+      eprint={2605.01978},
+      archivePrefix={arXiv},
+      primaryClass={eess.SY},
+      url={https://arxiv.org/abs/2605.01978}, 
+}
+```

@@ -1,4 +1,5 @@
 #!/bin/bash
+# Copyright 2026 Zachary Olkin. All rights reserved.
 
 # Script to mount remote robot_rl directory using SSHFS
 # This allows you to access remote training logs as if they were local

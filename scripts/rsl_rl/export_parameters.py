@@ -1,3 +1,5 @@
+# Copyright 2026 Zachary Olkin. All rights reserved.
+
 """
 Export policy parameters and environment configuration to YAML files.
 """
