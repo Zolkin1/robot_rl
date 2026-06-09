@@ -12,6 +12,7 @@ from isaaclab.utils.math import quat_apply, quat_from_angle_axis, yaw_quat
 from .base_trajectory_cmd import BaseTrajectoryCommand
 from .manager_base import ManagerBase
 from .multiskill_manager import MultiSkillManager
+from .sagittal_reflector import swap_left_right
 from .terrain_aware_ref import _TERRAIN_AWARE_SKILLS
 from .skill_bucket import (
     bucket_for_velocity,
@@ -80,7 +81,7 @@ _DEBUG_VIZ_END_SPHERE_DIST_FRAC: float = 0.25
 _DEBUG_VIZ_END_SPHERE_MIN_RADIUS: float = 0.1
 # Master toggle for the end-of-trajectory spheres.  Set to False to hide
 # them entirely (no prototype, no per-step viz emission).
-_DEBUG_VIZ_SHOW_END_SPHERES: bool = False #True
+_DEBUG_VIZ_SHOW_END_SPHERES: bool = True
 # Flat disk drawn at each env's reference-pose anchor position so the
 # anchor frame the trajectory is rendered around is visible at a glance.
 _DEBUG_VIZ_SHOW_REF_POSE: bool = True
@@ -301,6 +302,32 @@ class BatchedMultiSkillCommand(BaseTrajectoryCommand):
         self._vel_cmd = None
         # Register us as the manager's source-of-truth for skill_id.
         self.manager.set_skill_owner(self)
+
+        # --- Mirror-anchor state for perpetual skills --------------------
+        # Per-env flag: when True the active *perpetual* skill (e.g.
+        # ``standing``) is anchored to the sagittal mirror of its natural
+        # ref frame — the *left* foot instead of the trajectory-declared
+        # right foot — and its desired outputs are reflected to match.  Set
+        # at commit time to whichever foot is actually in contact so the
+        # anchor never snaps onto a mid-swing foot; cleared whenever the env
+        # leaves the perpetual skill or resets.  Always False for
+        # non-perpetual envs, so locomotion anchoring is untouched.
+        self._mirror_perpetual = torch.zeros(
+            self.num_envs, dtype=torch.bool, device=self.device
+        )
+        # For each entry of ``self.ref_frames``, the index of its left/right
+        # sagittal mirror within ``self.ref_frames`` (identity when no mirror
+        # exists).  ``_parse_ref_frames`` guarantees both members of every
+        # L/R pair are present, so every ankle frame has a real mirror here.
+        mirror_idx = [
+            (self.ref_frames.index(swap_left_right(name))
+             if swap_left_right(name) in self.ref_frames
+             else self.ref_frames.index(name))
+            for name in self.ref_frames
+        ]
+        self._ref_frame_mirror_idx = torch.tensor(
+            mirror_idx, dtype=torch.long, device=self.device
+        )
 
         # --- Precomputed orientation-quat index groups for SLERP ---------
         # For each body frame in the position outputs that has a complete
@@ -600,7 +627,16 @@ class BatchedMultiSkillCommand(BaseTrajectoryCommand):
         # single choke point.
         if fire_ids.numel() > 0:
             self.select_skill_and_traj(
-                fire_ids, SkillEvent.GATE_FIRE, ctx={"cur_traj": cur_traj},
+                fire_ids, SkillEvent.GATE_FIRE,
+                ctx={
+                    "cur_traj": cur_traj,
+                    # Full per-env sensor contact and the just-landed gate
+                    # foot (expected-contact ∧ actually-in-contact), used by
+                    # the commit to mirror-anchor a perpetual skill onto a
+                    # grounded foot.
+                    "contact_now": contact_now,
+                    "landed_mask": contact_now & target_mask,
+                },
             )
 
     def _gate_fire_landed_query(
@@ -725,6 +761,8 @@ class BatchedMultiSkillCommand(BaseTrajectoryCommand):
 
     def _commit_pending_skill_change_and_start_transition(
         self, fire_ids: torch.Tensor, cur_traj_pre_commit: torch.Tensor,
+        contact_now: torch.Tensor | None = None,
+        landed_mask: torch.Tensor | None = None,
     ) -> None:
         """Drain the local pending queue for ``fire_ids`` and start the
         cross-fade for envs whose commit actually flipped the skill.
@@ -734,6 +772,12 @@ class BatchedMultiSkillCommand(BaseTrajectoryCommand):
                 gate (early + late snaps).
             cur_traj_pre_commit: ``[N]`` trajectory indices that were
                 current *before* the commit, used as the fade-out source.
+            contact_now: ``[N, B]`` per-env sensor contact in
+                ``contact_bodies`` order (from the firing gate's read).  Used
+                to mirror-anchor a perpetual skill onto a grounded foot.
+            landed_mask: ``[N, B]`` mask of the just-landed gate foot
+                (expected-contact ∧ in-contact).  Same purpose; preferred
+                over raw ``contact_now`` because it is guaranteed grounded.
         """
         if fire_ids.numel() == 0:
             return
@@ -789,6 +833,39 @@ class BatchedMultiSkillCommand(BaseTrajectoryCommand):
                 "_commit_pending_skill_change_and_start_transition to "
                 "handle this case explicitly (e.g. instant-flip)."
             )
+
+        # --- Mirror-anchor perpetual skills to the grounded foot ---------
+        # Default: every committing env reverts to natural (right-foot)
+        # anchoring.  This also clears the flag on a perpetual→periodic
+        # commit.  For envs entering a perpetual skill, anchor to whichever
+        # foot is actually grounded so ``get_measured_outputs`` never snaps
+        # ``ref_poses`` onto a mid-swing foot.
+        self._mirror_perpetual[commit_ids] = False
+        new_perpetual = new_gates == 0
+        if new_perpetual.any() and contact_now is not None and landed_mask is not None:
+            perp_ids = commit_ids[new_perpetual]
+            # Natural ref frame of the perpetual skill (right foot for
+            # ``standing``) and its sagittal mirror (left foot).  Phase value
+            # is immaterial for a single-domain perpetual skill.
+            natural_ref = self.manager.get_ref_frames_in_use(
+                self.manager.phase[perp_ids], self.ref_frames, env_ids=perp_ids,
+            )
+            mirror_ref = self._ref_frame_mirror_idx[natural_ref]
+            nat_c = self.ref_to_contact_idx[natural_ref]   # natural foot contact col
+            mir_c = self.ref_to_contact_idx[mirror_ref]    # mirror foot contact col
+            nat_landed = landed_mask[perp_ids, nat_c]
+            mir_landed = landed_mask[perp_ids, mir_c]
+            nat_contact = contact_now[perp_ids, nat_c]
+            mir_contact = contact_now[perp_ids, mir_c]
+            # Anchor to the mirror foot only when it is the better-grounded
+            # choice: it is the just-landed gate foot (and the natural foot
+            # is not), or — falling back to raw sensor contact — it is the
+            # only foot in contact.  Otherwise keep the natural anchor (the
+            # pre-fix behaviour, correct whenever the right foot is grounded).
+            use_mirror = (mir_landed & ~nat_landed) | (
+                ~mir_landed & ~nat_landed & mir_contact & ~nat_contact
+            )
+            self._mirror_perpetual[perp_ids] = use_mirror
 
         # Start the cross-fade with the pre-commit trajectory as the
         # fade-out source, seeded with the env's current phase so the
@@ -862,7 +939,9 @@ class BatchedMultiSkillCommand(BaseTrajectoryCommand):
                 env_ids, landed_pos, landed_quat, predicted_xy
             )
             self._commit_pending_skill_change_and_start_transition(
-                env_ids, cur_traj
+                env_ids, cur_traj,
+                contact_now=ctx.get("contact_now"),
+                landed_mask=ctx.get("landed_mask"),
             )
 
         elif event is SkillEvent.RESET:
@@ -1235,6 +1314,10 @@ class BatchedMultiSkillCommand(BaseTrajectoryCommand):
             a_out = torch.where(force_instant, ps_out, a_out)
             pa_out = pa_out & ~force_instant
             tx_clear = tx_clear | force_instant
+            # Leaving a perpetual skill (its gate-less active traj is being
+            # swapped out) — drop the mirror-anchor flag so the next skill
+            # anchors naturally.
+            self._mirror_perpetual[env_ids[force_instant]] = False
 
         # Scatter back into global buffers.
         self._skill_id[env_ids] = a_out
@@ -1287,6 +1370,7 @@ class BatchedMultiSkillCommand(BaseTrajectoryCommand):
         self.pending.clear(env_ids_t)
         self.transition.clear(env_ids_t)
         self._forced_traj.clear(env_ids_t)
+        self._mirror_perpetual[env_ids_t] = False
 
     def compute_blended_outputs_at(
         self,
@@ -1460,6 +1544,69 @@ class BatchedMultiSkillCommand(BaseTrajectoryCommand):
         y_vel_out[tx_mask] = y_vel_blended
         return y_pos_out, y_vel_out
 
+    def _maybe_mirror_ref_frame(
+        self, ref_frame_indices: torch.Tensor, env_ids: torch.Tensor | None
+    ) -> torch.Tensor:
+        """Remap the active ref-frame index to its sagittal mirror for
+        mirror-anchored envs (see ``_mirror_perpetual``).
+
+        Pure pass-through when no env is mirror-anchored.
+
+        Args:
+            ref_frame_indices: ``[N]`` (or ``[len(env_ids)]``) indices into
+                ``self.ref_frames``.
+            env_ids: Optional env subset matching ``ref_frame_indices``.
+
+        Returns:
+            Indices with mirror-anchored envs swapped to their mirror frame.
+        """
+        if not self._mirror_perpetual.any():
+            return ref_frame_indices
+        flag = (
+            self._mirror_perpetual if env_ids is None
+            else self._mirror_perpetual[env_ids]
+        )
+        mirror = self._ref_frame_mirror_idx[ref_frame_indices]
+        return torch.where(flag, mirror, ref_frame_indices)
+
+    def _maybe_reflect_perpetual(
+        self,
+        y_pos: torch.Tensor,
+        y_vel: torch.Tensor,
+        env_ids: torch.Tensor | None,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Sagittal-reflect the desired outputs for mirror-anchored envs.
+
+        The perpetual skill's reference is authored relative to its natural
+        (right-foot) frame; for envs anchored to the mirror (left) foot —
+        the foot ``get_measured_outputs`` snapped ``ref_poses`` onto — the
+        reference is reflected so ``y_des`` is expressed in the same
+        (left-foot) frame as the measured ``y_act``.  Pure pass-through when
+        no env is mirror-anchored.
+
+        Args:
+            y_pos: ``[M, P]`` desired position outputs.
+            y_vel: ``[M, V]`` desired velocity outputs.
+            env_ids: Optional env subset matching the rows of ``y_pos`` /
+                ``y_vel`` (``None`` ⇒ all envs).
+
+        Returns:
+            Possibly-reflected ``(y_pos, y_vel)`` of the same shapes.
+        """
+        if not self._mirror_perpetual.any():
+            return y_pos, y_vel
+        flag = (
+            self._mirror_perpetual if env_ids is None
+            else self._mirror_perpetual[env_ids]
+        )
+        if not flag.any():
+            return y_pos, y_vel
+        y_pos = y_pos.clone()
+        y_vel = y_vel.clone()
+        y_pos[flag] = self._traj_pos_reflector.reflect(y_pos[flag])
+        y_vel[flag] = self._traj_vel_reflector.reflect(y_vel[flag])
+        return y_pos, y_vel
+
     def _transform_desired_outputs(
         self,
         phase: torch.Tensor,
@@ -1476,6 +1623,14 @@ class BatchedMultiSkillCommand(BaseTrajectoryCommand):
         ``compute_blended_outputs_at`` directly to avoid the
         side-effect.
         """
+        # Reflect the perpetual-skill contribution for mirror-anchored envs
+        # (e.g. ``standing`` anchored to the left foot).  Done BEFORE the
+        # transition early-return so it also applies on the steady-state
+        # (non-blending) path, and before the blend so only the NEW
+        # (perpetual) side of a cross-fade is reflected — the OLD side is
+        # evaluated separately inside ``compute_blended_outputs_at``.
+        y_pos, y_vel = self._maybe_reflect_perpetual(y_pos, y_vel, env_ids)
+
         if self.cfg.transition_blend_end_phi <= 0.0 or not self.transition.active.any():
             return y_pos, y_vel
 
@@ -1558,6 +1713,7 @@ class BatchedMultiSkillCommand(BaseTrajectoryCommand):
             just_reset_ids = torch.where(just_reset)[0]
             self.transition.clear(just_reset_ids)
             self._forced_traj.clear(just_reset_ids)
+            self._mirror_perpetual[just_reset_ids] = False
 
         in_window = (ep_len > 0) & (ep_len < self.env.max_episode_length)
         if self._last_compute_step is None:
@@ -1936,10 +2092,21 @@ class BatchedMultiSkillCommand(BaseTrajectoryCommand):
         # the same per-sample phi for both old and new keeps the
         # cylinder stable across steps within a domain (and identical
         # to the pre-perpetual-fix viz behaviour the user expects).
-        y_pos_flat, _ = self.compute_blended_outputs_at(
+        y_pos_flat, y_vel_flat = self.compute_blended_outputs_at(
             phi_flat, env_ids_flat,
             alpha_override=alpha_flat,
             old_phase_override=phi_flat,
+        )
+        # Mirror-anchored perpetual envs (e.g. left-foot ``standing``) see a
+        # sagittally reflected ``y_des`` in production via
+        # ``_transform_desired_outputs``.  The viz calls the blend helper
+        # directly and bypasses that wrapper, so re-apply the same
+        # reflection here — otherwise the rendered frames / drift spheres
+        # would be drawn in the unreflected (right-foot) frame even though
+        # the policy and the termination use the reflected one.  ``env_ids_flat``
+        # carries the per-row env id, so the per-env flag indexes correctly.
+        y_pos_flat, _ = self._maybe_reflect_perpetual(
+            y_pos_flat, y_vel_flat, env_ids_flat
         )
         local_outs = y_pos_flat.view(N, S, -1)                         # (N, S, P)
 

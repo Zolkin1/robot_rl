@@ -218,6 +218,30 @@ class BaseTrajectoryCommand(CommandTerm):
     # Measured outputs
     # ------------------------------------------------------------------
 
+    def _maybe_mirror_ref_frame(
+        self, ref_frame_indices: torch.Tensor, env_ids: torch.Tensor | None
+    ) -> torch.Tensor:
+        """Hook: optionally remap the active ref-frame index per env.
+
+        The base implementation is a no-op.  ``BatchedMultiSkillCommand``
+        overrides it so a perpetual skill (e.g. ``standing``) can be
+        anchored to the sagittal mirror of its natural ref frame — the foot
+        actually in contact — instead of always the trajectory-declared
+        (right) foot.  Routing the index through this hook *before* the
+        refresh-gate and snap logic in :meth:`get_measured_outputs` makes
+        the existing ``changed``/``ref_in_contact`` machinery snap
+        ``ref_poses`` onto the chosen foot.
+
+        Args:
+            ref_frame_indices: ``[N]`` (or ``[len(env_ids)]``) indices into
+                ``self.ref_frames`` selected by the trajectory's phase.
+            env_ids: Optional env subset matching ``ref_frame_indices``.
+
+        Returns:
+            Possibly-remapped ref-frame indices of the same shape.
+        """
+        return ref_frame_indices
+
     def get_measured_outputs(self, phase: torch.Tensor, env_ids: torch.Tensor = None) -> None:
         """Compute measured outputs from the robot state.
 
@@ -242,6 +266,7 @@ class BaseTrajectoryCommand(CommandTerm):
         new_domains = self.manager.get_current_domains(phase, env_ids)
         if env_ids is None:
             ref_frame_indices = self.manager.get_ref_frames_in_use(phase, self.ref_frames)
+            ref_frame_indices = self._maybe_mirror_ref_frame(ref_frame_indices, env_ids)
             changed = (
                 (new_domains != self.current_domain)
                 | (ref_frame_indices != self.prev_ref_frame_idx)
@@ -250,6 +275,7 @@ class BaseTrajectoryCommand(CommandTerm):
             self.cur_ref_frame_idx = ref_frame_indices
         else:
             ref_frame_indices = self.manager.get_ref_frames_in_use(phase, self.ref_frames, env_ids)
+            ref_frame_indices = self._maybe_mirror_ref_frame(ref_frame_indices, env_ids)
             changed = (
                 (new_domains != self.current_domain[env_ids])
                 | (ref_frame_indices != self.prev_ref_frame_idx[env_ids])
