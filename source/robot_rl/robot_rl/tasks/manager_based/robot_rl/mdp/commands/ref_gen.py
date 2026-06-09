@@ -1,3 +1,5 @@
+# Copyright 2026 Zachary Olkin. All rights reserved.
+
 import math
 import torch
 from torch import Tensor

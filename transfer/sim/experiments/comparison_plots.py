@@ -1,3 +1,5 @@
+# Copyright 2026 Zachary Olkin. All rights reserved.
+
 import os
 import yaml
 import matplotlib.pyplot as plt

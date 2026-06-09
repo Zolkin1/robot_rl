@@ -100,3 +100,6 @@ transfer/sim/experiments/comparison_logs
 talos_remote_mount/
 transfer/sim/experiments/temp_holder/
 hf/
+
+claude_plans/
+uv.lock

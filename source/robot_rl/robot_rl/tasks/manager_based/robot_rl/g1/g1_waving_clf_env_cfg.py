@@ -1,3 +1,5 @@
+# Copyright 2026 Zachary Olkin. All rights reserved.
+
 from isaaclab.utils import configclass
 # from robot_rl.tasks.manager_based.robot_rl.mdp.commands.clf_cmd.hzd_cfg import GaitLibraryHZDCommandCfg
 from robot_rl.tasks.manager_based.robot_rl.humanoid_env_cfg import HumanoidCommandsCfg

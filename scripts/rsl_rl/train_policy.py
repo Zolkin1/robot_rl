@@ -1,3 +1,5 @@
+# Copyright 2026 Zachary Olkin. All rights reserved.
+
 import argparse
 import os
 import sys

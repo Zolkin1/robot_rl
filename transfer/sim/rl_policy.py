@@ -1,3 +1,5 @@
+# Copyright 2026 Zachary Olkin. All rights reserved.
+
 import os
 import re
 from pathlib import Path

@@ -1,3 +1,5 @@
+# Copyright 2026 Zachary Olkin. All rights reserved.
+
 """Standalone plotting utility for randomized parameter experiments.
 
 Loads simulation logs from experiment directories and produces:

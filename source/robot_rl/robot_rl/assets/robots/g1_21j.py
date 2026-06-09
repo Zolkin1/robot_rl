@@ -1,3 +1,5 @@
+# Copyright 2026 Zachary Olkin. All rights reserved.
+
 import isaaclab.sim as sim_utils
 from isaaclab.actuators import ImplicitActuatorCfg, DelayedPDActuatorCfg
 from isaaclab.assets.articulation import ArticulationCfg

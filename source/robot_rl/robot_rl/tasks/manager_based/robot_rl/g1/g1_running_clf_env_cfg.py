@@ -1,3 +1,5 @@
+# Copyright 2026 Zachary Olkin. All rights reserved.
+
 import torch
 from isaaclab.terrains import TerrainGeneratorCfg
 from isaaclab.utils import configclass

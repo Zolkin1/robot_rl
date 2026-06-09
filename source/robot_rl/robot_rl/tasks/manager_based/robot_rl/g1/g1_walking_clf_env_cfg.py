@@ -1,3 +1,5 @@
+# Copyright 2026 Zachary Olkin. All rights reserved.
+
 import torch
 from isaaclab.utils import configclass
 from isaaclab.utils.math import quat_from_euler_xyz, quat_mul, quat_apply

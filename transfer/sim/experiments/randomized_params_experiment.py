@@ -1,3 +1,5 @@
+# Copyright 2026 Zachary Olkin. All rights reserved.
+
 """Randomized physical parameter experiment.
 
 Runs M mujoco simulations for each of N policies, with pre-computed randomized

@@ -1,3 +1,5 @@
+# Copyright 2026 Zachary Olkin. All rights reserved.
+
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt

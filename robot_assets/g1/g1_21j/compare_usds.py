@@ -1,3 +1,5 @@
+# Copyright 2026 Zachary Olkin. All rights reserved.
+
 """Compare two USD files side-by-side.
 
 Prints joint properties (stiffness, damping, limits) and body properties

@@ -1,3 +1,5 @@
+# Copyright 2026 Zachary Olkin. All rights reserved.
+
 """Play stats comparison across multiple policies.
 
 Reads pre-existing plots/play_stats.txt files from multiple policy run

@@ -1,3 +1,5 @@
+# Copyright 2026 Zachary Olkin. All rights reserved.
+
 from isaaclab.managers import CommandTermCfg
 from isaaclab.utils import configclass
 
