@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<robot name="double_integrator">
+
+  <!-- Fixed world frame -->
+  <link name="world"/>
+
+  <!-- Ball: 1 kg sphere, radius 0.05 m -->
+  <link name="ball">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <mass value="1.0"/>
+      <!-- Solid sphere: I = 2/5 * m * r^2 = 2/5 * 1.0 * 0.05^2 = 0.001 -->
+      <inertia ixx="0.001" ixy="0.0" ixz="0.0"
+               iyy="0.001" iyz="0.0"
+               izz="0.001"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.05"/>
+      </geometry>
+      <material name="blue">
+        <color rgba="0.2 0.4 0.9 1.0"/>
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.05"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <!-- 1D prismatic joint along X axis -->
+  <joint name="slide_joint" type="prismatic">
+    <parent link="world"/>
+    <child link="ball"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit lower="-100.0" upper="100.0" effort="100.0" velocity="100.0"/>
+    <dynamics damping="0.0" friction="0.0"/>
+  </joint>
+
+</robot>

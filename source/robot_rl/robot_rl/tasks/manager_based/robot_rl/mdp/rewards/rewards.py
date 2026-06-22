@@ -37,14 +37,31 @@ def vdot_tanh(env: ManagerBasedRLEnv, command_name: str, alpha: float = 1.0) -> 
     return vdot_reward
 
 
+_clf_reward_step = 0
+
 def clf_reward(env: ManagerBasedRLEnv, command_name: str, max_eta_err: float = 0.15, eps: float = 1e-6) -> torch.Tensor:
     """CLF-based reward: r = exp(-V(η) / V_max), clipped to [0, 1]."""
+    global _clf_reward_step
 
     ref_term = env.command_manager.get_term(command_name)
-    v = ref_term.v  # [B] scalar CLF value per env
+    v = ref_term.v.clone()  # [B] scalar CLF value per env
     max_clf = ref_term.clf.lambda_max * max_eta_err ** 2 + eps # principled normalization; lambda_max(P) * eta**2
 
+    # print(f"Sigma: {max_clf}")
+    # print(f"max lam P: {ref_term.clf.lambda_max}")
+    # print(f"min lam P: {ref_term.clf.lambda_min}")
+
     reward = torch.exp(-v / max_clf)
+
+    # if _clf_reward_step % 50 == 0:
+    #     print(f"[clf_reward debug] step={_clf_reward_step} | "
+    #           f"V mean={v.mean().item():.6f} max={v.max().item():.6f} | "
+    #           f"lambda_max={ref_term.clf.lambda_max:.6f} | "
+    #           f"max_eta_err={max_eta_err} | "
+    #           f"max_clf={max_clf:.6f} | "
+    #           f"reward mean={reward.mean().item():.6f} min={reward.min().item():.6f}")
+    _clf_reward_step += 1
+
     # reward = torch.exp(-torch.clamp(v, max=5.0 * max_clf) / max_clf)
     # reward = torch.exp(-torch.clamp(v, max=200 * max_clf) / (10*max_clf))    # 200, 100   # NOTE: Used for bend over (10*max_clf is normal)
     return reward
@@ -131,13 +148,23 @@ def clf_decreasing_condition(
     norm_P = ref_term.clf.norm_P
 
     # Theoretical upper bound on violation
+    # For the continuous time version
+    # max_violation = (
+    #     2.0 * norm_P * eta_max * eta_dot_max + alpha * lambda_max * eta_max ** 2 + eps
+    # )
+    # For the discrete time version
     max_violation = (
-        2.0 * norm_P * eta_max * eta_dot_max + alpha * lambda_max * eta_max ** 2 + eps
+        0.02 * eta_dot_max * norm_P + alpha * lambda_max * eta_max ** 2 + eps
     )
+    # print(f"max_violation: {max_violation}")
+    # print(f"norm_P: {norm_P}, lambda: {lambda_max}")
     # Only penalize when violation is positive
-    violation = torch.clamp(vdot + alpha * v, min=0.0)
+    violation = vdot + alpha * v #torch.clamp(vdot + alpha * v, min=0.0)
+    # print(f"violation: {violation}")
     penalty = violation / max_violation
+    # penalty = torch.clamp(penalty, min=0.0, max=1.0)
     penalty = torch.clamp(penalty, min=0.0, max=1.0)
+    # print(f"penalty: {penalty}")
     return penalty
 
 

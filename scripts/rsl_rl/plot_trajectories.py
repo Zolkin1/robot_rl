@@ -9,6 +9,18 @@ import glob
 import torch
 import argparse
 
+# ---- Paper figure font sizes (change these to resize all paper plots) ----
+PAPER_TITLE_SIZE = 20
+PAPER_LABEL_SIZE = 18
+PAPER_TICK_SIZE = 16
+PAPER_LEGEND_SIZE = 16
+
+# ---- Focused COM/ankle figure font sizes ----
+FOCUSED_TITLE_SIZE = 18
+FOCUSED_LABEL_SIZE = 14
+FOCUSED_TICK_SIZE = 12
+FOCUSED_LEGEND_SIZE = 12
+
 
 def find_most_recent_log_dir(base_path="logs/play"):
     """Find the most recent log directory"""
@@ -54,8 +66,8 @@ def format_joint_name(joint_name):
     return formatted
 
 
-def plot_trajectories(data, save_dir=None, trajectory_type=None):
-    """Plot all trajectories with proper labels and units"""
+def plot_trajectories(data, save_dir=None, trajectory_type=None, paper=False, gamma=0.99):
+    """Plot all trajectories with proper labels and units."""
     # Convert lists to numpy arrays and handle torch tensors
     processed_data = {}
     for key, values in data.items():
@@ -204,8 +216,9 @@ def plot_trajectories(data, save_dir=None, trajectory_type=None):
             return axs[idx]
         return axs[idx // n_cols, idx % n_cols]
 
-    # Hard code number of envs to plot
-    N_ENVS_TO_PLOT = 2
+    # Determine number of envs to plot (up to 2, capped by available data)
+    num_envs_available = processed_data['y_des'].shape[1] if 'y_des' in processed_data else 2
+    N_ENVS_TO_PLOT = min(2, num_envs_available)
     env_ids = list(range(N_ENVS_TO_PLOT))
 
     # TODO: Don't plot None data
@@ -474,6 +487,7 @@ def plot_trajectories(data, save_dir=None, trajectory_type=None):
                 plt.savefig(os.path.join(save_dir, f'v_and_vdot_env{env_id}.png'), dpi=300, bbox_inches='tight')
             plt.close(fig)
 
+
         # --- Error Metrics ---
         error_metrics = [key for key in processed_data.keys() if key.startswith('error_')]
         if error_metrics:
@@ -530,6 +544,433 @@ def plot_trajectories(data, save_dir=None, trajectory_type=None):
     # # Generate focused COM and ankle plot
     # plot_focused_com_ankle(data, save_dir=save_dir, trajectory_type=trajectory_type)
 
+    if paper:
+        plot_paper_figure(data, save_dir=save_dir, gamma=gamma)
+
+
+def _find_name_index(names_array: np.ndarray, target: str) -> int | None:
+    """Find the index of a target name in an ordered output names array.
+
+    Args:
+        names_array: 2-D array of shape [1, num_dims] from ordered_pos/vel_output_names.
+        target: The name string to search for (e.g. ``"pelvis_link:pos_x"``).
+
+    Returns:
+        The column index, or ``None`` if not found.
+    """
+    for i in range(names_array.shape[1]):
+        if str(names_array[0, i]) == target:
+            return i
+    return None
+
+
+def _find_contact_step_boundaries(
+    foot_contact: np.ndarray, offset: int = 3
+) -> list[int]:
+    """Detect step boundaries from foot contact data.
+
+    A new step begins ``offset`` timesteps before either foot transitions from
+    not-in-contact to in-contact (foot strike).
+
+    Args:
+        foot_contact: 2-D array of shape ``[T, num_feet]`` with binary contact
+            flags (1 = in contact).
+        offset: Number of timesteps to shift the boundary earlier (before the
+            actual contact event).
+
+    Returns:
+        Sorted list of timestep indices where a new step begins, including 0.
+    """
+    boundaries = {0}
+    for t in range(1, len(foot_contact)):
+        for foot in range(foot_contact.shape[1]):
+            if foot_contact[t, foot] == 1.0 and foot_contact[t - 1, foot] == 0.0:
+                boundaries.add(max(t - offset, 0))
+                break  # only one boundary per timestep
+    return sorted(boundaries)
+
+
+def _compute_per_step_discounted_return(
+    values: np.ndarray, boundaries: list[int], gamma: float
+) -> np.ndarray:
+    """Compute discounted sum per gait step.
+
+    For each step (segment between consecutive boundaries), the horizon H
+    equals the step length.  At each timestep *t* within the step the return is::
+
+        G[t] = sum_{k=0}^{H-1} gamma^k * v[min(t_local + k, H - 1)]
+
+    where *t_local* is the offset from the step start.  When the look-ahead
+    extends past the step boundary the last value in the step is repeated
+    (matching the double-integrator convention).
+
+    Args:
+        values: 1-D array of per-timestep values, shape ``[T]``.
+        boundaries: Sorted list of step-start indices (from
+            ``_find_contact_step_boundaries`` or domain changes). A sentinel
+            at ``len(values)`` is appended automatically if missing.
+        gamma: Discount factor.
+
+    Returns:
+        1-D array of discounted sums, shape ``[T]``.
+    """
+    n_steps = len(values)
+    disc_return = np.zeros(n_steps)
+
+    # Ensure sentinel at the end
+    if boundaries[-1] != n_steps:
+        boundaries = list(boundaries) + [n_steps]
+
+    for seg_idx in range(len(boundaries) - 1):
+        seg_start = boundaries[seg_idx] - 1
+        seg_end = boundaries[seg_idx + 1] - 1
+        H = seg_end - seg_start  # step length = horizon
+
+        for t in range(seg_start, seg_end):
+            t_local = t - seg_start
+            total = 0.0
+            for k in range(H):
+                idx = min(t_local + k, H - 1)
+                total += (gamma ** k) * values[seg_start + idx]
+            disc_return[t] = total
+
+    return disc_return
+
+
+def plot_paper_figure(
+    data: dict, save_dir: str | None = None, gamma: float = 0.99
+) -> None:
+    """Generate a paper-ready figure with LaTeX fonts.
+
+    Top 2x2 grid: pelvis x position/velocity and left hip pitch angle/velocity
+    (reference vs actual).  Bottom wide panel: per-step discounted reward.
+
+    Args:
+        data: Raw logged data dict (values are lists of torch tensors).
+        save_dir: Directory to save the figure. If ``None``, only displays.
+        gamma: Discount factor for the per-step discounted return plot.
+    """
+    plt.rcParams.update({
+        "text.usetex": True,
+        "font.family": "serif",
+    })
+
+    # Convert torch tensors to numpy
+    processed: dict[str, np.ndarray] = {}
+    for key, values in data.items():
+        if isinstance(values[0], torch.Tensor):
+            processed[key] = np.array([v.cpu().numpy() for v in values])
+        else:
+            processed[key] = np.array(values)
+
+    for required in ('y_des', 'y_act', 'dy_des', 'dy_act',
+                     'ordered_pos_output_names', 'ordered_vel_output_names'):
+        if required not in processed:
+            print(f"[paper] Missing required data key '{required}'. Skipping paper figure.")
+            return
+
+    # Time axis (assume 50 Hz)
+    n_steps = len(processed['y_des'])
+    time = np.arange(n_steps) * 0.02
+
+    env_id = 0
+
+    # Look up indices
+    pos_names = processed['ordered_pos_output_names']
+    vel_names = processed['ordered_vel_output_names']
+
+    pelvis_pos_idx = _find_name_index(pos_names, "pelvis_link:pos_x")
+    pelvis_vel_idx = _find_name_index(vel_names, "pelvis_link:pos_x")
+    hip_pos_idx = _find_name_index(pos_names, "joint:left_hip_pitch_joint")
+    hip_vel_idx = _find_name_index(vel_names, "joint:left_hip_pitch_joint")
+
+    if any(idx is None for idx in (pelvis_pos_idx, pelvis_vel_idx, hip_pos_idx, hip_vel_idx)):
+        print(f"[paper] Could not find all required indices:")
+        print(f"  pelvis pos: {pelvis_pos_idx}, pelvis vel: {pelvis_vel_idx}")
+        print(f"  hip pos: {hip_pos_idx}, hip vel: {hip_vel_idx}")
+        print(f"  Available pos names: {[str(pos_names[0, i]) for i in range(pos_names.shape[1])]}")
+        print(f"  Available vel names: {[str(vel_names[0, i]) for i in range(vel_names.shape[1])]}")
+        return
+
+    # # Check if we can plot the discounted reward
+    # has_disc_plot = 'reward' in processed and 'current_domain' in processed
+    # if not has_disc_plot:
+    #     print("[paper] Missing 'reward' or 'current_domain'. Skipping discounted reward panel.")
+    has_disc_plot = False
+
+    # # Check if we can plot V(x) and clf_reward
+    # has_v_clf_plot = 'v' in processed and 'clf_reward_raw' in processed
+    # if not has_v_clf_plot:
+    #     print("[paper] Missing 'v' or 'clf_reward_raw'. Skipping V(x) / CLF reward panel.")
+    has_v_clf_plot = False
+
+    # Check if we can plot the discrete step-to-step discounted reward
+    has_step_disc_plot = 'reward' in processed and 'current_domain' in processed
+    if not has_step_disc_plot:
+        print("[paper] Missing 'reward' or 'current_domain'. Skipping step-to-step discounted reward panel.")
+
+    # Build figure with gridspec: 2x2 on top, wide panels on bottom
+    import matplotlib.gridspec as gridspec
+
+    extra_rows = int(has_v_clf_plot) + int(has_disc_plot) + int(has_step_disc_plot)
+    height_ratios = [1, 1] + [0.8] * extra_rows
+    n_rows = 2 + extra_rows
+    fig = plt.figure(figsize=(10, 6 + 2.5 * extra_rows))
+    gs = gridspec.GridSpec(n_rows, 2, figure=fig, height_ratios=height_ratios)
+
+    ax00 = fig.add_subplot(gs[0, 0])
+    ax01 = fig.add_subplot(gs[0, 1])
+    ax10 = fig.add_subplot(gs[1, 0])
+    ax11 = fig.add_subplot(gs[1, 1])
+
+    # Shared plot helper
+    def _plot_panel(ax, idx_pos, y_key, dy_key, title, ylabel):
+        ax.plot(time, processed[y_key][:, env_id, idx_pos], '--', linewidth=2, label='Reference')
+        ax.plot(time, processed[dy_key][:, env_id, idx_pos], linewidth=2, label='Actual')
+        ax.set_title(title, fontsize=PAPER_TITLE_SIZE)
+        ax.set_xlabel(r'Time (s)', fontsize=PAPER_LABEL_SIZE)
+        ax.set_ylabel(ylabel, fontsize=PAPER_LABEL_SIZE)
+        ax.tick_params(axis='both', which='major', labelsize=PAPER_TICK_SIZE)
+        ax.grid(True, alpha=0.3)
+        ax.legend(fontsize=PAPER_LEGEND_SIZE)
+
+    # (0,0) Pelvis x position
+    _plot_panel(ax00, pelvis_pos_idx, 'y_des', 'y_act',
+                r'Pelvis $x$ Position', r'Position (m)')
+
+    # (0,1) Pelvis x velocity
+    _plot_panel(ax01, pelvis_vel_idx, 'dy_des', 'dy_act',
+                r'Pelvis $x$ Velocity', r'Velocity (m/s)')
+
+    # (1,0) Left hip pitch angle
+    _plot_panel(ax10, hip_pos_idx, 'y_des', 'y_act',
+                r'Left Hip Pitch Angle', r'Angle (rad)')
+
+    # (1,1) Left hip pitch angular velocity
+    _plot_panel(ax11, hip_vel_idx, 'dy_des', 'dy_act',
+                r'Left Hip Pitch Angular Velocity', r'Angular Velocity (rad/s)')
+
+    # V(x) and CLF reward panel
+    bottom_row = 2
+    if has_v_clf_plot:
+        ax_v_clf = fig.add_subplot(gs[bottom_row, :])
+        bottom_row += 1
+
+        v = processed['v']
+        clf_raw = processed['clf_reward_raw']
+
+        if v.ndim > 1:
+            v_env = v[:, env_id].squeeze()
+        else:
+            v_env = v.squeeze()
+        if clf_raw.ndim > 1:
+            clf_env = clf_raw[:, env_id].squeeze()
+        else:
+            clf_env = clf_raw.squeeze()
+
+        ax_v_clf.plot(time, v_env, linewidth=2, color='C0', label=r'$V(x)$')
+        ax_v2 = ax_v_clf.twinx()
+        ax_v2.plot(time, clf_env, linewidth=2, color='C1', label=r'CLF Reward')
+
+        # CLF decreasing condition
+        if 'clf_decreasing_raw' in processed:
+            dec_raw = processed['clf_decreasing_raw']
+            if dec_raw.ndim > 1:
+                dec_env = dec_raw[:, env_id].squeeze()
+            else:
+                dec_env = dec_raw.squeeze()
+            ax_v2.plot(time, dec_env, linewidth=2, color='C3', label=r'CLF Decreasing')
+
+        # Total reward (weighted CLF terms)
+        if 'reward' in processed:
+            rew = processed['reward']
+            if rew.ndim > 1:
+                rew_env = rew[:, env_id].squeeze()
+            else:
+                rew_env = rew.squeeze()
+            ax_v2.plot(time, rew_env, linewidth=2, color='C4', label=r'Total Reward')
+
+        ax_v_clf.set_title(r'$V(x)$ and CLF Rewards', fontsize=PAPER_TITLE_SIZE)
+        ax_v_clf.set_xlabel(r'Time (s)', fontsize=PAPER_LABEL_SIZE)
+        ax_v_clf.set_ylabel(r'$V(x)$', fontsize=PAPER_LABEL_SIZE, color='C0')
+        ax_v2.set_ylabel(r'Reward Terms', fontsize=PAPER_LABEL_SIZE)
+        ax_v_clf.tick_params(axis='both', which='major', labelsize=PAPER_TICK_SIZE)
+        ax_v2.tick_params(axis='y', which='major', labelsize=PAPER_TICK_SIZE)
+        ax_v_clf.grid(True, alpha=0.3)
+
+        # Vertical lines at actual contact events
+        if 'foot_contact' in processed:
+            foot_contact = processed['foot_contact']
+            if foot_contact.ndim > 2:
+                contact_env = foot_contact[:, env_id, :]
+            else:
+                contact_env = foot_contact
+            contact_boundaries = _find_contact_step_boundaries(contact_env, offset=0)
+            for b in contact_boundaries:
+                ax_v_clf.axvline(time[b], color='C2', linestyle='--', linewidth=1, alpha=0.7)
+            # Add one labeled line for legend
+            ax_v_clf.axvline(time[contact_boundaries[0]], color='C2', linestyle='--',
+                             linewidth=1, alpha=0.7, label='Actual Contact')
+
+        # Vertical lines at nominal domain transitions
+        if 'current_domain' in processed:
+            domain = processed['current_domain']
+            if domain.ndim > 1:
+                domain_env = domain[:, env_id].squeeze()
+            else:
+                domain_env = domain.squeeze()
+            for t in range(1, len(domain_env)):
+                if domain_env[t] != domain_env[t - 1]:
+                    ax_v_clf.axvline(time[t], color='C3', linestyle=':', linewidth=1, alpha=0.7)
+            # Find first transition for legend
+            for t in range(1, len(domain_env)):
+                if domain_env[t] != domain_env[t - 1]:
+                    ax_v_clf.axvline(time[t], color='C3', linestyle=':',
+                                     linewidth=1, alpha=0.7, label='Nominal Step')
+                    break
+
+        # Combined legend
+        lines1, labels1 = ax_v_clf.get_legend_handles_labels()
+        lines2, labels2 = ax_v2.get_legend_handles_labels()
+        ax_v_clf.legend(lines1 + lines2, labels1 + labels2, fontsize=PAPER_LEGEND_SIZE, loc='upper right')
+
+    # Per-step discounted reward panel (using nominal domain boundaries)
+    # has_disc_plot is already set above (commented out)
+    if has_disc_plot:
+        ax_reward = fig.add_subplot(gs[bottom_row, :])
+
+        reward = processed['reward']  # [T, N] or [T]
+        domain = processed['current_domain']  # [T, N] or [T]
+
+        # Extract for the chosen environment
+        if reward.ndim > 1:
+            reward_env = reward[:, env_id].squeeze()
+        else:
+            reward_env = reward.squeeze()
+        if domain.ndim > 1:
+            domain_env = domain[:, env_id].squeeze()
+        else:
+            domain_env = domain.squeeze()
+
+        # Nominal step boundaries from domain transitions
+        nominal_boundaries = [0]
+        for t in range(1, len(domain_env)):
+            if domain_env[t] != domain_env[t - 1]:
+                nominal_boundaries.append(t)
+        print(f"[paper] Nominal step boundaries (times): {[time[b] for b in nominal_boundaries]}")
+        disc_return = _compute_per_step_discounted_return(reward_env, nominal_boundaries, gamma)
+
+        ax_reward.plot(time, disc_return, linewidth=2, color='C4')
+        ax_reward.set_title(rf'Per-Step Discounted Return ($\gamma={gamma}$)', fontsize=PAPER_TITLE_SIZE)
+        ax_reward.set_xlabel(r'Time (s)', fontsize=PAPER_LABEL_SIZE)
+        ax_reward.set_ylabel(r'Discounted Return', fontsize=PAPER_LABEL_SIZE)
+        ax_reward.tick_params(axis='both', which='major', labelsize=PAPER_TICK_SIZE)
+        ax_reward.grid(True, alpha=0.3)
+
+        # Vertical lines at actual contact events
+        if 'foot_contact' in processed:
+            foot_contact = processed['foot_contact']
+            if foot_contact.ndim > 2:
+                contact_env = foot_contact[:, env_id, :]
+            else:
+                contact_env = foot_contact
+            contact_boundaries = _find_contact_step_boundaries(contact_env, offset=0)
+            for b in contact_boundaries:
+                ax_reward.axvline(time[b], color='C2', linestyle='--', linewidth=1, alpha=0.7)
+            ax_reward.axvline(time[contact_boundaries[0]], color='C2', linestyle='--',
+                              linewidth=1, alpha=0.7, label='Actual Contact')
+
+        # Vertical lines at nominal domain transitions
+        for b in nominal_boundaries[1:]:
+            ax_reward.axvline(time[b], color='C3', linestyle=':', linewidth=1, alpha=0.7)
+        if len(nominal_boundaries) > 1:
+            ax_reward.axvline(time[nominal_boundaries[1]], color='C3', linestyle=':',
+                              linewidth=1, alpha=0.7, label='Nominal Step')
+
+        ax_reward.legend(fontsize=PAPER_LEGEND_SIZE, loc='upper right')
+        bottom_row += 1
+
+    # Discrete step-to-step discounted reward panel
+    if has_step_disc_plot:
+        ax_step_disc = fig.add_subplot(gs[bottom_row, :])
+
+        reward = processed['reward']
+        domain = processed['current_domain']
+
+        if reward.ndim > 1:
+            reward_env = reward[:, env_id].squeeze()
+        else:
+            reward_env = reward.squeeze()
+        if domain.ndim > 1:
+            domain_env = domain[:, env_id].squeeze()
+        else:
+            domain_env = domain.squeeze()
+
+        # Nominal step boundaries from domain transitions
+        nominal_boundaries = [0]
+        for t in range(1, len(domain_env)):
+            if domain_env[t] != domain_env[t - 1]:
+                nominal_boundaries.append(t)
+
+        print(f"nominal boundaries: {nominal_boundaries}")
+
+        # Sample reward at each step boundary
+        step_rewards = np.array([reward_env[b] for b in nominal_boundaries])
+        num_steps = len(step_rewards)
+
+        # Compute discounted return over steps
+        disc_step_return = np.zeros(num_steps)
+        for s in range(num_steps):
+            total = 0.0
+            for k in range(num_steps):
+                idx = min(s + k, num_steps - 1)
+                total += (gamma ** k) * step_rewards[idx]
+                print(f"s: {s}, k: {k}, gamma: {gamma}, step_reward: {step_rewards[idx]}, total: {total}")
+            disc_step_return[s] = total
+
+        steps_x = np.arange(num_steps)
+        line_return, = ax_step_disc.plot(steps_x, disc_step_return, linewidth=2, color='C0', marker='o', markersize=4, label='Discounted Reward')
+        ax_step_disc.set_title(rf'Step-to-Step Discounted Reward and State Error', fontsize=PAPER_TITLE_SIZE)
+        ax_step_disc.set_xlabel(r'Step', fontsize=PAPER_LABEL_SIZE)
+        ax_step_disc.set_ylabel(r'Discounted Reward', fontsize=PAPER_LABEL_SIZE)
+        ax_step_disc.tick_params(axis='both', which='major', labelsize=PAPER_TICK_SIZE)
+        ax_step_disc.tick_params(axis='y')#, labelcolor='C0')
+        ax_step_disc.grid(True, alpha=0.3)
+
+        # Overlay step-to-step eta norm on a twin axis
+        if 'eta_norm' in processed:
+            eta_norm = processed['eta_norm']
+            if eta_norm.ndim > 1:
+                eta_norm_env = eta_norm[:, env_id].squeeze()
+            else:
+                eta_norm_env = eta_norm.squeeze()
+
+            step_eta_norms = np.array([eta_norm_env[b] for b in nominal_boundaries])
+
+            ax_eta = ax_step_disc.twinx()
+            line_eta, = ax_eta.plot(steps_x, step_eta_norms, linewidth=2, color='C1', marker='s', markersize=4, label=r'$\|x - x^*\|_2$')
+            ax_eta.set_ylabel(r'$\|x - x^*\|_2$', fontsize=PAPER_LABEL_SIZE)
+            ax_eta.tick_params(axis='y', labelsize=PAPER_TICK_SIZE)#, labelcolor='C1')
+
+            ax_step_disc.legend(handles=[line_return, line_eta], fontsize=PAPER_LEGEND_SIZE, loc='center right')
+
+    plt.tight_layout()
+
+    if save_dir:
+        svg_path = os.path.join(save_dir, 'paper_figure.svg')
+        plt.savefig(svg_path, format='svg', bbox_inches='tight')
+        print(f"[paper] Saved SVG to {svg_path}")
+
+        png_path = os.path.join(save_dir, 'paper_figure.png')
+        plt.savefig(png_path, dpi=300, bbox_inches='tight')
+        print(f"[paper] Saved PNG to {png_path}")
+
+        pdf_path = os.path.join(save_dir, 'paper_figure.pdf')
+        plt.savefig(pdf_path, format='pdf', bbox_inches='tight')
+        print(f"[paper] Saved PDF to {pdf_path}")
+
+    plt.close(fig)
+
 
 def plot_focused_com_ankle(data, save_dir=None, trajectory_type=None):
     """Plot focused view of COM positions and left ankle position/orientation (desired vs actual)"""
@@ -551,10 +992,11 @@ def plot_focused_com_ankle(data, save_dir=None, trajectory_type=None):
     time_steps = np.arange(len(processed_data[list(processed_data.keys())[0]]))
     time = time_steps * 0.02    # Assume 50 Hz
     
-    # Hard code number of envs to plot
-    N_ENVS_TO_PLOT = 2
+    # Determine number of envs to plot (up to 2, capped by available data)
+    num_envs_available = processed_data['y_des'].shape[1] if 'y_des' in processed_data else 2
+    N_ENVS_TO_PLOT = min(2, num_envs_available)
     env_ids = list(range(N_ENVS_TO_PLOT))
-    
+
     # Check if we have required data
     if 'y_des' not in processed_data or 'y_act' not in processed_data:
         print("Warning: y_out or y_act data not found. Cannot create focused COM/ankle plots.")
@@ -611,97 +1053,97 @@ def plot_focused_com_ankle(data, save_dir=None, trajectory_type=None):
         if has_base_velocity and processed_data['base_velocity'].shape[2] >= 2:
             # Plot X velocity
             axes[0, 0].plot(time, processed_data['base_velocity'][:, env_id, 0], linewidth=2, color='tab:blue')
-            axes[0, 0].set_title('Commanded $x$ Velocity', fontsize=18)
-            axes[0, 0].set_xlabel('Time (s)', fontsize=14)
-            axes[0, 0].set_ylabel('Velocity (m/s)', fontsize=14)
-            axes[0, 0].tick_params(axis='both', which='major', labelsize=12)
+            axes[0, 0].set_title('Commanded $x$ Velocity', fontsize=FOCUSED_TITLE_SIZE)
+            axes[0, 0].set_xlabel('Time (s)', fontsize=FOCUSED_LABEL_SIZE)
+            axes[0, 0].set_ylabel('Velocity (m/s)', fontsize=FOCUSED_LABEL_SIZE)
+            axes[0, 0].tick_params(axis='both', which='major', labelsize=FOCUSED_TICK_SIZE)
             axes[0, 0].grid(True, alpha=0.3)
-            
+
             # Plot Y velocity
             axes[1, 0].plot(time, processed_data['base_velocity'][:, env_id, 1], linewidth=2, color='tab:blue')
-            axes[1, 0].set_title('Commanded $y$ Velocity', fontsize=18)
-            axes[1, 0].set_xlabel('Time (s)', fontsize=14)
-            axes[1, 0].set_ylabel('Velocity (m/s)', fontsize=14)
-            axes[1, 0].tick_params(axis='both', which='major', labelsize=12)
+            axes[1, 0].set_title('Commanded $y$ Velocity', fontsize=FOCUSED_TITLE_SIZE)
+            axes[1, 0].set_xlabel('Time (s)', fontsize=FOCUSED_LABEL_SIZE)
+            axes[1, 0].set_ylabel('Velocity (m/s)', fontsize=FOCUSED_LABEL_SIZE)
+            axes[1, 0].tick_params(axis='both', which='major', labelsize=FOCUSED_TICK_SIZE)
             axes[1, 0].grid(True, alpha=0.3)
-            
+
             # Plot Yaw velocity
             axes[2, 0].plot(time, processed_data['base_velocity'][:, env_id, 2], linewidth=2, color='tab:blue')
-            axes[2, 0].set_title('Commanded Yaw Velocity', fontsize=18)
-            axes[2, 0].set_xlabel('Time (s)', fontsize=14)
-            axes[2, 0].set_ylabel('Angular Velocity (rad/s)', fontsize=14)
-            axes[2, 0].tick_params(axis='both', which='major', labelsize=12)
+            axes[2, 0].set_title('Commanded Yaw Velocity', fontsize=FOCUSED_TITLE_SIZE)
+            axes[2, 0].set_xlabel('Time (s)', fontsize=FOCUSED_LABEL_SIZE)
+            axes[2, 0].set_ylabel('Angular Velocity (rad/s)', fontsize=FOCUSED_LABEL_SIZE)
+            axes[2, 0].tick_params(axis='both', which='major', labelsize=FOCUSED_TICK_SIZE)
             axes[2, 0].grid(True, alpha=0.3)
         
         # Column 1: COM Positions
         if com_x_idx is not None:
             axes[0, 1].plot(time, processed_data['y_des'][:, env_id, com_x_idx], '--', linewidth=2, label='Reference')
             axes[0, 1].plot(time, processed_data['y_act'][:, env_id, com_x_idx], linewidth=2, label='Actual')
-            axes[0, 1].set_title('COM Position $x$', fontsize=18)
-            axes[0, 1].set_xlabel('Time (s)', fontsize=14)
-            axes[0, 1].set_ylabel('Position (m)', fontsize=14)
-            axes[0, 1].tick_params(axis='both', which='major', labelsize=12)
+            axes[0, 1].set_title('COM Position $x$', fontsize=FOCUSED_TITLE_SIZE)
+            axes[0, 1].set_xlabel('Time (s)', fontsize=FOCUSED_LABEL_SIZE)
+            axes[0, 1].set_ylabel('Position (m)', fontsize=FOCUSED_LABEL_SIZE)
+            axes[0, 1].tick_params(axis='both', which='major', labelsize=FOCUSED_TICK_SIZE)
             axes[0, 1].grid(True, alpha=0.3)
-            axes[0, 1].legend(fontsize=12, loc='lower right')
+            axes[0, 1].legend(fontsize=FOCUSED_LEGEND_SIZE, loc='lower right')
         
         if com_y_idx is not None:
             axes[1, 1].plot(time, processed_data['y_des'][:, env_id, com_y_idx], '--', linewidth=2, label='Reference')
             axes[1, 1].plot(time, processed_data['y_act'][:, env_id, com_y_idx], linewidth=2, label='Actual')
-            axes[1, 1].set_title('COM Position $y$', fontsize=18)
-            axes[1, 1].set_xlabel('Time (s)', fontsize=14)
-            axes[1, 1].set_ylabel('Position (m)', fontsize=14)
-            axes[1, 1].tick_params(axis='both', which='major', labelsize=12)
+            axes[1, 1].set_title('COM Position $y$', fontsize=FOCUSED_TITLE_SIZE)
+            axes[1, 1].set_xlabel('Time (s)', fontsize=FOCUSED_LABEL_SIZE)
+            axes[1, 1].set_ylabel('Position (m)', fontsize=FOCUSED_LABEL_SIZE)
+            axes[1, 1].tick_params(axis='both', which='major', labelsize=FOCUSED_TICK_SIZE)
             axes[1, 1].grid(True, alpha=0.3)
-            axes[1, 1].legend(fontsize=12, loc='lower right')
+            axes[1, 1].legend(fontsize=FOCUSED_LEGEND_SIZE, loc='lower right')
         
         if com_z_idx is not None:
             axes[2, 1].plot(time, processed_data['y_des'][:, env_id, com_z_idx], '--', linewidth=2, label='Reference')
             axes[2, 1].plot(time, processed_data['y_act'][:, env_id, com_z_idx], linewidth=2, label='Actual')
-            axes[2, 1].set_title('COM Position $z$', fontsize=18)
-            axes[2, 1].set_xlabel('Time (s)', fontsize=14)
-            axes[2, 1].set_ylabel('Position (m)', fontsize=14)
-            axes[2, 1].tick_params(axis='both', which='major', labelsize=12)
+            axes[2, 1].set_title('COM Position $z$', fontsize=FOCUSED_TITLE_SIZE)
+            axes[2, 1].set_xlabel('Time (s)', fontsize=FOCUSED_LABEL_SIZE)
+            axes[2, 1].set_ylabel('Position (m)', fontsize=FOCUSED_LABEL_SIZE)
+            axes[2, 1].tick_params(axis='both', which='major', labelsize=FOCUSED_TICK_SIZE)
             axes[2, 1].grid(True, alpha=0.3)
-            axes[2, 1].legend(fontsize=12, loc='lower right')
+            axes[2, 1].legend(fontsize=FOCUSED_LEGEND_SIZE, loc='lower right')
         
         # Column 2: Ankle Values
         if left_ankle_x_idx is not None:
             axes[0, 2].plot(time, processed_data['y_des'][:, env_id, left_ankle_x_idx], '--', linewidth=2, label='Reference')
             axes[0, 2].plot(time, processed_data['y_act'][:, env_id, left_ankle_x_idx], linewidth=2, label='Actual')
-            axes[0, 2].set_title('Swing Ankle Position $x$', fontsize=18)
-            axes[0, 2].set_xlabel('Time (s)', fontsize=14)
-            axes[0, 2].set_ylabel('Position (m)', fontsize=14)
-            axes[0, 2].tick_params(axis='both', which='major', labelsize=12)
+            axes[0, 2].set_title('Swing Ankle Position $x$', fontsize=FOCUSED_TITLE_SIZE)
+            axes[0, 2].set_xlabel('Time (s)', fontsize=FOCUSED_LABEL_SIZE)
+            axes[0, 2].set_ylabel('Position (m)', fontsize=FOCUSED_LABEL_SIZE)
+            axes[0, 2].tick_params(axis='both', which='major', labelsize=FOCUSED_TICK_SIZE)
             axes[0, 2].grid(True, alpha=0.3)
-            axes[0, 2].legend(fontsize=12, loc='lower right')
+            axes[0, 2].legend(fontsize=FOCUSED_LEGEND_SIZE, loc='lower right')
         
         if left_ankle_z_idx is not None:
             axes[1, 2].plot(time, processed_data['y_des'][:, env_id, left_ankle_z_idx], '--', linewidth=2, label='Reference')
             axes[1, 2].plot(time, processed_data['y_act'][:, env_id, left_ankle_z_idx], linewidth=2, label='Actual')
-            axes[1, 2].set_title('Swing Ankle Position $z$', fontsize=18)
-            axes[1, 2].set_xlabel('Time (s)', fontsize=14)
-            axes[1, 2].set_ylabel('Position (m)', fontsize=14)
-            axes[1, 2].tick_params(axis='both', which='major', labelsize=12)
+            axes[1, 2].set_title('Swing Ankle Position $z$', fontsize=FOCUSED_TITLE_SIZE)
+            axes[1, 2].set_xlabel('Time (s)', fontsize=FOCUSED_LABEL_SIZE)
+            axes[1, 2].set_ylabel('Position (m)', fontsize=FOCUSED_LABEL_SIZE)
+            axes[1, 2].tick_params(axis='both', which='major', labelsize=FOCUSED_TICK_SIZE)
             axes[1, 2].grid(True, alpha=0.3)
-            axes[1, 2].legend(fontsize=12, loc='lower right')
+            axes[1, 2].legend(fontsize=FOCUSED_LEGEND_SIZE, loc='lower right')
         
         if left_ankle_pitch_idx is not None:
             axes[2, 2].plot(time, processed_data['y_des'][:, env_id, left_ankle_pitch_idx], '--', linewidth=2, label='Reference')
             axes[2, 2].plot(time, processed_data['y_act'][:, env_id, left_ankle_pitch_idx], linewidth=2, label='Actual')
-            axes[2, 2].set_title('Swing Ankle Pitch Angle', fontsize=18)
-            axes[2, 2].set_xlabel('Time (s)', fontsize=14)
-            axes[2, 2].set_ylabel('Angle (rad)', fontsize=14)
-            axes[2, 2].tick_params(axis='both', which='major', labelsize=12)
+            axes[2, 2].set_title('Swing Ankle Pitch Angle', fontsize=FOCUSED_TITLE_SIZE)
+            axes[2, 2].set_xlabel('Time (s)', fontsize=FOCUSED_LABEL_SIZE)
+            axes[2, 2].set_ylabel('Angle (rad)', fontsize=FOCUSED_LABEL_SIZE)
+            axes[2, 2].tick_params(axis='both', which='major', labelsize=FOCUSED_TICK_SIZE)
             axes[2, 2].grid(True, alpha=0.3)
-            axes[2, 2].legend(fontsize=12, loc='lower right')
+            axes[2, 2].legend(fontsize=FOCUSED_LEGEND_SIZE, loc='lower right')
         
         # Hide any empty subplots
         for i in range(3):
             for j in range(3):
                 if not axes[i, j].lines:  # If no data was plotted
-                    axes[i, j].text(0.5, 0.5, 'No Data\nAvailable', ha='center', va='center', 
-                                   transform=axes[i, j].transAxes, fontsize=12)
-                    axes[i, j].set_title(f'Plot {i},{j} - No Data', fontsize=18)
+                    axes[i, j].text(0.5, 0.5, 'No Data\nAvailable', ha='center', va='center',
+                                   transform=axes[i, j].transAxes, fontsize=FOCUSED_LEGEND_SIZE)
+                    axes[i, j].set_title(f'Plot {i},{j} - No Data', fontsize=FOCUSED_TITLE_SIZE)
         
         plt.tight_layout()
         

@@ -66,8 +66,12 @@ def export_policy_parameters(env, obs, actions, save_dir):
     # Add action scale
     try:
         params["action_scale"] = unwrapped_env.action_manager.get_term("joint_pos").cfg.scale
-    except KeyError:
-        pass
+    except (KeyError, ValueError):
+        # Try force action term (e.g. double integrator)
+        try:
+            params["action_scale"] = unwrapped_env.action_manager.get_term("force").cfg.scale
+        except (KeyError, ValueError):
+            pass
 
     # Get skill type
     try:
@@ -75,8 +79,7 @@ def export_policy_parameters(env, obs, actions, save_dir):
         params["skill_type"] = unwrapped_env.command_manager.get_term("traj_ref").trajectory_type.value
         params["total_time"] = unwrapped_env.command_manager.get_term("traj_ref").manager.get_total_time()
     except KeyError:
-        raise ValueError("Could not get skill_type and/or total_time while exporting parameters!")
-        # pass
+        pass
 
     # Add velocity command ranges
     try:

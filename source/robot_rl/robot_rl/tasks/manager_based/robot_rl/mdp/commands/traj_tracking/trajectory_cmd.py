@@ -170,6 +170,10 @@ class TrajectoryCommand(CommandTerm):
         self.phasing_var = self.manager.get_phasing_var(t)
         self.unmasked_phasing_var = self.phasing_var
 
+        # Skip hold logic if disabled (no base_velocity command needed)
+        if self.cfg.hold_phi_threshold <= 0:
+            return self.phasing_var
+
         # Determine which envs should hold
         cmd_vel = self.env.command_manager.get_command("base_velocity")
         prev_should_hold = self.should_hold.clone()
@@ -840,17 +844,23 @@ class TrajectoryCommand(CommandTerm):
         self.get_desired_output_time = (end - start) * torch.ones(self.num_envs, device=self.device)
 
         start = time.perf_counter()
-        vdot, vcur = self.clf.compute_vdot(self.y_act, self.y_des, self.dy_act, self.dy_des)
+        vdot, vcur, eta = self.clf.compute_vdot(self.y_act, self.y_des, self.dy_act, self.dy_des)
+        self.eta_norm = torch.linalg.norm(eta, dim=1)
 
         # # TODO: Test
-        # ddy_act = self.compute_measured_acceleration(self.ref_poses[:, :-4])
+        # ddy_act = self.compute_measured_acceleration(self.ref_poses[:, 3:])
         # ddy_nom = self.manager.get_acceleration(t)
-        # vdot, vcur = self.clf.compute_vdot_analytic(self.y_act, self.y_des, self.dy_act, self.dy_des, ddy_act, ddy_nom)
+        # vdot, vcur, eta = self.clf.compute_vdot_analytic(self.y_act, self.y_des, self.dy_act, self.dy_des, ddy_act, ddy_nom)
+        # self.eta_norm = torch.linalg.norm(eta, dim=1)
         end = time.perf_counter()
         self.vdot_time = (end - start) * torch.ones(self.num_envs, device=self.device)
 
         self.vdot = vdot
         self.v = vcur
+
+        # print("[Traj cmd] "
+        #       f"V={self.v.mean().item():.6f} | "
+        #       f"v dot={self.vdot.mean().item():.6f}")
 
         self.manager.log_v_on_phasing_var(self.get_phasing_var(), self.v)
 
@@ -866,6 +876,7 @@ class TrajectoryCommand(CommandTerm):
         """
         self.metrics["v"] = self.v
         self.metrics["vdot"] = self.vdot
+        self.metrics["eta_norm"] = self.eta_norm
 
         # Log position tracking errors (using pos output names)
         for i, output in enumerate(self.ordered_pos_output_names):
@@ -881,7 +892,7 @@ class TrajectoryCommand(CommandTerm):
         self.metrics["vdot_time"] = self.vdot_time
 
         # Log per-reference tracking
-        v_mean = self.manager.get_v_log_avg().squeeze(-1)
+        v_mean = self.manager.get_v_log_avg().reshape(-1)
         for i in range(len(v_mean)):
             # Use repeat() instead of expand() to create a contiguous tensor that
             # can be safely modified in-place by the command manager
